@@ -14,7 +14,107 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      engineering_tasks: {
+        Row: {
+          agent: string
+          commit_sha: string
+          due_date: string
+          host: string
+          id: string
+          note: string
+          progress: number
+          repository: string
+          source_url: string
+          start_date: string
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          agent: string
+          commit_sha?: string
+          due_date: string
+          host: string
+          id: string
+          note?: string
+          progress?: number
+          repository: string
+          source_url?: string
+          start_date: string
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          agent?: string
+          commit_sha?: string
+          due_date?: string
+          host?: string
+          id?: string
+          note?: string
+          progress?: number
+          repository?: string
+          source_url?: string
+          start_date?: string
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      task_editors: {
+        Row: {
+          created_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      task_updates: {
+        Row: {
+          agent: string
+          created_at: string
+          id: string
+          note: string
+          progress: number
+          status: string
+          task_id: string
+        }
+        Insert: {
+          agent: string
+          created_at?: string
+          id?: string
+          note: string
+          progress: number
+          status: string
+          task_id: string
+        }
+        Update: {
+          agent?: string
+          created_at?: string
+          id?: string
+          note?: string
+          progress?: number
+          status?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_updates_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "engineering_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
