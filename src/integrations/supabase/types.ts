@@ -17,6 +17,7 @@ export type Database = {
       engineering_tasks: {
         Row: {
           agent: string
+          blocked_on: string
           commit_sha: string
           due_date: string
           host: string
@@ -32,6 +33,7 @@ export type Database = {
         }
         Insert: {
           agent: string
+          blocked_on?: string
           commit_sha?: string
           due_date: string
           host: string
@@ -47,6 +49,7 @@ export type Database = {
         }
         Update: {
           agent?: string
+          blocked_on?: string
           commit_sha?: string
           due_date?: string
           host?: string
@@ -62,7 +65,123 @@ export type Database = {
         }
         Relationships: []
       }
-      task_editors: {
+      github_prs: {
+        Row: {
+          draft: boolean
+          fetched_at: string
+          head_sha: string
+          id: number
+          merge_commit_sha: string | null
+          number: number
+          repo: string
+          state: string
+          title: string
+          url: string
+        }
+        Insert: {
+          draft?: boolean
+          fetched_at?: string
+          head_sha: string
+          id: number
+          merge_commit_sha?: string | null
+          number: number
+          repo: string
+          state: string
+          title: string
+          url: string
+        }
+        Update: {
+          draft?: boolean
+          fetched_at?: string
+          head_sha?: string
+          id?: number
+          merge_commit_sha?: string | null
+          number?: number
+          repo?: string
+          state?: string
+          title?: string
+          url?: string
+        }
+        Relationships: []
+      }
+      github_repos: {
+        Row: {
+          default_branch: string
+          fetched_at: string
+          head_sha: string
+          name: string
+        }
+        Insert: {
+          default_branch: string
+          fetched_at?: string
+          head_sha: string
+          name: string
+        }
+        Update: {
+          default_branch?: string
+          fetched_at?: string
+          head_sha?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      owner_decisions: {
+        Row: {
+          blocks: string[]
+          decided_at: string | null
+          decision_source_url: string | null
+          decision_text: string | null
+          gate_type: string
+          id: string
+          options: Json
+          question: string
+          requested_at: string
+          requested_by: string
+          status: string
+          subject: string
+          superseded_by: string | null
+        }
+        Insert: {
+          blocks?: string[]
+          decided_at?: string | null
+          decision_source_url?: string | null
+          decision_text?: string | null
+          gate_type: string
+          id: string
+          options?: Json
+          question: string
+          requested_at?: string
+          requested_by: string
+          status?: string
+          subject: string
+          superseded_by?: string | null
+        }
+        Update: {
+          blocks?: string[]
+          decided_at?: string | null
+          decision_source_url?: string | null
+          decision_text?: string | null
+          gate_type?: string
+          id?: string
+          options?: Json
+          question?: string
+          requested_at?: string
+          requested_by?: string
+          status?: string
+          subject?: string
+          superseded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "owner_decisions_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "owner_decisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      owner_editors: {
         Row: {
           created_at: string
           user_id: string
@@ -77,10 +196,67 @@ export type Database = {
         }
         Relationships: []
       }
+      task_editors: {
+        Row: {
+          agent: string | null
+          created_at: string
+          user_id: string
+        }
+        Insert: {
+          agent?: string | null
+          created_at?: string
+          user_id: string
+        }
+        Update: {
+          agent?: string | null
+          created_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      task_requirements: {
+        Row: {
+          created_at: string
+          id: string
+          proof_url: string
+          requirement: string
+          source_url: string
+          state: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          proof_url?: string
+          requirement: string
+          source_url?: string
+          state?: string
+          task_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          proof_url?: string
+          requirement?: string
+          source_url?: string
+          state?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_requirements_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "engineering_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_updates: {
         Row: {
           agent: string
           created_at: string
+          editor_id: string | null
           id: string
           note: string
           progress: number
@@ -90,6 +266,7 @@ export type Database = {
         Insert: {
           agent: string
           created_at?: string
+          editor_id?: string | null
           id?: string
           note: string
           progress: number
@@ -99,6 +276,7 @@ export type Database = {
         Update: {
           agent?: string
           created_at?: string
+          editor_id?: string | null
           id?: string
           note?: string
           progress?: number
