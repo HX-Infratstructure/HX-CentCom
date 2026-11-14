@@ -9,11 +9,9 @@ import {
   Scripts,
   type ErrorComponentProps,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import type { ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
   return (
@@ -40,9 +38,6 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -77,20 +72,23 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
-    // Replace these placeholders with the app's name and description when first building the app.
     // Each content route, / included, must still set its own head(). Never add og:image or
     // twitter:image here: every page without its own would inherit the root's preview image.
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "HX · Agent operations" },
-      { name: "description", content: "Agent updates, engineering evidence, and owner decisions across HX." },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "HX · Agent operations" },
-      { property: "og:description", content: "Agent updates, engineering evidence, and owner decisions across HX." },
+      { title: "HX-CentCom · Hana-X Central Command" },
+      {
+        name: "description",
+        content: "Agent updates, engineering evidence, and owner decisions across HX.",
+      },
+      { property: "og:title", content: "HX-CentCom · Hana-X Central Command" },
+      {
+        property: "og:description",
+        content: "Agent updates, engineering evidence, and owner decisions across HX.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
@@ -116,11 +114,15 @@ declare module "@tanstack/react-router" {
 }
 
 function RootShell({ children }: { children: ReactNode }) {
-  const importedDocument = useImportedMatches({ select: matches => matches.at(-1)?.staticData.importedDocument });
+  const importedDocument = useImportedMatches({
+    select: (matches) => matches.at(-1)?.staticData.importedDocument,
+  });
   return (
     <html lang="en" {...importedDocument?.html}>
       <head>
-        <style href="site-import-inline" precedence="imported-inline">{"@layer imported-inline;"}</style>
+        <style href="site-import-inline" precedence="imported-inline">
+          {"@layer imported-inline;"}
+        </style>
         <HeadContent />
       </head>
       <body {...importedDocument?.body}>
@@ -133,15 +135,6 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const router = useRouter();
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-      router.invalidate();
-      if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
-    });
-    return () => subscription.unsubscribe();
-  }, [router, queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>

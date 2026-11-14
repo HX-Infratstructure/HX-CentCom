@@ -1,21 +1,73 @@
-import { createServerFn } from '@tanstack/react-start';
-import { createClient } from '@supabase/supabase-js';
-import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
-import type { Database } from '@/integrations/supabase/types';
+import { createServerFn } from "@tanstack/react-start";
+import {
+  isServiceError,
+  type ActivityQueryInput,
+  type DecisionQueryInput,
+  type GithubPrQueryInput,
+  type UpdateQueryInput,
+} from "@/server/services";
 
-export const getTaskWorkspace = createServerFn({ method: 'GET' }).handler(async () => {
- const key=process.env['SUPABASE_PUBLISHABLE_KEY']; const url=process.env['SUPABASE_URL'];
- if(!key || !url) throw new Error('Task storage is unavailable.');
- const client=createClient<Database>(url,key,{auth:{persistSession:false},global:{fetch:(input,init)=>{const headers=new Headers(init?.headers); if(key.startsWith('sb_') && headers.get('Authorization')===`Bearer ${key}`) headers.delete('Authorization');headers.set('apikey',key);return fetch(input,{...init,headers});}}});
- const [t,u,r,d,p,g]=await Promise.all([client.from('engineering_tasks').select('*').order('start_date'),client.from('task_updates').select('*').order('created_at',{ascending:false}).limit(100),client.from('task_requirements').select('*').order('created_at'),client.from('owner_decisions').select('*').order('requested_at'),client.from('github_prs').select('*').order('repo'),client.from('github_repos').select('*')]);
- if(t.error||u.error||r.error||d.error||p.error||g.error) throw new Error('Could not load engineering records.');
- return {tasks:t.data??[],updates:u.data??[],requirements:r.data??[],decisions:d.data??[],prs:p.data??[],repos:g.data??[]};
-});
-export const updateTaskProgress=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator((input:{id:string;progress:number;status:string;note:string})=>{
- if(!input.id || !Number.isInteger(input.progress) || input.progress<0 || input.progress>100 || !['Waiting','In progress','Complete','Blocked'].includes(input.status) || input.note.trim().length<3 || input.note.length>2000) throw new Error('Enter a valid progress update and a short note.');
- return {...input,note:input.note.trim()};
-}).handler(async({data,context})=>{
- const {data:task,error}=await context.supabase.from('engineering_tasks').update({progress:data.progress,status:data.status,note:data.note}).eq('id',data.id).select().maybeSingle();
- if(error || !task) throw new Error("This account can only update tasks assigned to its own agent.");
- return task;
-});
+/** The service parses the query; this only gives the server function its input type. */
+const typesOnly =
+  <T>() =>
+  (input: T): T =>
+    input;
+
+export const listWorkspace = createServerFn({ method: "GET" }).handler(({ context }) =>
+  context.services.listWorkspace(),
+);
+
+export const listUpdates = createServerFn({ method: "GET" })
+  .validator(typesOnly<UpdateQueryInput>())
+  .handler(({ context, data }) => context.services.listUpdates(data));
+
+export const listActivity = createServerFn({ method: "GET" })
+  .validator(typesOnly<ActivityQueryInput>())
+  .handler(({ context, data }) => context.services.listActivity(data));
+
+export const listDecisions = createServerFn({ method: "GET" })
+  .validator(typesOnly<DecisionQueryInput>())
+  .handler(({ context, data }) => context.services.listDecisions(data));
+
+export const listGithubPrs = createServerFn({ method: "GET" })
+  .validator(typesOnly<GithubPrQueryInput>())
+  .handler(({ context, data }) => context.services.listGithubPrs(data));
+
+/**
+ * A miss is null, never a thrown not_found: a server function's error reaches the browser as its message alone, and
+ * the sheet would show a failure instead of "missing". Any other error still throws.
+ */
+export const getDecision = createServerFn({ method: "GET" })
+  .validator(typesOnly<{ readonly id: string }>())
+  .handler(async ({ context, data }) => {
+    try {
+      return await context.services.getDecision(data.id);
+    } catch (error) {
+      if (isServiceError(error) && error.code === "not_found") return null;
+      throw error;
+    }
+  });
+
+/** As getDecision: a miss is null, so the sheet shows "missing". */
+export const getRaidItem = createServerFn({ method: "GET" })
+  .validator(typesOnly<{ readonly id: string }>())
+  .handler(async ({ context, data }) => {
+    try {
+      return await context.services.getRaidItem(data.id);
+    } catch (error) {
+      if (isServiceError(error) && error.code === "not_found") return null;
+      throw error;
+    }
+  });
+
+/** As getDecision: a miss is null, so the sheet shows "missing". */
+export const getLesson = createServerFn({ method: "GET" })
+  .validator(typesOnly<{ readonly id: string }>())
+  .handler(async ({ context, data }) => {
+    try {
+      return await context.services.getLesson(data.id);
+    } catch (error) {
+      if (isServiceError(error) && error.code === "not_found") return null;
+      throw error;
+    }
+  });

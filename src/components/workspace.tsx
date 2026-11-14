@@ -1,14 +1,76 @@
-import { Link } from '@tanstack/react-router';
-import { Gavel, Activity, ArrowUpRight, Bot, ChevronDown, ChevronRight, CircleHelp, FileCheck2, GitBranch, Github, LayoutDashboard, ListTodo, LockKeyhole, Search, Settings2, ShieldCheck, Terminal, Workflow } from 'lucide-react';
-import type { ReactNode } from 'react';
-import { Button } from '@/components/ui/button';
-import { agents, ageLabel, recommended, type Decision } from '@/lib/task-data';
+import { Link, useRouter } from "@tanstack/react-router";
+import {
+  Gavel,
+  GitPullRequest,
+  GraduationCap,
+  History,
+  LayoutDashboard,
+  ListTodo,
+  TriangleAlert,
+} from "lucide-react";
+import type { ReactNode } from "react";
+import { toAppError } from "./adapt";
+import { ErrorState } from "./list-states";
+import { OwnerKeyControl } from "./owner-session";
 
-export function Workspace({children,page='Agent overview'}:{children:ReactNode;page?:string}){
- return <div className="app-shell"><aside className="workspace-rail"><Link to="/" className="brand"><div className="brand-mark">HX</div><div>Engineering<small>AGENT CONTROL CENTER</small></div></Link><div className="workspace-name"><span>HX workspace</span><ChevronDown size={13}/></div><div className="rail-label">Workspace</div><nav className="rail-nav" aria-label="Workspace"><Button asChild variant="rail" data-active={page==='Agent overview'}><Link to="/"><LayoutDashboard/><span className="nav-text">Agent overview</span></Link></Button><Button asChild variant="rail" data-active={page==='Tasks & timeline'}><Link to="/tasks"><ListTodo/><span className="nav-text">Tasks & timeline</span></Link></Button><Button asChild variant="rail" data-active={page==='Owner decisions'}><Link to="/decisions"><Gavel/><span className="nav-text">Owner decisions</span></Link></Button></nav><div className="rail-separator"/><div className="rail-label">Agent roster</div><div className="rail-agents">{agents.map(a=><div key={a.id} className="rail-agent"><Bot size={13}/>{a.id}<span className="dot"/></div>)}</div><div className="rail-bottom"><div className="env-label"><LockKeyhole size={11}/> DEV / TEST ENVIRONMENT</div><div className="owner"><div className="owner-avatar">AZ</div><div>Agent Zero<small>Workspace owner</small></div><ChevronDown/></div></div></aside><div className="work-area"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><ChevronRight/><strong>{page}</strong></div><div className="topbar-tools"><span className="snapshot-tag"><span className="dot"/> IMPORTED SNAPSHOT</span><div className="toolbar-divider"/><Button variant="quiet" size="icon" aria-label="Search task records" title="Search task records" asChild><Link to="/tasks"><Search/></Link></Button><Button variant="quiet" size="icon" aria-label="View source repository" title="View source repository" asChild><a href="https://github.com/HX-Infratstructure" target="_blank" rel="noreferrer"><Github/></a></Button></div></header>{children}</div></div>;
+const NAV = [
+  { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
+  { to: "/tasks", label: "Tasks", icon: ListTodo, exact: false },
+  { to: "/decisions", label: "Decisions", icon: Gavel, exact: false },
+  { to: "/raid", label: "RAID", icon: TriangleAlert, exact: false },
+  { to: "/lessons", label: "Lessons", icon: GraduationCap, exact: false },
+  { to: "/pull-requests", label: "Pull requests", icon: GitPullRequest, exact: false },
+  { to: "/activity", label: "Activity", icon: History, exact: false },
+] as const;
+
+/** The app chrome. `page` is the page's h1; the active nav item comes from the router. */
+export function Workspace({ page, children }: { page: string; children: ReactNode }): ReactNode {
+  return (
+    <div className="app-shell">
+      <aside className="workspace-rail">
+        <Link to="/" className="brand" aria-label="HX-CentCom overview">
+          <span className="brand-mark" aria-hidden="true">
+            HX
+          </span>
+          {/* At phone width the seven nav icons need the brand's room, so only the mark stays. */}
+          <span className="brand-name max-[480px]:hidden">
+            HX-CentCom<small>Hana-X Central Command</small>
+          </span>
+        </Link>
+        <nav className="rail-nav" aria-label="Pages">
+          {NAV.map(({ to, label, icon: Icon, exact }) => (
+            <Link
+              key={to}
+              to={to}
+              activeOptions={{ exact, includeSearch: false }}
+              aria-label={label}
+              className="rail-link"
+            >
+              <Icon aria-hidden="true" />
+              <span className="nav-text">{label}</span>
+            </Link>
+          ))}
+        </nav>
+        <p className="env-label">Dev/test environment</p>
+      </aside>
+      <div className="work-area">
+        <header className="topbar">
+          {/* Focusable so a sheet whose opener is gone can return focus to the page. */}
+          <h1 tabIndex={-1}>{page}</h1>
+          <OwnerKeyControl />
+        </header>
+        <main className="page">{children}</main>
+      </div>
+    </div>
+  );
 }
-export function AgentGlyph({tone='green',owner=false}:{tone?:string;owner?:boolean}){return <span className={`agent-glyph tone-${tone}`}>{owner?<ShieldCheck size={18}/>:<Terminal size={18}/>}</span>;}
-export function Footer(){return <footer className="page-footer"><span className="footer-left"><ShieldCheck/> Owner governed <span>·</span> Independent review <span>·</span> Separate deployment GO</span><span>HX Engineering · live records</span></footer>;}
-export function RecordTags({id,host,sha}:{id:string;host:string;sha:string}){return <div className="record-tags"><span className="record-tag"><ListTodo/>{id}</span><span className="record-tag"><Workflow/>{host}</span>{sha && <span className="record-tag"><GitBranch/>{sha}</span>}</div>;}
 
-export function DecisionCard({d}:{d:Decision}){const rec=recommended(d);return <div className="decision-item"><div className="decision-top"><span><span className="dot"/> {d.gate_type.replace('_',' ').toUpperCase()}</span><small>{d.id} · {ageLabel(d.requested_at)}</small></div><h3>{d.question}</h3><p>{d.subject}</p>{rec && <p><strong>Recommended:</strong> {rec.label}{rec.recommended_by?` (${rec.recommended_by})`:''}</p>}<div className="decision-meta">{d.blocks.length?d.blocks.map(b=><Link key={b} to="/tasks" search={{task:b}} className="record-tag attention-tag">Blocks {b}</Link>):<span>Blocks no tracked task</span>}<span>Requested by {d.requested_by}</span></div>{d.decision_source_url && <Button variant="link" size="sm" asChild><a href={d.decision_source_url} target="_blank" rel="noreferrer">Source<ArrowUpRight/></a></Button>}</div>;}
+/** A route's `errorComponent`: the failure inside the app chrome, with a retry that reruns the route's loaders. */
+export function RouteError({ page, error }: { page: string; error: unknown }): ReactNode {
+  const router = useRouter();
+  return (
+    <Workspace page={page}>
+      <ErrorState error={toAppError(error)} retry={() => void router.invalidate()} />
+    </Workspace>
+  );
+}

@@ -1,13 +1,315 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
-import { useSuspenseQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { ArrowDownToLine, ArrowRight, ArrowUpRight, Bot, ChevronRight, CircleCheck, FileCheck2, Github, ListFilter, Search, ShieldCheck } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Workspace, AgentGlyph, Footer, RecordTags, DecisionCard } from '@/components/workspace';
-import { agents, agentCard, agentFor, coverage, coverageLabel, filterTasks, isStale, needsAttention, openPrs, pendingDecisions, tasksQuery } from '@/lib/task-data';
+import { useCallback, useId, type ReactNode } from "react";
+import { Link, createFileRoute } from "@tanstack/react-router";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useSuspenseInfiniteQuery,
+  useSuspenseQuery,
+  type InfiniteData,
+} from "@tanstack/react-query";
+import { adaptUpdatePages, adaptWorkspace, toAppError } from "@/components/adapt";
+import { DecisionList } from "@/components/decision";
+import { EmptyState, ErrorState, ShowMore } from "@/components/list-states";
+import { lists } from "@/components/lists";
+import {
+  ATTENTION_LABELS,
+  attentionOf,
+  openTasks,
+  splitInbox,
+  type Attention,
+  type Directory,
+  type TaskView,
+} from "@/components/model";
+import { PullRequestList } from "@/components/pull-request";
+import type { UpdateCounts, UpdatesPage } from "@/components/server-types";
+import { TaskList } from "@/components/task";
+import { UpdateList } from "@/components/update-item";
+import { FilterBar } from "@/components/url-state";
+import { RouteError, Workspace } from "@/components/workspace";
+import { prPages, tasksQuery, updatePages, type PrQuery, type UpdateQuery } from "@/lib/task-data";
 
-export const Route=createFileRoute('/')({loader:({context})=>context.queryClient.ensureQueryData(tasksQuery),head:()=>({meta:[{title:'HX · Agent overview'},{name:'description',content:'Agent activity, engineering progress, and owner decisions across the HX workspace.'},{property:'og:title',content:'HX · Agent overview'},{property:'og:description',content:'Agent activity, engineering evidence, and decisions in one operations workspace.'},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]}),component:Index});
-function Index(){const {data}=useSuspenseQuery(tasksQuery);const [agent,setAgent]=useState('');const [tab,setTab]=useState('All updates');const [search,setSearch]=useState('');const tasks=filterTasks(data.tasks,agent,search,tab);const pending=pendingDecisions(data.decisions);const prs=openPrs(data.prs);const done=data.tasks.filter(t=>t.status==='Complete').length;const attention=data.tasks.filter(needsAttention).length;const latest=data.tasks.reduce((m,t)=>t.updated_at>m?t.updated_at:m,'');const fmt=(d:string)=>d?new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';const run=data.tasks.find(t=>t.id==='IRP-04');const runCov=run?coverage(run.id,data.requirements):{proven:0,total:0};const proofs=data.requirements.filter(r=>r.proof_url).length;const synced=data.prs.reduce((m,p)=>p.fetched_at>m?p.fetched_at:m,'');
- const exportBrief=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='hx-agent-brief.json';a.click();URL.revokeObjectURL(url);};
- return <Workspace><main className="page-body"><div className="page-heading"><div><div className="eyebrow">Engineering operations</div><h1>Agent overview</h1><p>The work. The evidence. The next decision.</p></div><div className="page-actions"><Button variant="outline" size="sm" onClick={exportBrief} title="Export agent brief"><ArrowDownToLine/><span className="export-label">Export brief</span></Button><Button size="sm" asChild className="review-action"><Link to="/tasks">View task timeline<ArrowRight/></Link></Button></div></div><div className="briefing"><ShieldCheck/><span><strong>Owner checkpoint</strong> · {done} of {data.tasks.length} outcomes complete. {attention} need attention. {pending.length} owner decisions pending.</span><span>{fmt(latest).toUpperCase()}</span></div><section><div className="section-title"><h2>Agent roster <span className="tiny-count">{agents.length}</span></h2><span className="caption">Computed from saved tasks and decisions · not live presence</span></div><div className="agent-grid">{agents.map(a=>{const c=agentCard(a.id,data.tasks,data.prs,data.decisions);return <Button key={a.id} variant="agent" aria-label={`Filter updates for ${a.name}`} aria-pressed={agent===a.id} className={`tone-${a.tone} ${agent===a.id?'selected':''}`} onClick={()=>setAgent(agent===a.id?'':a.id)}><div className="agent-top"><AgentGlyph tone={a.tone} owner={a.id==='Agent Zero'}/><span className={`status ${c.waiting?'waiting':''}`}><span className="dot"/>{c.state}</span></div><h3>{a.name}</h3><div className="role">{a.role}</div><div className="assignment">{c.assignment}</div><div className="agent-bottom"><span>{c.count}</span><ArrowUpRight/></div></Button>;})}</div></section><div className="content-grid"><section className="updates-section"><div className="section-title"><h2>Agent updates <span className="tiny-count">{data.updates.length+data.tasks.length}</span></h2><Button variant="quiet" size="sm" onClick={()=>{setAgent('');setTab('All updates');setSearch('');}}><ListFilter/> {agent?agent:'All agents'}</Button></div><div className="feed-toolbar"><div className="tabs">{['All updates','Needs attention','Completed'].map(t=><Button key={t} variant="tab" aria-pressed={tab===t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}{t==='Needs attention' && <span className="tiny-count">{attention}</span>}</Button>)}</div><label className="feed-search"><Search/><input aria-label="Search agent updates" placeholder="Search updates…" value={search} onChange={e=>setSearch(e.target.value)}/></label></div>{data.updates.length>0 && !agent && tab==='All updates' && <><div className="date-heading">Latest progress updates<span/></div>{data.updates.slice(0,3).map(u=><article className="update-row" key={u.id}><AgentGlyph/><div><div className="update-meta"><strong>{u.agent}</strong><span className="update-type">Progress update</span><span className="time">{new Date(u.created_at).toLocaleDateString('en-US')}</span></div><h3>{u.status} · {u.progress}% reported</h3><p>{u.note}</p><span className="record-tag">{u.task_id}</span></div></article>)}</>}<div className="date-heading">Task records · last change {fmt(latest)} <span/></div>{tasks.map(task=>{const a=agentFor(task.agent);return <article className={`update-row tone-${a.tone}`} key={task.id}><AgentGlyph tone={a.tone}/><div><div className="update-meta"><strong>{a.name}</strong><span>·</span><span className="update-type">{task.status==='Complete'?'Outcome complete':needsAttention(task)?'Needs attention':'In progress'}</span><span className="time">{coverageLabel(task,data.requirements)}</span></div><h3>{task.title}</h3><p>{task.note}</p><RecordTags id={task.id} host={task.host} sha={task.commit_sha}/>{(task.blocked_on!=='none' || isStale(task,data.repos,data.prs)) && <div className="record-tags">{task.blocked_on!=='none' && <span className="record-tag attention-tag">{({owner_decision:'Blocked on owner decision',assignment:'Owner assignment needed',dependency:'Blocked on dependency'} as Record<string,string>)[task.blocked_on]}</span>}{isStale(task,data.repos,data.prs) && <span className="record-tag stale-tag">Stale commit</span>}</div>}</div><Button asChild variant="record" size="record" className="row-arrow" aria-label={`Open ${task.id}`} title="Open task details"><Link to="/tasks" search={{task:task.id}}><ChevronRight/></Link></Button></article>;})}{tasks.length===0 && <div className="empty-state">No updates match this selection.<br/><Button variant="link" size="sm" onClick={()=>{setAgent('');setTab('All updates');setSearch('');}}>Show all updates</Button></div>}</section><aside className="right-column"><section className="right-section"><div className="section-title"><h2>Needs your decision <span className="tiny-count">{pending.length}</span></h2><Link to="/decisions" className="caption">All</Link></div>{pending.slice(0,4).map(d=><DecisionCard key={d.id} d={d}/>)}{pending.length>4 && <Button variant="link" size="sm" asChild><Link to="/decisions">{pending.length-4} more pending<ArrowUpRight/></Link></Button>}{!pending.length && <p className="caption">No pending decisions.</p>}</section><section className="right-section"><div className="section-title"><h2>Open pull requests <span className="tiny-count">{prs.length}</span></h2><Github size={15}/></div>{prs.slice(0,8).map(p=><div className="pr-row" key={p.id}><a href={p.url} target="_blank" rel="noreferrer">{p.repo} #{p.number}</a>{p.draft && <span className="record-tag">Draft</span>}<small>{p.head_sha.slice(0,7)}</small></div>)}<p className="caption">{synced?`Synced from GitHub ${new Date(synced).toLocaleString("en-US")}`:"Waiting for the first GitHub sync"}</p></section><section className="right-section"><div className="section-title"><h2>Qualification evidence</h2><FileCheck2 size={15}/></div><div className="qualification-head"><strong>{runCov.proven}<span className="text-muted-foreground text-sm"> / {runCov.total}</span></strong><span>Requirements proven</span></div><div className="qualification-bars" aria-label={`${runCov.proven} of ${runCov.total} requirements proven`}>{data.requirements.filter(r=>r.task_id===run?.id).map(r=><i key={r.id} className={r.state==="PASS"?"":"opacity-25"}/>)}</div><p className="qualification-note">{run?.title}<br/>{run?.note}</p><Button variant="link" size="sm" asChild className="mt-3"><a href="https://github.com/HX-Infratstructure/HX-Semantic-Router/issues/10#issuecomment-6846416722" target="_blank" rel="noreferrer">Source evidence<ArrowUpRight/></a></Button></section><section className="right-section"><div className="section-title"><h2>Workspace sources</h2></div><div className="connection"><Github/><span>GitHub</span><span>{synced?'Live sync':'Not synced yet'}</span></div><div className="connection"><FileCheck2/><span>Evidence records</span><span>{proofs} linked</span></div><div className="connection"><Bot/><span>Agent connections</span><span>Not connected</span></div></section></aside></div><Footer/></main></Workspace>;
+type FeedFilters = { readonly agentId?: string | undefined; readonly taskId?: string | undefined };
+type OverviewDeps = FeedFilters & { readonly attention?: Attention | undefined };
+type OpenTaskFilters = ReturnType<typeof lists.openTasks.filters>;
+
+const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
+const DECISIONS_SHOWN = 5;
+const PRS_SHOWN = 8;
+const OPEN_PRS: PrQuery = { state: "open" };
+
+/** The Open tasks list: blocked first, filtered and counted by its attention facet. */
+function openTaskRows(tasks: readonly TaskView[], filters: OpenTaskFilters) {
+  return lists.openTasks.local(openTasks(tasks), filters, { attention: attentionOf });
+}
+
+/** The ids of the rows the Open tasks list shows under `attention`. */
+function tasksNeeding(attention: Attention, tasks: readonly TaskView[]): readonly string[] {
+  return openTaskRows(tasks, { attention }).items.map((t) => t.id);
+}
+
+/**
+ * The feed's read. The feed's filters and the attention filter combine with AND. A reason goes to the server, which
+ * selects the reason's open tasks however many there are. The server refuses `taskId` beside `attention`, so a chosen
+ * task is read alone when it is one of `attentionIds`; null when it is not, and the feed then sends no request.
+ */
+function feedQuery(
+  { agentId, taskId }: FeedFilters,
+  attention: Attention | undefined,
+  attentionIds: readonly string[] | undefined,
+): UpdateQuery | null {
+  if (attention === undefined) return { agentId, taskId };
+  if (taskId === undefined) return { agentId, attention };
+  return attentionIds?.includes(taskId) === true ? { agentId, taskId } : null;
+}
+
+export const Route = createFileRoute("/")({
+  validateSearch: (raw) => ({
+    ...lists.overviewFeed.validate(raw),
+    ...lists.openTasks.validate(raw),
+  }),
+  loaderDeps: ({ search }): OverviewDeps => {
+    const feed = lists.overviewFeed.filters(search);
+    return {
+      agentId: feed.agent,
+      taskId: feed.task,
+      attention: lists.openTasks.filters(search).attention,
+    };
+  },
+  /** Prefetches the feed read the first render derives from the same workspace, so server rendering has its data. */
+  loader: async ({ context: { queryClient }, deps: { attention, ...feed } }) => {
+    const workspace = queryClient.ensureQueryData(tasksQuery);
+    // Only a reason makes the feed wait for the workspace, because its read is keyed by the reason's open tasks.
+    const loadFeed = async () => {
+      const attentionIds =
+        attention === undefined
+          ? undefined
+          : tasksNeeding(attention, adaptWorkspace(await workspace).tasks);
+      const query = feedQuery(feed, attention, attentionIds);
+      if (query !== null) {
+        await queryClient.ensureInfiniteQueryData(updatePages(query, attentionIds));
+      }
+    };
+    await Promise.all([
+      workspace,
+      loadFeed(),
+      queryClient.ensureInfiniteQueryData(prPages(OPEN_PRS)),
+    ]);
+  },
+  head: () => ({
+    meta: [
+      { title: "Overview | HX-CentCom" },
+      {
+        name: "description",
+        content: "The latest agent updates, the decisions waiting on the owner, and the open work.",
+      },
+      { property: "og:title", content: "Overview | HX-CentCom" },
+      {
+        property: "og:description",
+        content: "The latest agent updates, the decisions waiting on the owner, and the open work.",
+      },
+    ],
+  }),
+  errorComponent: ({ error }) => <RouteError page="Overview" error={error} />,
+  component: Overview,
+});
+
+function Overview(): ReactNode {
+  const search = Route.useSearch();
+  const { data: ws } = useSuspenseQuery(workspaceQuery);
+  const pending = splitInbox(ws.decisions).pending;
+  const taskFilters = lists.openTasks.filters(search);
+  const tasks = openTaskRows(ws.tasks, taskFilters);
+  const decisionsId = useId();
+  const tasksId = useId();
+
+  return (
+    <Workspace page="Overview">
+      <div className="overview">
+        <section aria-labelledby={decisionsId} className="overview-decisions">
+          <h2 id={decisionsId} className="section-title">
+            Needs your decision <span className="count">{pending.length}</span>
+          </h2>
+          {pending.length === 0 ? (
+            <EmptyState>No decision is waiting on you.</EmptyState>
+          ) : (
+            <>
+              <DecisionList decisions={pending.slice(0, DECISIONS_SHOWN)} />
+              <Link to="/decisions" className="text-link section-link">
+                {pending.length > DECISIONS_SHOWN
+                  ? `All ${pending.length} pending decisions`
+                  : "Decisions and history"}
+              </Link>
+            </>
+          )}
+        </section>
+
+        <Feed dir={ws} tasks={ws.tasks} />
+
+        <section aria-labelledby={tasksId} className="overview-tasks">
+          <h2 id={tasksId} className="section-title">
+            Open tasks <span className="count">{tasks.items.length}</span>
+          </h2>
+          <FilterBar search={lists.openTasks} counts={tasks.counts} label="Filter open tasks" />
+          {tasks.items.length === 0 ? (
+            <EmptyState>
+              {lists.openTasks.active(taskFilters)
+                ? "No open tasks match these filters."
+                : "Every task is done and nothing is blocked."}
+            </EmptyState>
+          ) : (
+            <TaskList tasks={tasks.items} />
+          )}
+        </section>
+
+        <OpenPullRequests />
+      </div>
+    </Workspace>
+  );
+}
+
+/** The first rows of the open PRs in the server's order (newest first); the heading counts all of them. */
+function OpenPullRequests(): ReactNode {
+  const headingId = useId();
+  const { items, counts } = useSuspenseInfiniteQuery(prPages(OPEN_PRS)).data;
+  const total = counts?.total ?? 0;
+  const stored = counts?.stored ?? 0;
+  return (
+    <section aria-labelledby={headingId} className="overview-prs">
+      <h2 id={headingId} className="section-title">
+        Open pull requests <span className="count">{total}</span>
+      </h2>
+      {total === 0 ? (
+        <EmptyState>
+          {stored === 0
+            ? "No GitHub sync has stored pull requests yet."
+            : "The last GitHub sync found no open pull requests."}
+        </EmptyState>
+      ) : (
+        <PullRequestList prs={items.slice(0, PRS_SHOWN)} />
+      )}
+      {total > PRS_SHOWN ? (
+        <Link to="/pull-requests" search={OPEN_PRS} className="text-link section-link">
+          All {total} open pull requests
+        </Link>
+      ) : (
+        stored > 0 && (
+          <Link to="/pull-requests" className="text-link section-link">
+            All pull requests
+          </Link>
+        )
+      )}
+    </section>
+  );
+}
+
+/**
+ * The attention control stays on the Open tasks list; the feed names the reason it applies. The reason's tasks come
+ * from the current workspace, so a refresh that changes them changes the feed's read.
+ */
+function Feed({ dir, tasks }: { dir: Directory; tasks: readonly TaskView[] }): ReactNode {
+  const headingId = useId();
+  const { attention, agentId, taskId } = Route.useLoaderDeps();
+  const attentionIds = attention === undefined ? undefined : tasksNeeding(attention, tasks);
+  const query = feedQuery({ agentId, taskId }, attention, attentionIds);
+  const filtered = attention !== undefined || agentId !== undefined || taskId !== undefined;
+  return (
+    <section aria-labelledby={headingId} className="overview-feed">
+      <h2 id={headingId} className="section-title">
+        Latest updates
+      </h2>
+      {attention !== undefined && (
+        <p className="quiet">
+          Only updates on open tasks that need attention: {ATTENTION_LABELS[attention]}
+        </p>
+      )}
+      {query === null ? (
+        <>
+          <FeedFilters dir={dir} counts={null} attentionIds={attentionIds} />
+          <EmptyState>No updates match these filters.</EmptyState>
+        </>
+      ) : (
+        <FeedPages dir={dir} query={query} filtered={filtered} attentionIds={attentionIds} />
+      )}
+    </section>
+  );
+}
+
+/**
+ * Not a suspense read: the loader prefetched the first render's read, and a read a later refresh asks for loads while
+ * the previous one stays on screen.
+ */
+function FeedPages({
+  dir,
+  query,
+  filtered,
+  attentionIds,
+}: {
+  dir: Directory;
+  query: UpdateQuery;
+  filtered: boolean;
+  attentionIds: readonly string[] | undefined;
+}): ReactNode {
+  const select = useCallback(
+    (data: InfiniteData<UpdatesPage, string | undefined>) => adaptUpdatePages(data.pages, dir),
+    [dir],
+  );
+  const pages = useInfiniteQuery({
+    ...updatePages(query, attentionIds),
+    select,
+    placeholderData: keepPreviousData,
+  });
+  const items = pages.data?.items ?? [];
+  const counts = pages.data?.counts ?? null;
+  return (
+    <>
+      <FeedFilters dir={dir} counts={counts} attentionIds={attentionIds} />
+      {pages.isPending && <p className="quiet">Loading updates.</p>}
+      {pages.isError && !pages.isFetchNextPageError && (
+        <ErrorState error={toAppError(pages.error)} retry={() => void pages.refetch()} />
+      )}
+      {pages.isSuccess && items.length === 0 && (
+        <EmptyState>
+          {filtered ? "No updates match these filters." : "No agent has posted an update yet."}
+        </EmptyState>
+      )}
+      {items.length > 0 && <UpdateList updates={items} />}
+      <ShowMore
+        shown={items.length}
+        total={counts?.total}
+        noun="updates"
+        hasMore={pages.hasNextPage}
+        pending={pages.isFetchingNextPage}
+        error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
+        onShowMore={() => void pages.fetchNextPage()}
+      />
+    </>
+  );
+}
+
+/**
+ * With no read (null counts), each facet shows only its active chip. Under a reason the Task chips offer only the
+ * reason's tasks, because the server's task counts leave out the feed's own `taskIds`.
+ */
+function FeedFilters({
+  dir,
+  counts,
+  attentionIds,
+}: {
+  dir: Directory;
+  counts: UpdateCounts | null;
+  attentionIds: readonly string[] | undefined;
+}): ReactNode {
+  const byTask = counts?.byTask ?? {};
+  const task =
+    attentionIds === undefined
+      ? byTask
+      : Object.fromEntries(Object.entries(byTask).filter(([id]) => attentionIds.includes(id)));
+  return (
+    <FilterBar
+      search={lists.overviewFeed}
+      counts={{ agent: counts?.byAgent ?? {}, task }}
+      label="Filter updates"
+      agents={dir.agents}
+    />
+  );
 }

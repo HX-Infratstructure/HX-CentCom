@@ -1,0 +1,314 @@
+#!/usr/bin/env node
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join, resolve } from "node:path";
+import { addAbortSignal } from "node:stream";
+import { text } from "node:stream/consumers";
+import { promisify } from "node:util";
+
+const BUDGET_MS = 2500;
+const HARD_EXIT_MS = 2900;
+const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const PR_URL = /https:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+\b/;
+
+const PUBLISH_COMMANDS = Object.freeze([
+  {
+    note: "Pushed commits",
+    program: "git",
+    words: ["push"],
+    // `:branch` and `+:branch` delete a branch; a bare `:` pushes the matching branches.
+    noPublishArg: /^(?:-n|--dry-run|-d|--delete|-h|--help|\+?:.+)$/,
+    successProofOutput: null,
+    nothingPublishedOutput: /Everything up-to-date/,
+  },
+  {
+    note: "Opened a pull request",
+    program: "gh",
+    words: ["pr", "create"],
+    noPublishArg: /^(?:--dry-run|-w|--web|-h|--help)$/,
+    successProofOutput: PR_URL,
+    nothingPublishedOutput: /already exists/,
+  },
+  {
+    note: "Merged a pull request",
+    program: "gh",
+    words: ["pr", "merge"],
+    noPublishArg: /^(?:--auto|--disable-auto|-h|--help)$/,
+    successProofOutput: null,
+    nothingPublishedOutput: null,
+  },
+]);
+
+const VALUE_OPTIONS = ["-C", "-c"];
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+const debug =
+  process.env.CENTCOM_DEBUG === "1"
+    ? (msg) => process.stderr.write(`centcom-hook: ${msg}\n`)
+    : () => {};
+const done = () => process.exit(0);
+
+// Node prints process warnings to stderr; without its listener, stderr stays empty.
+process.removeAllListeners("warning");
+process.on("uncaughtException", done);
+process.on("unhandledRejection", done);
+setTimeout(done, HARD_EXIT_MS).unref();
+
+main()
+  .then(debug, (err) => debug(`skipped: ${describe(err)}`))
+  .finally(done);
+
+async function main() {
+  const deadline = AbortSignal.timeout(BUDGET_MS);
+  const call = readCall(JSON.parse(await text(addAbortSignal(deadline, process.stdin))));
+  if (!call) return "skipped: not a finished foreground Bash call";
+  const publish = findPublish(call);
+  if (!publish) return "skipped: no git push, gh pr create or gh pr merge that provably published";
+  if (!publish.dir) return "skipped: cannot tell which repository the command ran in";
+  // A failed static import exits 1 before any handler exists; this one rejects into main's catch.
+  const { openDashboard } = await import("./lib/centcom.mjs");
+  const dash = openDashboard(process.env, { source: "hook" });
+  const repo = await readRepo(publish.dir, deadline);
+  if (!repo) return `skipped: no git commit at ${publish.dir}`;
+  const taskId = process.env.CENTCOM_TASK?.trim() || (await readTaskFile(repo.root));
+  if (!taskId) return "skipped: no task (set CENTCOM_TASK or write .centcom-task in the repo root)";
+  const update = { kind: "link", note: publish.note, commitSha: repo.sha, prUrl: publish.prUrl };
+  const id = await dash.postUpdate(taskId, update, { signal: deadline });
+  return `posted ${id} to ${taskId}`;
+}
+
+function readCall(payload) {
+  const {
+    hook_event_name: event,
+    tool_name: tool,
+    tool_input: input,
+    tool_response: response,
+    cwd,
+  } = payload ?? {};
+  if (event !== "PostToolUse" || tool !== "Bash" || typeof input?.command !== "string") return null;
+  if (typeof cwd !== "string" || !isAbsolute(cwd)) return null;
+  // A background call fires the hook when it starts, so its outcome is unknown.
+  if (input.run_in_background === true || response?.interrupted === true) return null;
+  const output = (name) => (typeof response?.[name] === "string" ? response[name] : "");
+  return { command: input.command, cwd, stdout: output("stdout"), stderr: output("stderr") };
+}
+
+function findPublish({ command, cwd, stdout, stderr }) {
+  const segments = splitCommandLine(command);
+  const proven = provenByExit(segments);
+  const output = `${stdout}\n${stderr}`;
+  const hits = [];
+  let dir = cwd;
+  segments.forEach((segment, i) => {
+    if (segment.argv[0] === "cd") {
+      dir = segment.nested ? null : moveDir(null, segment.argv[1]);
+      return;
+    }
+    const match = matchPublish(segment.argv);
+    if (!match) return;
+    const { row, dirOptions } = match;
+    if (
+      (proven[i] || row.successProofOutput?.test(output)) &&
+      !row.nothingPublishedOutput?.test(output)
+    ) {
+      hits.push({
+        row,
+        argv: segment.argv,
+        dir: dirOptions.reduce((from, target) => moveDir(from, target), dir),
+      });
+    }
+  });
+  if (!hits.length) return null;
+  return {
+    note: [...new Set(hits.map((hit) => hit.row.note))].join("; "),
+    dir: hits.at(-1).dir,
+    prUrl:
+      lastPrUrl(stdout) ??
+      lastPrUrl(stderr) ??
+      lastPrUrl(hits.flatMap((hit) => hit.argv).join(" ")),
+  };
+}
+
+function lastPrUrl(haystack) {
+  return haystack.match(new RegExp(PR_URL, "g"))?.at(-1);
+}
+
+function provenByExit(segments) {
+  const proven = segments.map(() => false);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const { before, after } = segments[i];
+    if (i < segments.length - 1 && after !== "&&") break;
+    proven[i] = after !== "&" && before !== "||";
+  }
+  return proven;
+}
+
+function matchPublish(argv) {
+  let k = 0;
+  while (ASSIGNMENT.test(argv[k] ?? "")) k++;
+  const program = basename(argv[k++] ?? "");
+  const dirOptions = [];
+  while (argv[k]?.startsWith("-")) {
+    if (!VALUE_OPTIONS.includes(argv[k])) {
+      k++;
+      continue;
+    }
+    if (argv[k] === "-C") dirOptions.push(argv[k + 1]);
+    k += 2;
+  }
+  const row = PUBLISH_COMMANDS.find(
+    (r) => r.program === program && r.words.every((w, j) => argv[k + j] === w),
+  );
+  if (!row || argv.slice(k + row.words.length).some((w) => row.noPublishArg.test(w))) return null;
+  return { row, dirOptions };
+}
+
+function moveDir(from, target) {
+  if (target === undefined || /[$`]/.test(target)) return null;
+  if (target === "~" || target.startsWith("~/")) return join(homedir(), target.slice(1));
+  if (isAbsolute(target)) return target;
+  return from === null ? null : resolve(from, target);
+}
+
+const CONNECTORS = { "&&": "&&", "||": "||", "|&": "|", ";": ";", "|": "|", "&": "&", "\n": ";" };
+const OPERATORS_LONGEST_FIRST = Object.keys(CONNECTORS).sort((a, b) => b.length - a.length);
+const REDIRECTION = /^(<<<|<<-?|&>>?|>>|>&|<&|>\||<>|>|<)/;
+const NUMBERED_REDIRECTION = /^\d*(<<<|<<-?|&>>?|>>|>&|<&|>\||<>|>|<)/;
+
+function splitCommandLine(line) {
+  const segments = [];
+  const heredocs = [];
+  let argv = [];
+  let word = null;
+  let before = null;
+  let depth = 0;
+  let nested = false;
+  let i = 0;
+
+  const endWord = () => {
+    if (word === null) return;
+    if (!argv.length) nested = depth > 0;
+    argv.push(word);
+    word = null;
+  };
+  const endSegment = (connector) => {
+    endWord();
+    if (!argv.length) return;
+    segments.push({ argv, before, after: connector, nested });
+    argv = [];
+    before = connector;
+  };
+  const readTarget = () => {
+    while (line[i] === " " || line[i] === "\t") i++;
+    let target = "";
+    while (i < line.length && !/[\s;&|()<>]/.test(line[i])) {
+      const quote = line[i];
+      if (quote === "'" || quote === '"') {
+        const end = line.indexOf(quote, i + 1);
+        target += line.slice(i + 1, end < 0 ? line.length : end);
+        i = end < 0 ? line.length : end + 1;
+      } else {
+        target += line[i++];
+      }
+    }
+    return target;
+  };
+  const skipHeredocBodies = () => {
+    for (const { delimiter, stripTabs } of heredocs.splice(0)) {
+      while (i < line.length) {
+        const end = line.indexOf("\n", i);
+        const row = line.slice(i, end < 0 ? line.length : end);
+        i = end < 0 ? line.length : end + 1;
+        if ((stripTabs ? row.replace(/^\t+/, "") : row) === delimiter) break;
+      }
+    }
+  };
+
+  while (i < line.length) {
+    const c = line[i];
+    if (c === "'") {
+      const end = line.indexOf("'", i + 1);
+      word = (word ?? "") + line.slice(i + 1, end < 0 ? line.length : end);
+      i = end < 0 ? line.length : end + 1;
+      continue;
+    }
+    if (c === '"') {
+      word ??= "";
+      for (i++; i < line.length && line[i] !== '"'; i++) {
+        if (line[i] === "\\" && '$`"\\\n'.includes(line[i + 1] ?? "")) {
+          if (line[i + 1] !== "\n") word += line[i + 1];
+          i++;
+        } else {
+          word += line[i];
+        }
+      }
+      i++;
+      continue;
+    }
+    if (c === "\\") {
+      if (line[i + 1] !== "\n") word = (word ?? "") + (line[i + 1] ?? "");
+      i += 2;
+      continue;
+    }
+    if (c === "#" && word === null) {
+      const end = line.indexOf("\n", i);
+      i = end < 0 ? line.length : end;
+      continue;
+    }
+    if (c === " " || c === "\t" || c === "(" || c === ")") {
+      endWord();
+      if (c === "(") depth++;
+      if (c === ")") depth = Math.max(0, depth - 1);
+      i++;
+      continue;
+    }
+    const redirection = (word === null ? NUMBERED_REDIRECTION : REDIRECTION).exec(line.slice(i));
+    if (redirection) {
+      i += redirection[0].length;
+      const target = readTarget();
+      if (redirection[1] === "<<" || redirection[1] === "<<-")
+        heredocs.push({ delimiter: target, stripTabs: redirection[1] === "<<-" });
+      continue;
+    }
+    const operator = OPERATORS_LONGEST_FIRST.find((op) => line.startsWith(op, i));
+    if (operator) {
+      i += operator.length;
+      endSegment(CONNECTORS[operator]);
+      if (operator === "\n") skipHeredocBodies();
+      continue;
+    }
+    word = (word ?? "") + c;
+    i++;
+  }
+  endSegment(null);
+  return segments;
+}
+
+async function readRepo(dir, signal) {
+  try {
+    const { stdout } = await promisify(execFile)(
+      "git",
+      ["-C", dir, "rev-parse", "--show-toplevel", "HEAD"],
+      { signal, encoding: "utf8" },
+    );
+    const [root, sha] = stdout.trim().split("\n");
+    return root && SHA.test(sha ?? "") ? { root, sha } : null;
+  } catch (err) {
+    if (signal.aborted) throw err;
+    return null;
+  }
+}
+
+async function readTaskFile(root) {
+  const content = await readFile(join(root, ".centcom-task"), "utf8").catch(() => "");
+  return content.split("\n", 1)[0].trim() || undefined;
+}
+
+/** Any other error shows only its code or name, because a JSON.parse message quotes its input and the payload holds
+ *  whatever the command printed. */
+function describe(err) {
+  return err?.name === "DashError"
+    ? `${err.code}: ${err.message}`
+    : (err?.code ?? err?.name ?? "error");
+}

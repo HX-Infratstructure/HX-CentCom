@@ -5,15 +5,29 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1794630072944,
-      "tag": "0000_agent_task_progress",
+      "when": 1794637313470,
+      "tag": "0000_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1794631891770,
-      "tag": "0001_owner_decisions_requirements_github",
+      "when": 1794637314203,
+      "tag": "0001_activity_log_append_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794637315000,
+      "tag": "0002_raid_lessons",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794663215107,
+      "tag": "0003_activity_revert",
       "breakpoints": true
     }
   ]

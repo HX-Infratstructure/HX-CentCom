@@ -1,0 +1,270 @@
+#!/usr/bin/env node
+import { parseArgs } from "node:util";
+import { DashError, openDashboard } from "./lib/centcom.mjs";
+
+const TIMEOUT_MS = 10_000;
+
+class UsageError extends Error {}
+
+const KINDS = {
+  text: { option: { type: "string" }, value: (flag, v) => requireText(`--${flag}`, v) },
+  list: {
+    option: { type: "string", multiple: true },
+    value: (flag, vs) => vs.map((v) => requireText(`--${flag}`, v)),
+  },
+  flag: { option: { type: "boolean" }, value: (flag, v) => v },
+};
+
+const RAID_FIELDS = [
+  ["type", "type", "text"],
+  ["title", "title", "text"],
+  ["summary", "summary", "text"],
+  ["description", "description", "text"],
+  ["source", "sourceUrl", "text"],
+  ["severity", "severity", "text"],
+  ["task", "taskIds", "list"],
+  ["status", "status", "text"],
+  ["owner", "ownerAgent", "text"],
+  ["review-at", "reviewAt", "text"],
+  ["decision", "decisionId", "text"],
+  ["probability", "probability", "text"],
+  ["impact", "impact", "text"],
+  ["mitigation", "mitigation", "text"],
+  ["validation-method", "validationMethod", "text"],
+  ["validation-state", "validationState", "text"],
+  ["resolution", "resolution", "text"],
+  ["escalated", "escalated", "flag"],
+  ["blocked-task", "blockedTaskId", "text"],
+  ["blocking-ref", "blockingRef", "text"],
+];
+
+const LESSON_FIELDS = [
+  ["title", "title", "text"],
+  ["summary", "summary", "text"],
+  ["situation", "situation", "text"],
+  ["action", "action", "text"],
+  ["outcome", "outcome", "text"],
+  ["recommendation", "recommendation", "text"],
+  ["source", "sourceUrl", "text"],
+  ["tag", "tags", "list"],
+  ["applies-to", "appliesTo", "text"],
+  ["status", "status", "text"],
+  ["enforced-by", "enforcedByUrl", "text"],
+];
+
+const RAID_ADD = form(RAID_FIELDS, ["type", "title", "summary", "description", "source"]);
+const RAID_UPDATE = form(RAID_FIELDS.filter(([flag]) => flag !== "type"));
+const LESSON_ADD = form(LESSON_FIELDS, [
+  "title",
+  "summary",
+  "situation",
+  "action",
+  "outcome",
+  "recommendation",
+  "source",
+]);
+const LESSON_UPDATE = form(LESSON_FIELDS);
+
+const COMMANDS = {
+  progress: {
+    usage:
+      "centcom progress --task <id> --note <text> [--status <label>] [--link <label=url>]... [--sha <sha>] [--pr <url>] [--run <id>]",
+    options: {
+      task: { type: "string" },
+      note: { type: "string" },
+      status: { type: "string" },
+      link: { type: "string", multiple: true },
+      sha: { type: "string" },
+      pr: { type: "string" },
+      run: { type: "string" },
+    },
+    run: runProgress,
+  },
+  whoami: { usage: "centcom whoami", options: {}, run: runWhoami },
+  "raid add": {
+    usage: `centcom raid add ${RAID_ADD.usage}`,
+    options: RAID_ADD.options,
+    run: runRaidAdd,
+  },
+  "raid update": {
+    usage: `centcom raid update <id> ${RAID_UPDATE.usage}`,
+    options: RAID_UPDATE.options,
+    positionals: ["<id>"],
+    run: runRaidUpdate,
+  },
+  "lesson add": {
+    usage: `centcom lesson add ${LESSON_ADD.usage}`,
+    options: LESSON_ADD.options,
+    run: runLessonAdd,
+  },
+  "lesson update": {
+    usage: `centcom lesson update <id> ${LESSON_UPDATE.usage}`,
+    options: LESSON_UPDATE.options,
+    positionals: ["<id>"],
+    run: runLessonUpdate,
+  },
+};
+
+const USAGE = `Usage:
+${Object.values(COMMANDS)
+  .map((c) => `  ${c.usage}`)
+  .join("\n")}
+  centcom help
+
+Environment:
+  CENTCOM_URL        HX-CentCom base URL, for example http://192.168.50.207:8420
+  CENTCOM_KEY_FILE   key file, mode 600 (default ~/.config/hx-centcom/key)
+
+Exit status: 0 done, 1 refused or failed, 2 usage error.`;
+
+process.exitCode = await main(process.argv.slice(2));
+
+async function main(argv) {
+  const grouped = Object.keys(COMMANDS).some((k) => k.startsWith(`${argv[0]} `));
+  const words = argv.slice(0, grouped ? 2 : 1);
+  const name = words.join(" ");
+  const rest = argv.slice(words.length);
+  if (name === "help" || name === "--help" || name === "-h") {
+    process.stdout.write(`${USAGE}\n`);
+    return 0;
+  }
+  const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
+  if (!command) {
+    process.stderr.write(`centcom: usage: unknown command ${JSON.stringify(name)}\n${USAGE}\n`);
+    return 2;
+  }
+  try {
+    const { values, positionals } = parseArgs({
+      args: rest,
+      options: command.options,
+      strict: true,
+      allowPositionals: true,
+      allowNegative: true,
+    });
+    const wanted = command.positionals ?? [];
+    if (positionals.length > wanted.length)
+      throw new UsageError(`unexpected argument ${JSON.stringify(positionals[wanted.length])}`);
+    if (positionals.length < wanted.length)
+      throw new UsageError(`${wanted[positionals.length]} is required`);
+    await command.run(values, positionals);
+    return 0;
+  } catch (err) {
+    if (err instanceof UsageError || String(err?.code).startsWith("ERR_PARSE_ARGS")) {
+      process.stderr.write(`centcom: usage: ${err.message}\nRun "centcom help" for usage.\n`);
+      return 2;
+    }
+    if (err instanceof DashError) {
+      process.stderr.write(
+        `centcom: ${err.code}${err.status ? ` (${err.status})` : ""}: ${err.message}\n`,
+      );
+      for (const issue of err.issues) process.stderr.write(`  ${issue.path}: ${issue.message}\n`);
+      return 1;
+    }
+    process.stderr.write(`centcom: internal error (${err?.name ?? "unknown"})\n`);
+    return 1;
+  }
+}
+
+async function runProgress(values) {
+  const taskId = requireText("--task", values.task);
+  const update = {
+    kind: "progress",
+    note: requireText("--note", values.note),
+    status: optionalText("--status", values.status),
+    links: values.link?.map(parseLink),
+    commitSha: optionalText("--sha", values.sha),
+    prUrl: optionalText("--pr", values.pr),
+    runId: optionalText("--run", values.run),
+  };
+  const id = await dashboard().postUpdate(taskId, update, deadline());
+  process.stdout.write(`${id}\n`);
+}
+
+async function runWhoami() {
+  const actor = await dashboard().whoami(deadline());
+  process.stdout.write(
+    actor
+      ? `${actor.agentId} (${actor.role})\n`
+      : "The server did not say which agent this key belongs to.\n",
+  );
+}
+
+async function runRaidAdd(values) {
+  const item = RAID_ADD.body(values);
+  printRaidWrite(await dashboard().addRaidItem(item, deadline()));
+}
+
+async function runRaidUpdate(values, [rawId]) {
+  const id = requireText("<id>", rawId);
+  const patch = patchOf(RAID_UPDATE, values);
+  printRaidWrite(await dashboard().updateRaidItem(id, patch, deadline()));
+}
+
+async function runLessonAdd(values) {
+  const lesson = LESSON_ADD.body(values);
+  const id = await dashboard().addLesson(lesson, deadline());
+  process.stdout.write(`${id}\n`);
+}
+
+async function runLessonUpdate(values, [rawId]) {
+  const id = requireText("<id>", rawId);
+  const patch = patchOf(LESSON_UPDATE, values);
+  process.stdout.write(`${await dashboard().updateLesson(id, patch, deadline())}\n`);
+}
+
+function patchOf(form, values) {
+  const patch = form.body(values);
+  if (Object.keys(patch).length === 0) throw new UsageError("give at least one field to change");
+  return patch;
+}
+
+function printRaidWrite({ id, decisionId }) {
+  process.stdout.write(decisionId ? `${id}\ndecision ${decisionId}\n` : `${id}\n`);
+}
+
+function dashboard() {
+  return openDashboard(process.env, { source: "cli" });
+}
+
+function deadline() {
+  return { signal: AbortSignal.timeout(TIMEOUT_MS) };
+}
+
+function form(fields, required = []) {
+  return {
+    options: Object.fromEntries(fields.map(([flag, , kind]) => [flag, KINDS[kind].option])),
+    usage: fields
+      .map(([flag, , kind]) => {
+        const hint = kind === "flag" ? `--${flag} | --no-${flag}` : `--${flag} <${flag}>`;
+        if (required.includes(flag)) return hint;
+        return kind === "list" ? `[${hint}]...` : `[${hint}]`;
+      })
+      .join(" "),
+    body(values) {
+      const missing = required.find((flag) => values[flag] === undefined);
+      if (missing) throw new UsageError(`--${missing} is required`);
+      return Object.fromEntries(
+        fields.flatMap(([flag, field, kind]) =>
+          values[flag] === undefined ? [] : [[field, KINDS[kind].value(flag, values[flag])]],
+        ),
+      );
+    },
+  };
+}
+
+function requireText(flag, value) {
+  if (typeof value !== "string" || !value.trim()) throw new UsageError(`${flag} is required`);
+  return value.trim();
+}
+
+function optionalText(flag, value) {
+  return value === undefined ? undefined : requireText(flag, value);
+}
+
+function parseLink(raw) {
+  const at = raw.indexOf("=");
+  const label = raw.slice(0, at).trim();
+  if (at < 1 || !label)
+    throw new UsageError(`--link expects label=url, got ${JSON.stringify(raw)}`);
+  return { label, url: raw.slice(at + 1) };
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=HX-CentCom (TanStack Start node-server, 192.168.50.215:5420)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/hx-centcom/current
+EnvironmentFile=%h/.config/hx-centcom/app.env
+Environment=NODE_ENV=production NITRO_HOST=192.168.50.215 NITRO_PORT=5420
+ExecStart=%h/.local/bin/node .output/server/index.mjs
+Restart=on-failure
+# The LAN address can come up after the user manager at boot. Retrying every 5 s never reaches systemd's default
+# start limit of 5 starts in 10 s, so the unit keeps retrying until the bind succeeds.
+RestartSec=5
+
+[Install]
+WantedBy=default.target
