@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as ApiPublicJobsGithubSyncRouteImport } from './routes/api/public/jobs/github-sync'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +35,25 @@ const TasksRoute = TasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicJobsGithubSyncRoute = ApiPublicJobsGithubSyncRouteImport.update({
+  id: '/api/public/jobs/github-sync',
+  path: '/api/public/jobs/github-sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/reset-password': typeof ResetPasswordRoute
   '/tasks': typeof TasksRoute
+  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/reset-password': typeof ResetPasswordRoute
   '/tasks': typeof TasksRoute
+  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,30 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/reset-password': typeof ResetPasswordRoute
   '/tasks': typeof TasksRoute
+  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/reset-password' | '/tasks'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/reset-password'
+    | '/tasks'
+    | '/api/public/jobs/github-sync'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/reset-password' | '/tasks'
-  id: '__root__' | '/' | '/auth' | '/reset-password' | '/tasks'
+  to:
+    | '/'
+    | '/auth'
+    | '/reset-password'
+    | '/tasks'
+    | '/api/public/jobs/github-sync'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth'
+    | '/reset-password'
+    | '/tasks'
+    | '/api/public/jobs/github-sync'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +92,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TasksRoute: typeof TasksRoute
+  ApiPublicJobsGithubSyncRoute: typeof ApiPublicJobsGithubSyncRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +125,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/jobs/github-sync': {
+      id: '/api/public/jobs/github-sync'
+      path: '/api/public/jobs/github-sync'
+      fullPath: '/api/public/jobs/github-sync'
+      preLoaderRoute: typeof ApiPublicJobsGithubSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +140,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TasksRoute: TasksRoute,
+  ApiPublicJobsGithubSyncRoute: ApiPublicJobsGithubSyncRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
