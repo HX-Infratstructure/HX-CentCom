@@ -140,13 +140,43 @@ const stale = sql<boolean | null>`case
   ) then false
   else true end`;
 
+type Attention = NonNullable<Parsed<typeof updateQueryInput>["attention"]>;
+
+/**
+ * An open task is blocked or not done. The one definition behind `Task.open`, the attention reasons, the workspace's
+ * decisions and myWork's tasks.
+ */
+const isOpen = sql<boolean>`(${task.blocked_on} <> 'none' or ${task.group} <> 'done')`;
+
+/**
+ * The needs-attention reasons, the one definition that `Task.attention` and listUpdates' `attention` filter both read.
+ * Each holds only for an open task. `owner` counts a Pending decision that lists the task in `blocks`. `stale` holds
+ * only for `true`, because `null` means no GitHub data, which is not a finding.
+ */
+const NEEDS_ATTENTION: { readonly [A in Attention]: SQL } = {
+  blocked: ne(task.blocked_on, "none"),
+  owner: sql`(${task.group} = 'ready_for_owner' or ${task.blocked_on} in ('owner_decision', 'assignment')
+    or exists (select 1 from ${ownerDecisions} where ${ownerDecisions.status} = 'Pending' and ${task.id} = any(${ownerDecisions.blocks})))`,
+  stale: sql`(${stale}) is true`,
+};
+
+const attends = (reason: Attention) => sql`(${isOpen} and ${NEEDS_ATTENTION[reason]})`;
+
+/** The task's reasons in NEEDS_ATTENTION order. */
+const attention = sql<Attention[]>`array_remove(array[${sql.join(
+  (Object.keys(NEEDS_ATTENTION) as Attention[]).map(
+    (reason) => sql`case when ${attends(reason)} then ${reason}::text end`,
+  ),
+  sql`, `,
+)}], null)`;
+
 /** The tasks that `where` selects, in board order, with their requirements and computed fields. */
 async function tasksWith(
   tx: Tx,
   where?: SQL,
 ): Promise<{ readonly tasks: Task[]; readonly requirements: Requirement[] }> {
   const rows = await tx
-    .select({ ...getTableColumns(task), stale })
+    .select({ ...getTableColumns(task), open: isOpen, stale, attention })
     .from(task)
     .where(where)
     .orderBy(sql`${task.start_date} asc nulls last`, task.id);
@@ -175,7 +205,7 @@ export async function listWorkspace(db: Db): Promise<Workspace> {
       tx
         .select({ id: task.id })
         .from(task)
-        .where(and(sql`${task.id} = any(${ownerDecisions.blocks})`, ne(task.group, "done"))),
+        .where(and(sql`${task.id} = any(${ownerDecisions.blocks})`, isOpen)),
     );
     const decisions = await tx
       .select()
@@ -227,10 +257,7 @@ export async function myWork(db: Db, actor: Actor | null, agentId?: string): Pro
   return db.transaction(async (tx) => {
     const [agent] = await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, who));
     if (!agent) throw ServiceError.notFound("Agent", who);
-    const { tasks, requirements } = await tasksWith(
-      tx,
-      and(eq(task.agent, who), ne(task.group, "done")),
-    );
+    const { tasks, requirements } = await tasksWith(tx, and(eq(task.agent, who), isOpen));
     const taskIds = tasks.map((t) => t.id);
     const pendingDecisions = await tx
       .select()
@@ -261,12 +288,26 @@ export async function listUpdates(db: Db, raw: unknown): Promise<UpdatesPage> {
       { path: "taskIds", message: "cannot be combined with taskId" },
     ]);
   }
+  if (
+    query.attention !== undefined &&
+    (query.taskId !== undefined || query.taskIds !== undefined)
+  ) {
+    throw ServiceError.invalid("Give attention or a task, not both.", [
+      { path: "attention", message: "cannot be combined with taskId or taskIds" },
+    ]);
+  }
   return db.transaction((tx) => queryUpdates(tx, query), SNAPSHOT);
 }
 
 type UpdateFacet = "agent" | "task" | "source";
 
-/** `taskIds` belongs to the task facet with `taskId`, so `byTask` drops both and every other count applies them. */
+const needsAttention = (reason: Attention) =>
+  sql`${taskUpdates.task_id} in (select ${task.id} from ${task} where ${attends(reason)})`;
+
+/**
+ * `taskIds` and `attention` belong to the task facet with `taskId`, so `byTask` drops them and every other count
+ * applies them.
+ */
 function updateFilters(query: Parsed<typeof updateQueryInput>, except?: UpdateFacet): SQL[] {
   const filters: (SQL | undefined)[] = [
     except !== "agent" && query.agentId !== undefined
@@ -277,6 +318,9 @@ function updateFilters(query: Parsed<typeof updateQueryInput>, except?: UpdateFa
       : undefined,
     except !== "task" && query.taskIds !== undefined
       ? inArray(taskUpdates.task_id, query.taskIds)
+      : undefined,
+    except !== "task" && query.attention !== undefined
+      ? needsAttention(query.attention)
       : undefined,
     except !== "source" && query.source !== undefined
       ? eq(taskUpdates.source, query.source)

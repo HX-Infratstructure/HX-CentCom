@@ -1,7 +1,7 @@
 // R12 (CC1's design H1): the workspace no longer carries every pull request and every decision. Its decisions are the
-// Pending ones plus those whose `blocks` holds a task that is not done; tasks, requirements, agents, status labels and
-// repository heads stay whole. A task's detail and an agent's work are reads of their own, so a done task keeps its
-// decided decisions, and REST and MCP return the same thing.
+// Pending ones plus those whose `blocks` holds an open task, one that is blocked or not done; tasks, requirements,
+// agents, status labels and repository heads stay whole. A task's detail and an agent's work are reads of their own, so
+// a done task keeps its decided decisions, and REST and MCP return the same thing.
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Route as taskRoute } from "@/routes/api/v1/tasks/$id";
@@ -43,7 +43,7 @@ describe("listWorkspace", () => {
     );
   });
 
-  it("keeps a decided decision while the task it blocks is open, and drops it once the task is done", async () => {
+  it("keeps a decided decision while the task it blocks is open, and drops it once the task is done and unblocked", async () => {
     await h.svc.decide(h.as.OWNER, "D-01", {
       status: "Decided",
       decisionText: "Merge it.",
@@ -56,6 +56,12 @@ describe("listWorkspace", () => {
       status: "Complete",
       source: "api",
     });
+    expect(
+      ids((await h.svc.listWorkspace()).decisions),
+      "IRP-04 is done but still blocked on an owner decision, so it is open",
+    ).toContain("D-01");
+
+    await h.q(`update engineering_tasks set blocked_on = 'none' where id = 'IRP-04'`);
     const after = ids((await h.svc.listWorkspace()).decisions);
     expect(after).not.toContain("D-01");
     expect(after, "Pending decisions on the done task stay").toEqual(

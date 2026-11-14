@@ -49,20 +49,9 @@ export function adaptWorkspace(ws: S.Workspace): WorkspaceView {
     list.push(requirementView(r, dir.agents));
     requirements.set(r.task_id, list);
   }
-  const pendingDecisions = new Map<string, string[]>();
-  for (const d of ws.decisions) {
-    if (d.status !== "Pending") continue;
-    for (const taskId of d.blocks) {
-      const list = pendingDecisions.get(taskId) ?? [];
-      list.push(d.id);
-      pendingDecisions.set(taskId, list);
-    }
-  }
   return {
     ...dir,
-    tasks: ws.tasks.map((t) =>
-      taskView(t, dir, requirements.get(t.id) ?? [], pendingDecisions.get(t.id) ?? []),
-    ),
+    tasks: ws.tasks.map((t) => taskView(t, dir, requirements.get(t.id) ?? [])),
     decisions: ws.decisions.map((d) => decisionView(d, dir.agents)),
   };
 }
@@ -220,12 +209,7 @@ function requirementView(r: S.Requirement, agents: AgentDirectory): RequirementV
   };
 }
 
-function taskView(
-  t: S.Task,
-  dir: Directory,
-  requirements: readonly RequirementView[],
-  pendingDecisions: readonly string[],
-): TaskView {
+function taskView(t: S.Task, dir: Directory, requirements: readonly RequirementView[]): TaskView {
   const { agent, status, source_url, updated_at, ...rest } = t;
   return {
     ...rest,
@@ -234,7 +218,6 @@ function taskView(
     source: sourceRef(source_url),
     updatedAt: toInstant(updated_at),
     requirements,
-    pendingDecisions,
   };
 }
 

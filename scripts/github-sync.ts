@@ -105,12 +105,11 @@ function nextUrl(link: string | null): string | undefined {
 }
 
 /**
- * The URL to fetch once when `location` names this same PR on api.github.com, by a repository name in the org or by a
- * repository id. GitHub sends the id form for a renamed repository. The URL is rebuilt, so only api.github.com gets it.
+ * The URL to fetch once when a redirect's Location names this same PR on api.github.com, by a repository name in the
+ * org or by a repository id. GitHub sends the id form for a renamed repository. The URL is rebuilt, so only
+ * api.github.com gets it.
  */
-function redirectTarget(location: string | null, number: number): string | undefined {
-  if (location === null || !URL.canParse(location)) return undefined;
-  const url = new URL(location);
+function redirectTarget(url: URL, number: number): string | undefined {
   if (url.origin !== API || url.username || url.password || url.search || url.hash)
     return undefined;
   const named = url.pathname.match(/^\/repos\/([^/]+)\/([\w.-]+)\/pulls\/(\d+)$/);
@@ -190,19 +189,26 @@ function gitHubApi(fetch: Fetch, token: string) {
     /**
      * GitHub redirects a repository that was renamed inside the org, and one that left it. Only a Location that names
      * this PR on api.github.com is fetched, once, and its answer counts only if the org still owns the repository.
+     * A Location that does not parse, or a second redirect, leaves the PR's fate unknown, so it fails the run.
      */
     pull: async (
       repo: string,
       number: number,
     ): Promise<{ repo: string; pull: GitHubPull } | null> => {
-      const absent = (status: number) => status === 404 || (status >= 300 && status < 400);
       const url = `${API}/repos/${ORG}/${repo}/pulls/${number}`;
-      const res = await get(url, absent);
+      const res = await get(url, (status) => status === 404 || (status >= 300 && status < 400));
       if (res.ok) return { repo, pull: await json<GitHubPull>(res, url) };
-      const moved =
-        res.status === 404 ? undefined : redirectTarget(res.headers.get("location"), number);
+      if (res.status === 404) return null;
+      let location: URL;
+      try {
+        location = new URL(res.headers.get("location") ?? "");
+      } catch {
+        // The parse error carries the Location, which is reply text, so the error is never kept.
+        throw new Error(`GitHub GET ${url.slice(API.length)} -> ${res.status}`);
+      }
+      const moved = redirectTarget(location, number);
       if (moved === undefined) return null;
-      const next = await get(moved, absent);
+      const next = await get(moved, (status) => status === 404);
       if (!next.ok) return null;
       const found = await json<GitHubPull>(next, moved);
       const { name, owner } = found.base.repo;

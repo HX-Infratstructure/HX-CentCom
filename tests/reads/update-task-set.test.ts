@@ -1,4 +1,5 @@
-// SPEC:202 (CC1's follow-up 3): the feed filters by a set of tasks, which the overview's needs-attention facet uses.
+// SPEC:202 (CC1's follow-up 3): the feed filters by a set of tasks. The overview's needs-attention feed sends `attention`
+// instead (update-attention.test.ts).
 // `taskIds` holds 1 to 100 ids and belongs to the task facet: `byTask` drops it as it drops `taskId`, and every other
 // count applies it. `taskId` with `taskIds` is a 400. REST takes `taskIds` as one comma-separated parameter.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

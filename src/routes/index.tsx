@@ -48,17 +48,18 @@ function tasksNeeding(attention: Attention, tasks: readonly TaskView[]): readonl
 }
 
 /**
- * The feed's read. The feed's filters and the attention filter combine with AND, so a reason narrows the feed to
- * `attentionIds`, its open tasks. null when no update can match: the feed then sends no request, and never `taskId`
- * beside `taskIds` or an empty `taskIds`.
+ * The feed's read. The feed's filters and the attention filter combine with AND. A reason goes to the server, which
+ * selects the reason's open tasks however many there are. The server refuses `taskId` beside `attention`, so a chosen
+ * task is read alone when it is one of `attentionIds`; null when it is not, and the feed then sends no request.
  */
 function feedQuery(
   { agentId, taskId }: FeedFilters,
+  attention: Attention | undefined,
   attentionIds: readonly string[] | undefined,
 ): UpdateQuery | null {
-  if (attentionIds === undefined) return { agentId, taskId };
-  if (taskId !== undefined) return attentionIds.includes(taskId) ? { agentId, taskId } : null;
-  return attentionIds.length === 0 ? null : { agentId, taskIds: [...attentionIds] };
+  if (attention === undefined) return { agentId, taskId };
+  if (taskId === undefined) return { agentId, attention };
+  return attentionIds?.includes(taskId) === true ? { agentId, taskId } : null;
 }
 
 export const Route = createFileRoute("/")({
@@ -77,14 +78,16 @@ export const Route = createFileRoute("/")({
   /** Prefetches the feed read the first render derives from the same workspace, so server rendering has its data. */
   loader: async ({ context: { queryClient }, deps: { attention, ...feed } }) => {
     const workspace = queryClient.ensureQueryData(tasksQuery);
-    // Only a reason makes the feed wait for the workspace, because its read names the reason's open tasks.
+    // Only a reason makes the feed wait for the workspace, because its read is keyed by the reason's open tasks.
     const loadFeed = async () => {
       const attentionIds =
         attention === undefined
           ? undefined
           : tasksNeeding(attention, adaptWorkspace(await workspace).tasks);
-      const query = feedQuery(feed, attentionIds);
-      if (query !== null) await queryClient.ensureInfiniteQueryData(updatePages(query));
+      const query = feedQuery(feed, attention, attentionIds);
+      if (query !== null) {
+        await queryClient.ensureInfiniteQueryData(updatePages(query, attentionIds));
+      }
     };
     await Promise.all([
       workspace,
@@ -207,7 +210,7 @@ function Feed({ dir, tasks }: { dir: Directory; tasks: readonly TaskView[] }): R
   const headingId = useId();
   const { attention, agentId, taskId } = Route.useLoaderDeps();
   const attentionIds = attention === undefined ? undefined : tasksNeeding(attention, tasks);
-  const query = feedQuery({ agentId, taskId }, attentionIds);
+  const query = feedQuery({ agentId, taskId }, attention, attentionIds);
   const filtered = attention !== undefined || agentId !== undefined || taskId !== undefined;
   return (
     <section aria-labelledby={headingId} className="overview-feed">
@@ -251,7 +254,7 @@ function FeedPages({
     [dir],
   );
   const pages = useInfiniteQuery({
-    ...updatePages(query),
+    ...updatePages(query, attentionIds),
     select,
     placeholderData: keepPreviousData,
   });

@@ -58,10 +58,19 @@ export type Progress = {
   readonly percent: number | null;
 };
 /**
+ * `open`: the task is blocked or not done. The workspace keeps a decision that blocks an open task, and myWork lists
+ * an agent's open tasks.
  * `stale` (F9): null without a commit_sha or a GitHub mirror row for the task's repository; false when the SHA is a
  * case-insensitive prefix of that repository's head, an open PR's head or a merged PR's merge commit; else true.
+ * `attention`: why the open task needs the owner's attention, in the order blocked, owner, stale; empty for a task that
+ * is not open. listUpdates' `attention` filter selects the updates of exactly the tasks that list the reason.
  */
-export type Task = TaskRow & { readonly progress: Progress; readonly stale: boolean | null };
+export type Task = TaskRow & {
+  readonly progress: Progress;
+  readonly open: boolean;
+  readonly stale: boolean | null;
+  readonly attention: readonly NonNullable<NonNullable<UpdateQueryInput>["attention"]>[];
+};
 
 /** Facet counts for filter chips (R12). Each facet applies every filter except its own; none uses the cursor. */
 export type UpdateCounts = {

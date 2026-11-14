@@ -520,6 +520,29 @@ async function authorizeDependencyChange(
   }
 }
 
+/**
+ * Locks every task a dependency write affects, one at a time in ascending id order, FOR NO KEY UPDATE, before the RAID
+ * row insert or update sets its foreign key. Two crossing moves (D1 from A to B, D2 from B to A) then serialise on the
+ * lower id, and the second one's release check runs after the first commits, so it sees the first one's move. A
+ * create on a task and a move off it serialise the same way. The lock is FOR NO KEY UPDATE, not FOR UPDATE, because
+ * it must not wait on another write's foreign-key FOR KEY SHARE on the task. `releaseTask` takes the same lock again
+ * later in the transaction, which is then a no-op.
+ */
+async function lockAffectedTasks(
+  tx: Tx,
+  before: DependencyState | null,
+  after: DependencyState,
+): Promise<void> {
+  const taskIds = affectedTasks(before, after).sort((a, b) => (a < b ? -1 : 1));
+  for (const taskId of taskIds) {
+    await tx
+      .select({ id: engineeringTasks.id })
+      .from(engineeringTasks)
+      .where(eq(engineeringTasks.id, taskId))
+      .for("no key update");
+  }
+}
+
 type TaskVersion = { readonly id: string; readonly version: number };
 type Released = {
   readonly systemUpdates: readonly TaskUpdate[];
@@ -592,10 +615,9 @@ async function releaseTask(
 
 /**
  * Automation 2 (SPEC §6.1). A dependency's move into closed releases the task it is on, and an open dependency's move
- * to another task releases the task it left. Every release posts one system update that states the outcome. Tasks
- * lock in id order, so two releases in one write cannot deadlock. The lock is FOR NO KEY UPDATE because the RAID row's
- * foreign key already holds FOR KEY SHARE on its new task. FOR UPDATE would wait on that lock, so two crossing moves
- * (A to B, B to A) would each wait on the other.
+ * to another task releases the task it left. Every release posts one system update that states the outcome. Every
+ * released task is already locked by `lockAffectedTasks`, in id order and before the RAID row update, so the releases
+ * run in id order only to keep the system updates in a stable order.
  */
 async function releaseDependencyTasks(
   tx: Tx,
@@ -631,11 +653,13 @@ export const createRaidItemPlan: CreatePlan<typeof createRaidItemInput, RaidWrit
   async apply(tx, ctx) {
     const { actor, input, at } = ctx;
     throwIfAny(await referenceIssues(tx, input));
-    await authorizeDependencyChange(tx, actor, null, {
+    const dependency: DependencyState = {
       type: input.type,
       status: input.status,
       blocked_task_id: input.blockedTaskId ?? null,
-    });
+    };
+    await lockAffectedTasks(tx, null, dependency);
+    await authorizeDependencyChange(tx, actor, null, dependency);
     const columns = withRequiredDefaults(input.type, raidColumns(input));
     const id = await nextRaidId(tx);
     const [inserted] = await tx
@@ -684,6 +708,7 @@ export function updateRaidItemPlan(
       const columns = raidColumns(input);
       const merged = { ...before, ...columns };
       throwIfAny([...raidShapeIssues(before.type, merged), ...(await referenceIssues(tx, input))]);
+      await lockAffectedTasks(tx, before, merged);
       await authorizeDependencyChange(tx, actor, before, merged);
       const [updated] = await tx
         .update(raidItems)

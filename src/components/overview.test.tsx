@@ -63,7 +63,9 @@ function task(fields: Pick<Task, "id" | "title"> & Partial<Task>): Task {
     version: 1,
     updated_at: "2026-11-14T08:10:00.123456+00:00",
     progress: { proven: 0, total: 0, percent: null },
+    open: true,
     stale: null,
+    attention: [],
     ...fields,
   };
 }
@@ -182,12 +184,14 @@ describe("the overview's open tasks", () => {
             id: "IRP-32",
             title: "Wire the eval dashboard",
             blocked_on: "owner_decision",
+            attention: ["blocked", "owner"],
           }),
           task({
             id: "IRP-33",
             title: "Pin the router build",
             group: "done",
             status: "Complete",
+            open: false,
           }),
           task({
             id: "IRP-34",
@@ -195,6 +199,7 @@ describe("the overview's open tasks", () => {
             group: "done",
             status: "Complete",
             blocked_on: "dependency",
+            attention: ["blocked"],
           }),
           task({
             id: "IRP-35",
@@ -202,6 +207,7 @@ describe("the overview's open tasks", () => {
             agent: null,
             group: "ready_for_owner",
             status: "Waiting",
+            attention: ["owner"],
           }),
         ],
       }),
@@ -221,19 +227,26 @@ describe("the overview's open tasks", () => {
 describe("the overview's needs-attention filter", () => {
   const ATTENTION = workspace({
     tasks: [
-      task({ id: "IRP-71", title: "Close the benchmark run", blocked_on: "dependency" }),
+      task({
+        id: "IRP-71",
+        title: "Close the benchmark run",
+        blocked_on: "dependency",
+        attention: ["blocked"],
+      }),
       task({
         id: "IRP-72",
         title: "Write the release notes",
         group: "ready_for_owner",
         status: "Waiting",
+        attention: ["owner"],
       }),
-      task({ id: "IRP-73", title: "Wire the eval dashboard" }),
+      task({ id: "IRP-73", title: "Wire the eval dashboard", attention: ["owner"] }),
       task({
         id: "IRP-74",
         title: "Pin the router build",
         commit_sha: "3e39a5c94018db85bf6f2111b2e60471053c8a20",
         stale: true,
+        attention: ["stale"],
       }),
       task({
         id: "IRP-75",
@@ -246,6 +259,7 @@ describe("the overview's needs-attention filter", () => {
         title: "Assign the dashboard review",
         agent: null,
         blocked_on: "assignment",
+        attention: ["blocked", "owner"],
       }),
       // Finished work is not open, so its stale commit counts nowhere.
       task({
@@ -254,6 +268,7 @@ describe("the overview's needs-attention filter", () => {
         group: "done",
         status: "Complete",
         stale: true,
+        open: false,
       }),
     ],
     decisions: [
@@ -299,22 +314,16 @@ describe("the overview's needs-attention filter", () => {
   });
 
   it.each([
-    [
-      "blocked",
-      "Blocked",
-      ["Close the benchmark run", "Assign the dashboard review"],
-      ["IRP-71", "IRP-76"],
-    ],
+    ["blocked", "Blocked", ["Close the benchmark run", "Assign the dashboard review"]],
     [
       "owner",
       "Waiting on the owner",
       ["Assign the dashboard review", "Write the release notes", "Wire the eval dashboard"],
-      ["IRP-76", "IRP-72", "IRP-73"],
     ],
-    ["stale", "Stale commit", ["Pin the router build"], ["IRP-74"]],
+    ["stale", "Stale commit", ["Pin the router build"]],
   ] as const)(
-    "keeps only the matching rows at /?attention=%s and asks the feed for their updates alone",
-    async (value, label, titles, taskIds) => {
+    "keeps only the matching rows at /?attention=%s and asks the server for the reason's updates",
+    async (value, label, titles) => {
       const router = await renderOverview(ATTENTION, NO_PRS, `/?attention=${value}`);
 
       const open = section("Open tasks");
@@ -324,14 +333,14 @@ describe("the overview's needs-attention filter", () => {
         { name: `${label}${titles.length}`, current: true },
       ]);
       expect(router.state.location.search).toEqual({ attention: value });
-      expect(feedRequests()).toEqual([{ data: { taskIds } }]);
+      expect(feedRequests()).toEqual([{ data: { attention: value } }]);
       expect(screen.getByRole("region", { name: /^Latest updates/ })).toHaveTextContent(
         feedNote(label),
       );
     },
   );
 
-  it("writes the chosen reason to the URL and narrows the feed without sending the reason itself", async () => {
+  it("writes the chosen reason to the URL and sends the reason, not its task ids, to the feed", async () => {
     const router = await renderOverview(ATTENTION);
     const facet = within(screen.getByRole("group", { name: "Needs attention" }));
 
@@ -346,16 +355,13 @@ describe("the overview's needs-attention filter", () => {
     });
     expect(router.state.location.search).toEqual({});
     expect(section("Open tasks").heading).toBe("Open tasks 6");
-    expect(feedRequests()).toEqual([
-      { data: {} },
-      { data: { taskIds: ["IRP-76", "IRP-72", "IRP-73"] } },
-    ]);
+    expect(feedRequests()).toEqual([{ data: {} }, { data: { attention: "owner" } }]);
   });
 
   it("combines with the feed's agent filter", async () => {
     await renderOverview(ATTENTION, NO_PRS, "/?attention=blocked&agent=atlas");
 
-    expect(feedRequests()).toEqual([{ data: { agentId: "atlas", taskIds: ["IRP-71", "IRP-76"] } }]);
+    expect(feedRequests()).toEqual([{ data: { agentId: "atlas", attention: "blocked" } }]);
   });
 
   it("asks for the chosen task alone when it needs attention for the reason", async () => {
@@ -374,7 +380,22 @@ describe("the overview's needs-attention filter", () => {
     );
   });
 
-  it("sends no feed request when no open task needs attention for the reason", async () => {
+  it("sends the reason alone when more than 100 open tasks need attention for it", async () => {
+    const blocked = Array.from({ length: 101 }, (_, i) =>
+      task({
+        id: `IRP-${200 + i}`,
+        title: `Blocked task ${i}`,
+        blocked_on: "dependency",
+        attention: ["blocked"],
+      }),
+    );
+    await renderOverview(workspace({ tasks: blocked }), NO_PRS, "/?attention=blocked");
+
+    expect(section("Open tasks").heading).toBe("Open tasks 101");
+    expect(feedRequests()).toEqual([{ data: { attention: "blocked" } }]);
+  });
+
+  it("lets the server answer when no open task needs attention for the reason", async () => {
     await renderOverview(
       workspace({
         tasks: [
@@ -385,6 +406,7 @@ describe("the overview's needs-attention filter", () => {
             group: "done",
             status: "Complete",
             stale: true,
+            open: false,
           }),
         ],
       }),
@@ -392,7 +414,7 @@ describe("the overview's needs-attention filter", () => {
       "/?attention=stale",
     );
 
-    expect(feedRequests()).toEqual([]);
+    expect(feedRequests()).toEqual([{ data: { attention: "stale" } }]);
     expect(section("Latest updates").empty).toBe("No updates match these filters.");
   });
 
@@ -481,7 +503,7 @@ describe("the overview's needs-attention filter", () => {
       NO_PRS,
       "/?attention=blocked",
     );
-    expect(feedRequests()).toEqual([]);
+    expect(feedRequests()).toEqual([{ data: { attention: "blocked" } }]);
 
     const blockedUpdate = feedUpdate(5, "IRP-73");
     server.listUpdates.mockResolvedValue({
@@ -492,7 +514,7 @@ describe("the overview's needs-attention filter", () => {
     act(() => {
       router.options.context.queryClient.setQueryData(
         ["task-workspace"],
-        workspace({ tasks: [{ ...calm, blocked_on: "dependency" }] }),
+        workspace({ tasks: [{ ...calm, blocked_on: "dependency", attention: ["blocked"] }] }),
       );
     });
 
@@ -500,7 +522,10 @@ describe("the overview's needs-attention filter", () => {
     expect(await within(feed).findByText(blockedUpdate.note)).toBeInTheDocument();
     expect(section("Latest updates").empty).toBeNull();
     expect(section("Open tasks").rowTitles).toEqual(["Wire the eval dashboard"]);
-    expect(feedRequests()).toEqual([{ data: { taskIds: ["IRP-73"] } }]);
+    expect(feedRequests()).toEqual([
+      { data: { attention: "blocked" } },
+      { data: { attention: "blocked" } },
+    ]);
   });
 });
 

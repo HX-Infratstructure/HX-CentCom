@@ -231,8 +231,9 @@ Each run also fetches every PR that the database holds as `open` and that GitHub
 
 - **200.** The sync saves the PR's state.
 - **404.** The PR is `gone`.
-- **A redirect to the same PR on `api.github.com`.** The status is 3xx, and the `Location` is `https://api.github.com/repos/HX-Infratstructure/<name>/pulls/<n>` or `https://api.github.com/repositories/<id>/pulls/<n>`, where `<n>` is the PR's own number. GitHub sends the numeric form for a renamed repository. The sync sends one GET to that URL. If GitHub answers 200 and the PR's base repository belongs to the organization, the sync saves the PR's state under the repository's new name. If GitHub answers 404 or another redirect, or the base repository belongs to another organization, the PR is `gone`.
-- **Any other redirect.** The PR is `gone`. Examples are a `Location` on another host, a `Location` in another organization, and a malformed `Location`.
+- **A redirect to the same PR on `api.github.com`.** The status is 3xx, and the `Location` is `https://api.github.com/repos/HX-Infratstructure/<name>/pulls/<n>` or `https://api.github.com/repositories/<id>/pulls/<n>`, where `<n>` is the PR's own number. GitHub sends the numeric form for a renamed repository. The sync sends one GET to that URL. If GitHub answers 200 and the PR's base repository belongs to the organization, the sync saves the PR's state under the repository's new name. If GitHub answers 404, or the base repository belongs to another organization, the PR is `gone`. If GitHub answers another redirect, the run fails with `github-sync failed: GitHub GET <path> -> <status>` for that URL and saves nothing. The sync does not follow the second `Location`.
+- **A redirect without a usable `Location`.** The `Location` is missing, empty, relative, or not a URL. The sync cannot tell where the PR went, so the run fails with `github-sync failed: GitHub GET <path> -> <status>` and saves nothing.
+- **Any other redirect.** The PR is `gone`. Examples are a `Location` on another host, a `Location` in another organization, and a `Location` that names another PR.
 
 For a `gone` PR, the sync sets its state to `gone` and prints `github-sync gone repo=<repo> number=<n> id=<id>` before its `github-sync ok` line. Any other error status fails the run, and so does a redirect on any other request. The sync sends the token only to `api.github.com`.
 

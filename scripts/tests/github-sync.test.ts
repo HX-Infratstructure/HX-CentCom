@@ -722,8 +722,6 @@ describe("PR state", () => {
     `${API}/repositories/1457388817/pulls/5`,
     `${API}/repositories/abc/pulls/4`,
     `https://evil.example/repositories/1457388817/pulls/4`,
-    `/repos/${ORG}/renamed/pulls/4`,
-    "not a url",
   ]) {
     test(`a redirect to a Location that is not this PR on api.github.com in the org is marked gone without a request: ${location}`, async () => {
       const routes: Routes = {
@@ -787,7 +785,7 @@ describe("PR state", () => {
     });
   }
 
-  test("a second redirect after the one hop is marked gone, and the second Location is not requested", async () => {
+  test("a second redirect after the one hop fails the run with nothing saved, and the second Location is not requested", async () => {
     const renamed = pullUrl("renamed", 4);
     const again = pullUrl("renamed-again", 4);
     const routes: Routes = {
@@ -798,12 +796,35 @@ describe("PR state", () => {
       [again]: { body: oldClosedPull("renamed-again") },
     };
     const result = await run(routes, { open: [{ id: 404, repo: "old-name", number: 4 }] });
-    assert.equal(result.code, 0, result.stderr);
-    assert.deepEqual(result.db.saved[0]?.stateUpdates, [{ id: 404, state: "gone" }]);
-    assert.deepEqual(result.db.saved[0]?.prs, []);
+    assert.equal(result.code, 1);
+    assert.equal(result.db.calls.save, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "github-sync failed: GitHub GET /repos/HX-Infratstructure/renamed/pulls/4 -> 307\n",
+    );
     assert.equal(result.urls.filter((url) => url === renamed).length, 1, "the one hop was made");
     assert.equal(result.urls.filter((url) => url === again).length, 0, "no second hop");
   });
+
+  for (const location of ["not a url", `/repos/${ORG}/renamed/pulls/4`, "", undefined]) {
+    test(`a redirect whose Location cannot be parsed fails the run with nothing saved: ${JSON.stringify(location)}`, async () => {
+      const routes: Routes = {
+        [reposUrl]: { body: [repo("alpha")] },
+        ...quietRepo("alpha"),
+        [pullUrl("old-name", 4)]: { status: 301, location, body: { message: "Moved" } },
+      };
+      const result = await run(routes, { open: [{ id: 404, repo: "old-name", number: 4 }] });
+      assert.equal(result.code, 1);
+      assert.equal(result.db.calls.save, 0);
+      assert.equal(result.stdout, "");
+      assert.equal(
+        result.stderr,
+        "github-sync failed: GitHub GET /repos/HX-Infratstructure/old-name/pulls/4 -> 301\n",
+      );
+      assert.equal(result.calls.length, 5, result.urls.join(" "));
+    });
+  }
 
   test("a redirect anywhere else still fails the run", async () => {
     const result = await run({

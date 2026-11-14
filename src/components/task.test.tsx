@@ -51,13 +51,15 @@ function task(fields: Pick<Task, "id" | "title" | "stale"> & Partial<Task>): Tas
     version: 1,
     updated_at: "2026-11-14T08:10:00.123456+00:00",
     progress: { proven: 0, total: 0, percent: null },
+    open: true,
+    attention: [],
     ...fields,
   };
 }
 
 /** A commit behind every head, one at a head, and one the server has no GitHub data for. */
 const TASKS: readonly Task[] = [
-  task({ id: "IRP-81", title: "Pin the router build", stale: true }),
+  task({ id: "IRP-81", title: "Pin the router build", stale: true, attention: ["stale"] }),
   task({ id: "IRP-82", title: "Wire the eval dashboard", stale: false }),
   task({ id: "IRP-83", title: "Write the release notes", stale: null, commit_sha: null }),
 ];

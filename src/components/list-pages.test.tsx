@@ -69,7 +69,9 @@ function task(
     version: 1,
     updated_at: AT,
     progress: { proven: 0, total: 0, percent: null },
+    open: true,
     stale: null,
+    attention: [],
     ...fields,
   };
 }
@@ -86,6 +88,7 @@ const TASKS: readonly Task[] = [
     group: "in_progress",
     status: "In progress",
     blocked_on: "owner_decision",
+    attention: ["blocked", "owner"],
   }),
   task({
     id: "IRP-05",
@@ -93,6 +96,7 @@ const TASKS: readonly Task[] = [
     agent: "atlas",
     group: "ready_for_owner",
     status: "Ready for owner",
+    attention: ["owner"],
   }),
   task({
     id: "HX12-01",
@@ -101,6 +105,7 @@ const TASKS: readonly Task[] = [
     group: "backlog",
     status: "Waiting",
     blocked_on: "dependency",
+    attention: ["blocked"],
   }),
   task({
     id: "RO-01",
@@ -109,6 +114,7 @@ const TASKS: readonly Task[] = [
     group: "backlog",
     status: "Waiting",
     blocked_on: "assignment",
+    attention: ["blocked", "owner"],
   }),
   task({
     id: "IRP-UI",
@@ -124,6 +130,7 @@ const TASKS: readonly Task[] = [
     group: "backlog",
     status: "Waiting",
     blocked_on: "assignment",
+    attention: ["blocked", "owner"],
   }),
   task({
     id: "CC-01",
@@ -131,6 +138,7 @@ const TASKS: readonly Task[] = [
     agent: "atlas",
     group: "done",
     status: "Complete",
+    open: false,
   }),
 ];
 

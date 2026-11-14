@@ -40,7 +40,9 @@ function task(fields: Pick<Task, "id" | "title"> & Partial<Task>): Task {
     version: 1,
     updated_at: "2026-11-14T08:10:00.123456+00:00",
     progress: { proven: 0, total: 0, percent: null },
+    open: true,
     stale: null,
+    attention: [],
     ...fields,
   };
 }
@@ -175,7 +177,13 @@ describe("the task board's columns", () => {
     }),
     // A done status label does not move a card: the server's group decides its column.
     task({ id: "IRP-52", title: "Wire the eval dashboard", status: "Complete" }),
-    task({ id: "IRP-53", title: "Pin the router build", group: "done", status: "Complete" }),
+    task({
+      id: "IRP-53",
+      title: "Pin the router build",
+      group: "done",
+      status: "Complete",
+      open: false,
+    }),
     task({ id: "IRP-54", title: "Write the release notes", group: "backlog", status: "Waiting" }),
   ];
 

@@ -12,16 +12,17 @@ export const tasksQuery = queryOptions({
 /** The update feed's filters. The cursor never enters the URL. */
 export type UpdateQuery = Pick<
   NonNullable<UpdateQueryInput>,
-  "agentId" | "taskId" | "taskIds" | "source" | "since" | "until"
+  "agentId" | "taskId" | "taskIds" | "attention" | "source" | "since" | "until"
 >;
 
 /**
  * The one update-feed read, for the overview's latest updates and the tasks page's update log. Each route adds its own
- * `select`, because adapting a page needs the workspace's directory.
+ * `select`, because adapting a page needs the workspace's directory. `refreshOn` joins only the key: the overview's
+ * needs-attention feed passes the reason's open tasks, so a workspace refresh that changes them reads the feed again.
  */
-export function updatePages(query: UpdateQuery) {
+export function updatePages(query: UpdateQuery, refreshOn?: readonly string[]) {
   return infiniteQueryOptions({
-    queryKey: ["updates", query],
+    queryKey: refreshOn === undefined ? ["updates", query] : ["updates", query, refreshOn],
     queryFn: ({ pageParam }) => listUpdates({ data: { ...query, cursor: pageParam } }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,

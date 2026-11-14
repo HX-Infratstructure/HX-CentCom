@@ -40,7 +40,7 @@ export const ATTENTION_LABELS = {
   blocked: "Blocked",
   owner: "Waiting on the owner",
   stale: "Stale commit",
-} as const;
+} as const satisfies Record<S.Task["attention"][number], string>;
 export type Attention = keyof typeof ATTENTION_LABELS;
 
 export const UPDATE_SOURCE_LABELS = {
@@ -192,36 +192,20 @@ export type TaskView = Omit<S.Task, "agent" | "status" | "source_url" | "updated
   readonly source: SourceRef;
   readonly updatedAt: Instant;
   readonly requirements: readonly RequirementView[];
-  /** Ids of the Pending decisions that list this task in `blocks`. Complete: the workspace holds every Pending one. */
-  readonly pendingDecisions: readonly string[];
 };
 
-/** Blocked tasks first, then the rest of the unfinished work in workspace order. */
+/** Blocked tasks first, then the rest of the open tasks in workspace order. The server owns what open means. */
 export function openTasks(tasks: readonly TaskView[]): readonly TaskView[] {
-  const open = tasks.filter((t) => t.blocked_on !== "none" || t.group !== "done");
+  const open = tasks.filter((t) => t.open);
   return [
     ...open.filter((t) => t.blocked_on !== "none"),
     ...open.filter((t) => t.blocked_on === "none"),
   ];
 }
 
-/**
- * The one definition of each reason. `stale` holds only for `true`: `null` means the server has no GitHub data for
- * the commit, which is not a finding.
- */
-const NEEDS_ATTENTION: { readonly [A in Attention]: (task: TaskView) => boolean } = {
-  blocked: (t) => t.blocked_on !== "none",
-  owner: (t) =>
-    t.group === "ready_for_owner" ||
-    t.blocked_on === "owner_decision" ||
-    t.blocked_on === "assignment" ||
-    t.pendingDecisions.length > 0,
-  stale: (t) => t.stale === true,
-};
-
-/** Every reason the task needs attention, in chip order. The overview filter and the stale badge both read it. */
+/** Every reason the task needs attention. The server owns the rule; the overview filter and the stale badge read it. */
 export function attentionOf(task: TaskView): readonly Attention[] {
-  return (Object.keys(ATTENTION_LABELS) as Attention[]).filter((a) => NEEDS_ATTENTION[a](task));
+  return task.attention;
 }
 
 /**

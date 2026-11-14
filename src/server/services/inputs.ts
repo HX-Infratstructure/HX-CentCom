@@ -193,8 +193,10 @@ export const updateQueryInput = z
   .object({
     agentId: id.optional(),
     taskId: id.optional(),
-    /** Updates of any of these tasks (the needs-attention feed). listUpdates refuses it beside `taskId`. */
+    /** Updates of any of these tasks. listUpdates refuses it beside `taskId`. */
     taskIds: z.array(id).min(1).max(100).optional(),
+    /** Updates of the open tasks that need attention for this reason. listUpdates refuses it beside `taskId` or `taskIds`. */
+    attention: z.enum(["blocked", "owner", "stale"]).optional(),
     source: z.enum(UPDATE_SOURCES).optional(),
     since: pgInstant.optional(),
     until: pgInstant.optional(),

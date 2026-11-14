@@ -158,7 +158,7 @@ const TOOLS: readonly McpTool[] = [
   tool({
     name: "list_updates",
     description:
-      "Task updates, newest first, with filter counts. Filters: agentId, taskId, source, since, until. limit 1-100 (default 20); pass nextCursor back as cursor.",
+      "Task updates, newest first, with filter counts. Filters: agentId, taskId, taskIds, attention, source, since, until. taskIds is 1-100 task ids; it cannot be combined with taskId. attention is blocked, owner or stale: the updates of the open tasks whose attention lists that reason; it cannot be combined with taskId or taskIds. limit 1-100 (default 20); pass nextCursor back as cursor.",
     write: false,
     input: updateQueryInput.removeDefault().strict(),
     run: async (args, { services }) => read(await services.listUpdates(args)),
