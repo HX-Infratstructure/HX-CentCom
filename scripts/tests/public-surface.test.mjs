@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const SERVICES = new Set(["@/server/services", "../src/server/services/index.ts"]);
 const DB_CLIENT = new Set(["@/server/db/client", "../src/server/db/client.ts"]);
@@ -41,13 +43,39 @@ test("the matcher flags schema imports and deep services imports, static or dyna
   );
 });
 
-for (const file of ["github-sync.ts", "issue-key.ts"]) {
-  test(`scripts/${file} reaches src/server only through the services index and the db client`, () => {
-    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    assert.ok(
-      serverImports(source).some((specifier) => SERVICES.has(specifier)),
-      "the script imports the services index",
-    );
-    assert.deepEqual(violations(source), []);
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const TESTS = join("scripts", "tests");
+
+/** Every file under scripts/ and bin/. The tests in scripts/tests reach the database through createTestDb. */
+function files(dir) {
+  return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (!entry.isDirectory()) return [path];
+    return path === TESTS ? [] : files(path);
   });
 }
+
+const sources = new Map(
+  ["scripts", "bin"].flatMap(files).map((file) => [file, readFileSync(join(ROOT, file), "utf8")]),
+);
+
+test("the scan reads every script and bin file, and sees the services index where a script uses it", () => {
+  for (const file of ["scripts/github-sync.ts", "scripts/issue-key.ts", "bin/centcom"]) {
+    assert.ok(sources.has(file), file);
+  }
+  assert.ok(sources.has("bin/lib/centcom.mjs"), "the scan reaches bin/lib");
+  assert.ok(![...sources.keys()].some((file) => file.startsWith(TESTS)));
+  for (const file of ["scripts/github-sync.ts", "scripts/issue-key.ts"]) {
+    assert.ok(
+      serverImports(sources.get(file)).some((specifier) => SERVICES.has(specifier)),
+      file,
+    );
+  }
+});
+
+test("every file under scripts/ and bin/ reaches src/server only through the services index and the db client", () => {
+  const found = [...sources].flatMap(([file, source]) =>
+    violations(source).map((violation) => `${file}: ${violation}`),
+  );
+  assert.deepEqual(found, []);
+});

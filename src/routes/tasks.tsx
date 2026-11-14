@@ -1,7 +1,6 @@
 import { useCallback, useId, type ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
-  infiniteQueryOptions,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
@@ -12,33 +11,15 @@ import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
 import type { Directory } from "@/components/model";
 import { useOpenRecord } from "@/components/open-record";
-import type { UpdateSource, UpdatesPage } from "@/components/server-types";
+import type { UpdatesPage } from "@/components/server-types";
 import { KanbanBoard, TaskDetail, UPDATE_LOG_ID } from "@/components/task";
 import { TaskTimeline } from "@/components/timeline";
 import { UpdateList } from "@/components/update-item";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
-import { listUpdates } from "@/lib/tasks.functions";
-import { tasksQuery } from "@/lib/task-data";
-
-type UpdateQuery = {
-  readonly agentId?: string | undefined;
-  readonly taskId?: string | undefined;
-  readonly source?: UpdateSource | undefined;
-  readonly since?: string | undefined;
-  readonly until?: string | undefined;
-};
+import { tasksQuery, updatePages, type UpdateQuery } from "@/lib/task-data";
 
 const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
-
-function updatePages(query: UpdateQuery) {
-  return infiniteQueryOptions({
-    queryKey: ["updates", query],
-    queryFn: ({ pageParam }) => listUpdates({ data: { ...query, cursor: pageParam } }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
-  });
-}
 
 type TasksSearch = ReturnType<typeof lists.board.validate> &
   ReturnType<typeof lists.updateLog.validate> & { view?: "timeline" | undefined };

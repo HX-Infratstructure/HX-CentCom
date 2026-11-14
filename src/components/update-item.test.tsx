@@ -5,7 +5,7 @@ import type { AgentRef, Directory } from "./model";
 import type { TaskUpdate } from "./server-types";
 import { UpdateItem } from "./update-item";
 
-// A name the seed roster does not use, so this file restates no agent (tests/fixround/agent-roster.test.ts).
+// A name the seed roster does not use, so this file restates no agent (tests/codebase/agent-display-names.test.ts).
 const CC1: AgentRef = { id: "CC1", name: "Orchestrator", tone: "green", role: "agent" };
 const OWNER: AgentRef = { id: "Agent Zero", name: "Agent Zero", tone: "stone", role: "owner" };
 const DIRECTORY: Directory = {

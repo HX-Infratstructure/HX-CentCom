@@ -28,7 +28,7 @@ afterEach(async () => {
 const request = (sourceUrl: string): RequestDecisionInput => ({
   question: "Accept an HX-15 source on a decision?",
   summary: "A decision whose source exists only on HX-15.",
-  description: "B4's automation cites records that exist only on HX-15.",
+  description: "A RAID automation cites records that exist only on HX-15.",
   subject: "hx15 sources",
   gateType: "policy",
   options: [],

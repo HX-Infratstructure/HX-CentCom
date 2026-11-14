@@ -25,7 +25,13 @@ beforeAll(async () => {
     const source = SOURCES[i % SOURCES.length];
     if (!writer || !source) throw new Error("fixture tables are empty");
     const [name, taskId] = writer;
-    await h.svc.postProgress(h.as[name], taskId, { note: `t14 fixture ${i}`, source }, {});
+    await h.svc.postProgress(
+      h.as[name],
+      taskId,
+      { note: `t14 fixture ${i}`, source },
+      // Only the MCP adapter records source mcp; it passes via mcp.
+      source === "mcp" ? { via: "mcp" } : {},
+    );
   }
   // Give the fixtures known times: pairs share a timestamp, so a cursor that orders by time alone loses or repeats rows.
   const rows = await h.q<{ id: string; note: string }>(

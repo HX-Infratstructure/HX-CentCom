@@ -3,9 +3,11 @@ import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
 import { lists } from "./lists";
 import {
+  ATTENTION_LABELS,
   BLOCKED_ON_LABELS,
   REQUIREMENT_STATE_LABELS,
   TASK_GROUP_LABELS,
+  attentionOf,
   type TaskView,
 } from "./model";
 import {
@@ -22,6 +24,19 @@ import { FilterLink, RecordLink } from "./url-state";
 
 /** The id of the tasks page's update log section, which "Updates for <task>" scrolls to. */
 export const UPDATE_LOG_ID = "updates";
+
+const STALE_RULE =
+  "This task's commit is not its repository's head, an open pull request's head, or a merged pull request's merge commit.";
+
+/** Shown exactly when the overview counts the task under "Stale commit"; never for an unknown (null) state. */
+function StaleBadge({ task }: { task: TaskView }): ReactNode {
+  if (!attentionOf(task).includes("stale")) return null;
+  return (
+    <span className="attention" title={STALE_RULE}>
+      {ATTENTION_LABELS.stale}
+    </span>
+  );
+}
 
 /** Columns in TASK_GROUP_LABELS order. Read-only: no service writes `group`, so the board offers no drag. */
 export function KanbanBoard({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
@@ -80,6 +95,7 @@ function TaskCard({ task: t }: { task: TaskView }): ReactNode {
         ) : (
           <span className="quiet">Unassigned</span>
         )}
+        <StaleBadge task={t} />
       </div>
       <CoverageMeter progress={t.progress} compact />
       {t.blocked_on !== "none" && <p className="attention">{BLOCKED_ON_LABELS[t.blocked_on]}</p>}
@@ -112,6 +128,7 @@ export function TaskList({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
                 <span>Unassigned</span>
               )}
               <span>{t.statusLabel.label}</span>
+              <StaleBadge task={t} />
             </div>
             {t.blocked_on !== "none" && (
               <p className="attention">{BLOCKED_ON_LABELS[t.blocked_on]}</p>
@@ -146,14 +163,18 @@ export function TaskDetail({
 
 function TaskBody({ task: t }: { task: TaskView }): ReactNode {
   const requirementsId = useId();
+  const groupLabel = TASK_GROUP_LABELS[t.group];
   return (
     <>
       <p className="sheet-facts">
         <span>{t.statusLabel.label}</span>
-        <span>{TASK_GROUP_LABELS[t.group]}</span>
+        {groupLabel.toLowerCase() !== t.statusLabel.label.toLowerCase() && (
+          <span>{groupLabel}</span>
+        )}
         {t.blocked_on !== "none" && (
           <span className="attention">{BLOCKED_ON_LABELS[t.blocked_on]}</span>
         )}
+        <StaleBadge task={t} />
       </p>
       <CoverageMeter progress={t.progress} />
 

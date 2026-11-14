@@ -10,6 +10,7 @@ import { Route as requirements } from "@/routes/api/v1/tasks/$id/requirements";
 import { Route as postUpdate } from "@/routes/api/v1/tasks/$id/updates";
 import { Route as updates } from "@/routes/api/v1/updates";
 import { Route as workspace } from "@/routes/api/v1/workspace";
+import { DECISIONS } from "../services/seed-truth";
 import {
   errorOf,
   SOURCE_URL,
@@ -278,10 +279,9 @@ describe("GET /api/v1/decisions", () => {
     return (await res.json()) as DecisionsPage;
   }
 
-  async function seededIds(keep: (d: DecisionRow) => boolean): Promise<string[]> {
-    const res = await api.rest(workspace, "GET", "/api/v1/workspace");
-    expect(res.status, "GET /api/v1/workspace is 200").toBe(200);
-    const ids = ((await res.json()) as { decisions: DecisionRow[] }).decisions
+  // The workspace holds only open decisions now, so the expected ids come from the seed's hand-copied truth.
+  function seededIds(keep: (d: DecisionRow) => boolean): string[] {
+    const ids = DECISIONS.map((d) => ({ id: d.id, gate_type: d.gateType, status: d.status }))
       .filter(keep)
       .map((d) => d.id);
     expect(ids.length, "the seed has matching decisions").toBeGreaterThan(0);
@@ -294,7 +294,7 @@ describe("GET /api/v1/decisions", () => {
   ] as const)(
     "filtered by $filter=$value returns exactly the seeded decisions with that $field",
     async ({ filter, value, field }) => {
-      const expected = await seededIds((d) => d[field] === value);
+      const expected = seededIds((d) => d[field] === value);
       const page = await decisionsPage(`${filter}=${value}&limit=100`);
       expect(
         page.items.every((d) => d[field] === value),
@@ -306,7 +306,7 @@ describe("GET /api/v1/decisions", () => {
   );
 
   it("pages gateType=merge with limit=1 and the cursor until every matching decision is seen once", async () => {
-    const expected = await seededIds((d) => d.gate_type === "merge");
+    const expected = seededIds((d) => d.gate_type === "merge");
     expect(expected.length, "more than one page").toBeGreaterThan(1);
     const seen: string[] = [];
     let cursor: string | null = null;

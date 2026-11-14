@@ -10,9 +10,11 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as DecisionsRouteImport } from './routes/decisions'
 import { Route as LessonsRouteImport } from './routes/lessons'
 import { Route as McpRouteImport } from './routes/mcp'
+import { Route as PullRequestsRouteImport } from './routes/pull-requests'
 import { Route as RaidRouteImport } from './routes/raid'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as ApiV1SplatRouteImport } from './routes/api/v1/$'
@@ -23,10 +25,12 @@ import { Route as ApiV1LessonsRouteImport } from './routes/api/v1/lessons'
 import { Route as ApiV1RaidRouteImport } from './routes/api/v1/raid'
 import { Route as ApiV1UpdatesRouteImport } from './routes/api/v1/updates'
 import { Route as ApiV1WorkspaceRouteImport } from './routes/api/v1/workspace'
+import { Route as ApiV1GithubPrsRouteImport } from './routes/api/v1/github/prs'
 import { Route as ApiV1KeysIdRouteImport } from './routes/api/v1/keys/$id'
 import { Route as ApiV1LessonsIdRouteImport } from './routes/api/v1/lessons/$id'
 import { Route as ApiV1RaidIdRouteImport } from './routes/api/v1/raid/$id'
 import { Route as ApiV1TasksIdRouteImport } from './routes/api/v1/tasks/$id'
+import { Route as ApiV1ActivityIdRevertRouteImport } from './routes/api/v1/activity/$id/revert'
 import { Route as ApiV1DecisionsIdDecideRouteImport } from './routes/api/v1/decisions/$id/decide'
 import { Route as ApiV1TasksIdRequirementsRouteImport } from './routes/api/v1/tasks/$id/requirements'
 import { Route as ApiV1TasksIdUpdatesRouteImport } from './routes/api/v1/tasks/$id/updates'
@@ -34,6 +38,11 @@ import { Route as ApiV1TasksIdUpdatesRouteImport } from './routes/api/v1/tasks/$
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActivityRoute = ActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DecisionsRoute = DecisionsRouteImport.update({
@@ -49,6 +58,11 @@ const LessonsRoute = LessonsRouteImport.update({
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PullRequestsRoute = PullRequestsRouteImport.update({
+  id: '/pull-requests',
+  path: '/pull-requests',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RaidRoute = RaidRouteImport.update({
@@ -101,6 +115,11 @@ const ApiV1WorkspaceRoute = ApiV1WorkspaceRouteImport.update({
   path: '/api/v1/workspace',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1GithubPrsRoute = ApiV1GithubPrsRouteImport.update({
+  id: '/api/v1/github/prs',
+  path: '/api/v1/github/prs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiV1KeysIdRoute = ApiV1KeysIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -121,6 +140,11 @@ const ApiV1TasksIdRoute = ApiV1TasksIdRouteImport.update({
   path: '/api/v1/tasks/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1ActivityIdRevertRoute = ApiV1ActivityIdRevertRouteImport.update({
+  id: '/$id/revert',
+  path: '/$id/revert',
+  getParentRoute: () => ApiV1ActivityRoute,
+} as any)
 const ApiV1DecisionsIdDecideRoute = ApiV1DecisionsIdDecideRouteImport.update({
   id: '/$id/decide',
   path: '/$id/decide',
@@ -140,46 +164,54 @@ const ApiV1TasksIdUpdatesRoute = ApiV1TasksIdUpdatesRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/activity': typeof ActivityRoute
   '/decisions': typeof DecisionsRoute
   '/lessons': typeof LessonsRoute
   '/mcp': typeof McpRoute
+  '/pull-requests': typeof PullRequestsRoute
   '/raid': typeof RaidRoute
   '/tasks': typeof TasksRoute
   '/api/v1/$': typeof ApiV1SplatRoute
-  '/api/v1/activity': typeof ApiV1ActivityRoute
+  '/api/v1/activity': typeof ApiV1ActivityRouteWithChildren
   '/api/v1/decisions': typeof ApiV1DecisionsRouteWithChildren
   '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
   '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
   '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
   '/api/v1/updates': typeof ApiV1UpdatesRoute
   '/api/v1/workspace': typeof ApiV1WorkspaceRoute
+  '/api/v1/github/prs': typeof ApiV1GithubPrsRoute
   '/api/v1/keys/$id': typeof ApiV1KeysIdRoute
   '/api/v1/lessons/$id': typeof ApiV1LessonsIdRoute
   '/api/v1/raid/$id': typeof ApiV1RaidIdRoute
   '/api/v1/tasks/$id': typeof ApiV1TasksIdRouteWithChildren
+  '/api/v1/activity/$id/revert': typeof ApiV1ActivityIdRevertRoute
   '/api/v1/decisions/$id/decide': typeof ApiV1DecisionsIdDecideRoute
   '/api/v1/tasks/$id/requirements': typeof ApiV1TasksIdRequirementsRoute
   '/api/v1/tasks/$id/updates': typeof ApiV1TasksIdUpdatesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/activity': typeof ActivityRoute
   '/decisions': typeof DecisionsRoute
   '/lessons': typeof LessonsRoute
   '/mcp': typeof McpRoute
+  '/pull-requests': typeof PullRequestsRoute
   '/raid': typeof RaidRoute
   '/tasks': typeof TasksRoute
   '/api/v1/$': typeof ApiV1SplatRoute
-  '/api/v1/activity': typeof ApiV1ActivityRoute
+  '/api/v1/activity': typeof ApiV1ActivityRouteWithChildren
   '/api/v1/decisions': typeof ApiV1DecisionsRouteWithChildren
   '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
   '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
   '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
   '/api/v1/updates': typeof ApiV1UpdatesRoute
   '/api/v1/workspace': typeof ApiV1WorkspaceRoute
+  '/api/v1/github/prs': typeof ApiV1GithubPrsRoute
   '/api/v1/keys/$id': typeof ApiV1KeysIdRoute
   '/api/v1/lessons/$id': typeof ApiV1LessonsIdRoute
   '/api/v1/raid/$id': typeof ApiV1RaidIdRoute
   '/api/v1/tasks/$id': typeof ApiV1TasksIdRouteWithChildren
+  '/api/v1/activity/$id/revert': typeof ApiV1ActivityIdRevertRoute
   '/api/v1/decisions/$id/decide': typeof ApiV1DecisionsIdDecideRoute
   '/api/v1/tasks/$id/requirements': typeof ApiV1TasksIdRequirementsRoute
   '/api/v1/tasks/$id/updates': typeof ApiV1TasksIdUpdatesRoute
@@ -187,23 +219,27 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/activity': typeof ActivityRoute
   '/decisions': typeof DecisionsRoute
   '/lessons': typeof LessonsRoute
   '/mcp': typeof McpRoute
+  '/pull-requests': typeof PullRequestsRoute
   '/raid': typeof RaidRoute
   '/tasks': typeof TasksRoute
   '/api/v1/$': typeof ApiV1SplatRoute
-  '/api/v1/activity': typeof ApiV1ActivityRoute
+  '/api/v1/activity': typeof ApiV1ActivityRouteWithChildren
   '/api/v1/decisions': typeof ApiV1DecisionsRouteWithChildren
   '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
   '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
   '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
   '/api/v1/updates': typeof ApiV1UpdatesRoute
   '/api/v1/workspace': typeof ApiV1WorkspaceRoute
+  '/api/v1/github/prs': typeof ApiV1GithubPrsRoute
   '/api/v1/keys/$id': typeof ApiV1KeysIdRoute
   '/api/v1/lessons/$id': typeof ApiV1LessonsIdRoute
   '/api/v1/raid/$id': typeof ApiV1RaidIdRoute
   '/api/v1/tasks/$id': typeof ApiV1TasksIdRouteWithChildren
+  '/api/v1/activity/$id/revert': typeof ApiV1ActivityIdRevertRoute
   '/api/v1/decisions/$id/decide': typeof ApiV1DecisionsIdDecideRoute
   '/api/v1/tasks/$id/requirements': typeof ApiV1TasksIdRequirementsRoute
   '/api/v1/tasks/$id/updates': typeof ApiV1TasksIdUpdatesRoute
@@ -212,9 +248,11 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/activity'
     | '/decisions'
     | '/lessons'
     | '/mcp'
+    | '/pull-requests'
     | '/raid'
     | '/tasks'
     | '/api/v1/$'
@@ -225,19 +263,23 @@ export interface FileRouteTypes {
     | '/api/v1/raid'
     | '/api/v1/updates'
     | '/api/v1/workspace'
+    | '/api/v1/github/prs'
     | '/api/v1/keys/$id'
     | '/api/v1/lessons/$id'
     | '/api/v1/raid/$id'
     | '/api/v1/tasks/$id'
+    | '/api/v1/activity/$id/revert'
     | '/api/v1/decisions/$id/decide'
     | '/api/v1/tasks/$id/requirements'
     | '/api/v1/tasks/$id/updates'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/activity'
     | '/decisions'
     | '/lessons'
     | '/mcp'
+    | '/pull-requests'
     | '/raid'
     | '/tasks'
     | '/api/v1/$'
@@ -248,19 +290,23 @@ export interface FileRouteTypes {
     | '/api/v1/raid'
     | '/api/v1/updates'
     | '/api/v1/workspace'
+    | '/api/v1/github/prs'
     | '/api/v1/keys/$id'
     | '/api/v1/lessons/$id'
     | '/api/v1/raid/$id'
     | '/api/v1/tasks/$id'
+    | '/api/v1/activity/$id/revert'
     | '/api/v1/decisions/$id/decide'
     | '/api/v1/tasks/$id/requirements'
     | '/api/v1/tasks/$id/updates'
   id:
     | '__root__'
     | '/'
+    | '/activity'
     | '/decisions'
     | '/lessons'
     | '/mcp'
+    | '/pull-requests'
     | '/raid'
     | '/tasks'
     | '/api/v1/$'
@@ -271,10 +317,12 @@ export interface FileRouteTypes {
     | '/api/v1/raid'
     | '/api/v1/updates'
     | '/api/v1/workspace'
+    | '/api/v1/github/prs'
     | '/api/v1/keys/$id'
     | '/api/v1/lessons/$id'
     | '/api/v1/raid/$id'
     | '/api/v1/tasks/$id'
+    | '/api/v1/activity/$id/revert'
     | '/api/v1/decisions/$id/decide'
     | '/api/v1/tasks/$id/requirements'
     | '/api/v1/tasks/$id/updates'
@@ -282,19 +330,22 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActivityRoute: typeof ActivityRoute
   DecisionsRoute: typeof DecisionsRoute
   LessonsRoute: typeof LessonsRoute
   McpRoute: typeof McpRoute
+  PullRequestsRoute: typeof PullRequestsRoute
   RaidRoute: typeof RaidRoute
   TasksRoute: typeof TasksRoute
   ApiV1SplatRoute: typeof ApiV1SplatRoute
-  ApiV1ActivityRoute: typeof ApiV1ActivityRoute
+  ApiV1ActivityRoute: typeof ApiV1ActivityRouteWithChildren
   ApiV1DecisionsRoute: typeof ApiV1DecisionsRouteWithChildren
   ApiV1KeysRoute: typeof ApiV1KeysRouteWithChildren
   ApiV1LessonsRoute: typeof ApiV1LessonsRouteWithChildren
   ApiV1RaidRoute: typeof ApiV1RaidRouteWithChildren
   ApiV1UpdatesRoute: typeof ApiV1UpdatesRoute
   ApiV1WorkspaceRoute: typeof ApiV1WorkspaceRoute
+  ApiV1GithubPrsRoute: typeof ApiV1GithubPrsRoute
   ApiV1TasksIdRoute: typeof ApiV1TasksIdRouteWithChildren
 }
 
@@ -305,6 +356,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/activity': {
+      id: '/activity'
+      path: '/activity'
+      fullPath: '/activity'
+      preLoaderRoute: typeof ActivityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/decisions': {
@@ -326,6 +384,13 @@ declare module '@tanstack/react-router' {
       path: '/mcp'
       fullPath: '/mcp'
       preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pull-requests': {
+      id: '/pull-requests'
+      path: '/pull-requests'
+      fullPath: '/pull-requests'
+      preLoaderRoute: typeof PullRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/raid': {
@@ -398,6 +463,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1WorkspaceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/github/prs': {
+      id: '/api/v1/github/prs'
+      path: '/api/v1/github/prs'
+      fullPath: '/api/v1/github/prs'
+      preLoaderRoute: typeof ApiV1GithubPrsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/keys/$id': {
       id: '/api/v1/keys/$id'
       path: '/$id'
@@ -426,6 +498,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1TasksIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/activity/$id/revert': {
+      id: '/api/v1/activity/$id/revert'
+      path: '/$id/revert'
+      fullPath: '/api/v1/activity/$id/revert'
+      preLoaderRoute: typeof ApiV1ActivityIdRevertRouteImport
+      parentRoute: typeof ApiV1ActivityRoute
+    }
     '/api/v1/decisions/$id/decide': {
       id: '/api/v1/decisions/$id/decide'
       path: '/$id/decide'
@@ -449,6 +528,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ApiV1ActivityRouteChildren {
+  ApiV1ActivityIdRevertRoute: typeof ApiV1ActivityIdRevertRoute
+}
+
+const ApiV1ActivityRouteChildren: ApiV1ActivityRouteChildren = {
+  ApiV1ActivityIdRevertRoute: ApiV1ActivityIdRevertRoute,
+}
+
+const ApiV1ActivityRouteWithChildren = ApiV1ActivityRoute._addFileChildren(
+  ApiV1ActivityRouteChildren,
+)
 
 interface ApiV1DecisionsRouteChildren {
   ApiV1DecisionsIdDecideRoute: typeof ApiV1DecisionsIdDecideRoute
@@ -514,19 +605,22 @@ const ApiV1TasksIdRouteWithChildren = ApiV1TasksIdRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActivityRoute: ActivityRoute,
   DecisionsRoute: DecisionsRoute,
   LessonsRoute: LessonsRoute,
   McpRoute: McpRoute,
+  PullRequestsRoute: PullRequestsRoute,
   RaidRoute: RaidRoute,
   TasksRoute: TasksRoute,
   ApiV1SplatRoute: ApiV1SplatRoute,
-  ApiV1ActivityRoute: ApiV1ActivityRoute,
+  ApiV1ActivityRoute: ApiV1ActivityRouteWithChildren,
   ApiV1DecisionsRoute: ApiV1DecisionsRouteWithChildren,
   ApiV1KeysRoute: ApiV1KeysRouteWithChildren,
   ApiV1LessonsRoute: ApiV1LessonsRouteWithChildren,
   ApiV1RaidRoute: ApiV1RaidRouteWithChildren,
   ApiV1UpdatesRoute: ApiV1UpdatesRoute,
   ApiV1WorkspaceRoute: ApiV1WorkspaceRoute,
+  ApiV1GithubPrsRoute: ApiV1GithubPrsRoute,
   ApiV1TasksIdRoute: ApiV1TasksIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport

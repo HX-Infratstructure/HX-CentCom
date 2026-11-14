@@ -10,8 +10,8 @@ import {
   type Fixture,
 } from "./support";
 
-const B4_READS = ["list_lessons", "list_raid"];
-const B4_WRITES = ["add_lesson", "add_raid_item", "update_raid_item"];
+const RAID_LESSON_READS = ["list_lessons", "list_raid"];
+const RAID_LESSON_WRITES = ["add_lesson", "add_raid_item", "update_raid_item"];
 
 let h: Fixture;
 const clients: Client[] = [];
@@ -32,17 +32,18 @@ async function client(agentId?: string): Promise<Client> {
 const names = async (c: Client) => (await c.listTools()).tools.map((t) => t.name);
 
 describe("MCP tools for the RAID register and the lessons log (SPEC §6.1)", () => {
-  it("lists B4's read tools to anonymous callers and no B4 write tool", async () => {
+  it("lists the RAID and lesson read tools to anonymous callers and none of their write tools", async () => {
     const listed = await names(await client());
-    for (const name of B4_READS) expect(listed).toContain(name);
-    for (const name of B4_WRITES) expect(listed).not.toContain(name);
+    for (const name of RAID_LESSON_READS) expect(listed).toContain(name);
+    for (const name of RAID_LESSON_WRITES) expect(listed).not.toContain(name);
   });
 
   it("lists all five to a keyed agent, with honest annotations", async () => {
     const { tools } = await (await client("CC2")).listTools();
     const byName = new Map(tools.map((t) => [t.name, t.annotations]));
-    for (const name of [...B4_READS, ...B4_WRITES]) expect(byName.has(name), name).toBe(true);
-    for (const name of B4_READS)
+    for (const name of [...RAID_LESSON_READS, ...RAID_LESSON_WRITES])
+      expect(byName.has(name), name).toBe(true);
+    for (const name of RAID_LESSON_READS)
       expect(byName.get(name)).toEqual({ readOnlyHint: true, openWorldHint: false });
     const write = { readOnlyHint: false, idempotentHint: false, openWorldHint: false };
     expect(byName.get("add_raid_item")).toEqual({ ...write, destructiveHint: false });

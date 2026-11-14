@@ -11,6 +11,7 @@ import {
   REQUIREMENT_STATES,
   UPDATE_SOURCES,
   type UpdateKind,
+  type UpdateSource,
 } from "@/server/db/schema";
 import { SOURCE_REF_PATTERN } from "@/server/db/schema-raid";
 import { ServiceError, type Issue } from "./errors";
@@ -33,6 +34,39 @@ export const sourceRef = z
   .trim()
   .max(2000)
   .regex(new RegExp(SOURCE_REF_PATTERN), "must be an http(s) URL or hx15:<absolute path>");
+
+const INSTANT =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?:Z|([+-])(\d{2}):?(\d{2}))$/;
+
+/**
+ * PostgreSQL refuses year 0000 and offsets beyond ±15:59; isoTimestamp.fromDriver reads back only UTC years 0001-9999.
+ * Years change on whole seconds, and PostgreSQL's rounding to microseconds reaches the next second only from
+ * .9999995. `setUTCFullYear` because `Date.UTC` maps years 0-99 to 1900-1999.
+ */
+function storedAndReadBack(value: string): boolean {
+  const m = INSTANT.exec(value);
+  if (!m) return false;
+  const [, year, month, day, hour, minute, second = "0", fraction = "", sign, oh = "0", om = "0"] =
+    m;
+  if (Number(year) < 1 || Number(oh) > 15 || Number(om) > 59) return false;
+  const instant = new Date(0);
+  instant.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  instant.setUTCHours(Number(hour), Number(minute), Number(second), 0);
+  const offsetMs = (sign === "-" ? -1 : 1) * (Number(oh) * 60 + Number(om)) * 60_000;
+  const carryMs = /^9{6}[5-9]/.test(fraction) ? 1000 : 0;
+  const utcYear = new Date(instant.getTime() - offsetMs + carryMs).getUTCFullYear();
+  return utcYear >= 1 && utcYear <= 9999;
+}
+
+/** P3-6: an instant that PostgreSQL stores and that reads back, so a bad one is a 400 before any write. */
+export const pgInstant = z
+  .string()
+  .datetime({ offset: true })
+  .refine(
+    storedAndReadBack,
+    "must be a UTC instant in years 0001-9999 with an offset within ±15:59",
+  );
+
 const id = z.string().trim().min(1).max(100);
 const commitSha = z
   .string()
@@ -42,6 +76,8 @@ const commitSha = z
 const noTypedProgress = z
   .never({ message: "progress is computed from requirements and cannot be set" })
   .optional();
+
+const decisionQuestion = z.string().trim().min(1).max(500);
 
 export const postProgressInput = z.object({
   kind: z.enum(POSTED_KINDS).default("progress"),
@@ -56,7 +92,30 @@ export const postProgressInput = z.object({
   source: z.enum(UPDATE_SOURCES),
   runId: z.string().trim().min(1).max(200).optional(),
   progress: noTypedProgress,
+  /** F7a: overrides for the decision that a move into Ready for owner opens; any other update ignores it. */
+  decision: z
+    .object({ question: decisionQuestion.optional(), gateType: z.enum(GATE_TYPES).optional() })
+    .optional(),
 });
+
+type BodySource = Exclude<UpdateSource, "mcp">;
+const BODY_SOURCES = UPDATE_SOURCES.filter((s): s is BodySource => s !== "mcp") as [
+  BodySource,
+  ...BodySource[],
+];
+
+/**
+ * What postProgressPlan parses: a body may record any source but mcp, which only the MCP adapter records, through the
+ * `via` option that no REST body or header sets. The rule is in the schema, so one 400 lists it beside other fields.
+ */
+export const bodyProgressInput = postProgressInput.extend({
+  source: z.enum(BODY_SOURCES, {
+    errorMap: () => ({
+      message: `must be ${BODY_SOURCES.join(", ")}; only the /mcp endpoint records mcp`,
+    }),
+  }),
+});
+export const mcpProgressInput = postProgressInput.extend({ source: z.literal("mcp") });
 
 export const setRequirementInput = z
   .object({
@@ -87,48 +146,30 @@ export const setRequirementInput = z
     proofUrl: v.proofUrl ?? null,
   }));
 
-export const requestDecisionInput = z
-  .object({
-    question: z.string().trim().min(1).max(500),
-    // UTF-16 length is never below char_length, so this check always fires before the database's.
-    summary: z.string().trim().min(1).max(140),
-    description: z.string().trim().min(1).max(20000),
-    subject: z.string().trim().min(1).max(500),
-    gateType: z.enum(GATE_TYPES),
-    options: z
-      .array(
-        z
-          .object({
-            label: z.string().trim().min(1).max(200),
-            description: z.string().trim().min(1).max(2000).optional(),
-            recommended: z.boolean().default(false),
-          })
-          .transform(({ description, ...option }) =>
-            description === undefined ? option : { ...option, description },
-          ),
-      )
-      .max(10),
-    blocks: z.array(id).max(20),
-    sourceUrl: sourceRef,
-    recommendedBy: id.optional(),
-  })
-  .superRefine((v, ctx) => {
-    const recommended = v.options.filter((o) => o.recommended).length;
-    if (recommended > 0 && v.recommendedBy === undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["recommendedBy"],
-        message: "a recommended option needs recommendedBy",
-      });
-    }
-    if (recommended === 0 && v.recommendedBy !== undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["recommendedBy"],
-        message: "recommendedBy needs a recommended option",
-      });
-    }
-  });
+/** No recommendedBy: the server records the requester as the recommender of a recommended option (P3-8). */
+export const requestDecisionInput = z.object({
+  question: decisionQuestion,
+  // UTF-16 length is never below char_length, so this check always fires before the database's.
+  summary: z.string().trim().min(1).max(140),
+  description: z.string().trim().min(1).max(20000),
+  subject: z.string().trim().min(1).max(500),
+  gateType: z.enum(GATE_TYPES),
+  options: z
+    .array(
+      z
+        .object({
+          label: z.string().trim().min(1).max(200),
+          description: z.string().trim().min(1).max(2000).optional(),
+          recommended: z.boolean().default(false),
+        })
+        .transform(({ description, ...option }) =>
+          description === undefined ? option : { ...option, description },
+        ),
+    )
+    .max(10),
+  blocks: z.array(id).max(20),
+  sourceUrl: sourceRef,
+});
 
 export const decideInput = z.object({
   status: z.enum(OWNER_DECISION_STATUSES),
@@ -139,7 +180,6 @@ export const decideInput = z.object({
 export const issueKeyInput = z.object({ agentId: id, label: z.string().trim().min(1).max(100) });
 export const revokeKeyInput = z.object({ keyId: z.string().uuid() });
 
-const isoDateTime = z.string().datetime({ offset: true });
 const limit = z.coerce.number().int().min(1).max(100).default(20);
 const cursor = z.string().min(1).max(500);
 
@@ -147,9 +187,11 @@ export const updateQueryInput = z
   .object({
     agentId: id.optional(),
     taskId: id.optional(),
+    /** Updates of any of these tasks (the needs-attention feed). listUpdates refuses it beside `taskId`. */
+    taskIds: z.array(id).min(1).max(100).optional(),
     source: z.enum(UPDATE_SOURCES).optional(),
-    since: isoDateTime.optional(),
-    until: isoDateTime.optional(),
+    since: pgInstant.optional(),
+    until: pgInstant.optional(),
     limit,
     cursor: cursor.optional(),
   })
@@ -160,7 +202,7 @@ export const activityQueryInput = z
     actor: id.optional(),
     entity: z.enum(ACTIVITY_ENTITIES).optional(),
     entityId: id.optional(),
-    since: isoDateTime.optional(),
+    since: pgInstant.optional(),
     limit,
     cursor: cursor.optional(),
   })

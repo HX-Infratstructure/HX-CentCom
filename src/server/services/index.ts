@@ -5,7 +5,15 @@
 import type { Db } from "@/server/db/client";
 import { mintKey, resolveActor } from "./actor";
 import { createWriter } from "./pipeline";
-import { listActivity, listDecisions, listUpdates, listWorkspace } from "./reads";
+import {
+  getDecision,
+  getTask,
+  listActivity,
+  listDecisions,
+  listUpdates,
+  listWorkspace,
+  myWork,
+} from "./reads";
 import {
   createLessonPlan,
   listLessons,
@@ -13,8 +21,11 @@ import {
   withLessonsAsk,
   type LessonServices,
 } from "./lessons";
+import { listGithubPrs } from "./github";
 import { createRaidItemPlan, listRaid, updateRaidItemPlan, type RaidServices } from "./raid";
+import { revertPlan } from "./revert";
 import type { IssuedKey, ServiceDeps, Services as CoreServices } from "./types";
+import { withDecidedWebhook } from "./webhook";
 import {
   bootstrapOwnerKeyPlan,
   decidePlan,
@@ -26,27 +37,39 @@ import {
 } from "./writes";
 
 export function serviceDeps(overrides: Partial<ServiceDeps> = {}): ServiceDeps {
-  return { now: overrides.now ?? (() => new Date()), mintKey: overrides.mintKey ?? mintKey };
+  return {
+    now: overrides.now ?? (() => new Date()),
+    mintKey: overrides.mintKey ?? mintKey,
+    fetch: overrides.fetch ?? ((input, init) => fetch(input, init)),
+    webhook: overrides.webhook ?? null,
+  };
 }
 
 export function createServices(db: Db, deps: Partial<ServiceDeps> = {}): Services {
-  const write = createWriter(db, serviceDeps(deps));
+  const resolved = serviceDeps(deps);
+  const write = createWriter(db, resolved);
   return {
     resolveActor: (authHeader) => resolveActor(db, authHeader),
     listWorkspace: () => listWorkspace(db),
     listUpdates: (query) => listUpdates(db, query),
     listActivity: (query) => listActivity(db, query),
     listDecisions: (query) => listDecisions(db, query),
+    getDecision: (decisionId) => getDecision(db, decisionId),
+    getTask: (taskId) => getTask(db, taskId),
+    myWork: (actor, agentId) => myWork(db, actor, agentId),
+    listGithubPrs: (query) => listGithubPrs(db, query),
     postProgress: (actor, taskId, input, opts = {}) =>
-      write.update(actor, input, opts, withLessonsAsk(postProgressPlan(taskId))),
+      write.update(actor, input, opts, withLessonsAsk(postProgressPlan(taskId, opts.via))),
     setRequirement: (actor, taskId, input, opts = {}) =>
       write.update(actor, input, opts, setRequirementPlan(taskId)),
     requestDecision: (actor, input, opts = {}) =>
       write.create(actor, input, opts, requestDecisionPlan),
     decide: (actor, decisionId, input, opts = {}) =>
-      write.update(actor, input, opts, decidePlan(decisionId)),
+      write.update(actor, input, opts, withDecidedWebhook(decidePlan(decisionId), resolved)),
     issueKey: (actor, agentId, label) => write.keys(actor, { agentId, label }, issueKeyPlan),
     revokeKey: (actor, keyId) => write.keys(actor, { keyId }, revokeKeyPlan),
+    revertActivity: async (actor, activityId, opts = {}) =>
+      write.update(actor, { activityId }, opts, await revertPlan(db, actor, activityId)),
     listRaid: (query) => listRaid(db, query),
     createRaidItem: (actor, input, opts = {}) =>
       write.create(actor, input, opts, createRaidItemPlan),
@@ -59,7 +82,10 @@ export function createServices(db: Db, deps: Partial<ServiceDeps> = {}): Service
   };
 }
 
-/** Shadows the `Services` of `export type * from "./types"` below, so every importer sees B4's methods too. */
+/**
+ * Shadows the `Services` of `export type * from "./types"` below, so every importer also sees the RAID and lesson
+ * methods.
+ */
 export type Services = CoreServices & RaidServices & LessonServices;
 
 /**
@@ -85,13 +111,19 @@ export {
   type ServiceErrorBody,
 } from "./errors";
 export { POLICY } from "./policy";
+export { webhookConfig, type WebhookConfig } from "./webhook";
 export {
   recordGithubSnapshot,
   listOpenGithubPrs,
+  githubPrQueryInput,
+  GITHUB_PR_STATES,
   type GithubSnapshot,
   type GithubRepoInput,
   type GithubPrInput,
   type GithubPrState,
+  type GithubPrQueryInput,
+  type GithubPrCounts,
+  type GithubPrsPage,
 } from "./github";
 export {
   issueKeyInput,

@@ -1,6 +1,6 @@
-// B4's own test helpers (SPEC §8.1: tests never import another component's private helpers). They use only
-// createTestDb, the public exports of @/server/services and B4's own route modules, and check database state with
-// plain SQL against the SPEC §6.1 table and column names.
+// Test helpers for the RAID register and the lessons log (SPEC §8.1: tests never import another component's
+// private helpers). They use only createTestDb, the public exports of @/server/services and the route modules, and
+// check database state with plain SQL against the SPEC §6.1 table and column names.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { expect } from "vitest";
@@ -165,7 +165,7 @@ export function rest(
       context: { services },
       pathname: new URL(request.url).pathname,
       next: () => {
-        throw new Error("B4 handlers never call next()");
+        throw new Error("route handlers never call next()");
       },
     }),
   );

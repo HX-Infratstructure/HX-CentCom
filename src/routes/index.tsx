@@ -1,7 +1,6 @@
 import { useCallback, useId, type ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
-  infiniteQueryOptions,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
@@ -10,42 +9,91 @@ import { adaptUpdatePages, adaptWorkspace, toAppError } from "@/components/adapt
 import { DecisionList } from "@/components/decision";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
-import { splitInbox, type Directory, type TaskView } from "@/components/model";
+import {
+  ATTENTION_LABELS,
+  attentionOf,
+  openTasks,
+  splitInbox,
+  type Attention,
+  type Directory,
+  type TaskView,
+} from "@/components/model";
 import { PullRequestList } from "@/components/pull-request";
-import type { UpdatesPage } from "@/components/server-types";
+import type { UpdateCounts, UpdatesPage } from "@/components/server-types";
 import { TaskList } from "@/components/task";
 import { UpdateList } from "@/components/update-item";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
-import { listUpdates } from "@/lib/tasks.functions";
-import { tasksQuery } from "@/lib/task-data";
+import { prPages, tasksQuery, updatePages, type PrQuery, type UpdateQuery } from "@/lib/task-data";
 
-type FeedQuery = { readonly agentId?: string | undefined; readonly taskId?: string | undefined };
+type FeedFilters = { readonly agentId?: string | undefined; readonly taskId?: string | undefined };
+type OverviewDeps = FeedFilters & { readonly attention?: Attention | undefined };
+type OpenTaskFilters = ReturnType<typeof lists.openTasks.filters>;
 
 const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
 const DECISIONS_SHOWN = 5;
 const PRS_SHOWN = 8;
+const OPEN_PRS: PrQuery = { state: "open" };
 
-function updatePages(query: FeedQuery) {
-  return infiniteQueryOptions({
-    queryKey: ["updates", query],
-    queryFn: ({ pageParam }) => listUpdates({ data: { ...query, cursor: pageParam } }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
-  });
+/** The Open tasks list: blocked first, filtered and counted by its attention facet. */
+function openTaskRows(tasks: readonly TaskView[], filters: OpenTaskFilters) {
+  return lists.openTasks.local(openTasks(tasks), filters, { attention: attentionOf });
+}
+
+/** The ids of the rows the Open tasks list shows under `attention`. */
+function tasksNeeding(attention: Attention, tasks: readonly TaskView[]): readonly string[] {
+  return openTaskRows(tasks, { attention }).items.map((t) => t.id);
+}
+
+/**
+ * The feed's read. The feed's filters and the attention filter combine with AND, so a reason narrows the feed to
+ * `attentionIds`, its open tasks. null when no update can match: the feed then sends no request, and never `taskId`
+ * beside `taskIds` or an empty `taskIds`.
+ */
+function feedQuery(
+  { agentId, taskId }: FeedFilters,
+  attentionIds: readonly string[] | undefined,
+): UpdateQuery | null {
+  if (attentionIds === undefined) return { agentId, taskId };
+  if (taskId !== undefined) return attentionIds.includes(taskId) ? { agentId, taskId } : null;
+  return attentionIds.length === 0 ? null : { agentId, taskIds: [...attentionIds] };
 }
 
 export const Route = createFileRoute("/")({
-  validateSearch: (raw) => lists.overviewFeed.validate(raw),
-  loaderDeps: ({ search }): FeedQuery => {
+  validateSearch: (raw) => ({
+    ...lists.overviewFeed.validate(raw),
+    ...lists.openTasks.validate(raw),
+  }),
+  loaderDeps: ({ search }): OverviewDeps => {
     const feed = lists.overviewFeed.filters(search);
-    return { agentId: feed.agent, taskId: feed.task };
+    return {
+      agentId: feed.agent,
+      taskId: feed.task,
+      attention: lists.openTasks.filters(search).attention,
+    };
   },
-  loader: async ({ context: { queryClient }, deps }) => {
-    await Promise.all([
-      queryClient.ensureQueryData(tasksQuery),
-      queryClient.ensureInfiniteQueryData(updatePages(deps)),
+  /**
+   * Returns the feed's read and the reason's tasks, so the feed keeps what this load fetched. Rebuilt from a workspace
+   * that refetched since, they could name a set of tasks no load fetched, and the feed would suspend.
+   */
+  loader: async ({ context: { queryClient }, deps: { attention, ...feed } }) => {
+    const workspace = queryClient.ensureQueryData(tasksQuery);
+    // Only a reason makes the feed wait for the workspace, because its read names the reason's open tasks.
+    const loadFeed = async () => {
+      const attentionIds =
+        attention === undefined
+          ? undefined
+          : tasksNeeding(attention, adaptWorkspace(await workspace).tasks);
+      const query = feedQuery(feed, attentionIds);
+      if (query !== null) await queryClient.ensureInfiniteQueryData(updatePages(query));
+      return { feed: query, attentionIds };
+    };
+    const [, feedRead] = await Promise.all([
+      workspace,
+      loadFeed(),
+      queryClient.ensureInfiniteQueryData(prPages(OPEN_PRS)),
     ]);
+    return feedRead;
   },
   head: () => ({
     meta: [
@@ -65,23 +113,14 @@ export const Route = createFileRoute("/")({
   component: Overview,
 });
 
-/** Blocked tasks first, then the rest of the unfinished work in workspace order. */
-function openTasks(tasks: readonly TaskView[]): readonly TaskView[] {
-  const open = tasks.filter((t) => t.blocked_on !== "none" || t.group !== "done");
-  return [
-    ...open.filter((t) => t.blocked_on !== "none"),
-    ...open.filter((t) => t.blocked_on === "none"),
-  ];
-}
-
 function Overview(): ReactNode {
+  const search = Route.useSearch();
   const { data: ws } = useSuspenseQuery(workspaceQuery);
   const pending = splitInbox(ws.decisions).pending;
-  const tasks = openTasks(ws.tasks);
-  const prs = ws.prs.filter((pr) => pr.state === "open");
+  const taskFilters = lists.openTasks.filters(search);
+  const tasks = openTaskRows(ws.tasks, taskFilters);
   const decisionsId = useId();
   const tasksId = useId();
-  const prsId = useId();
 
   return (
     <Workspace page="Overview">
@@ -108,55 +147,107 @@ function Overview(): ReactNode {
 
         <section aria-labelledby={tasksId} className="overview-tasks">
           <h2 id={tasksId} className="section-title">
-            Open tasks <span className="count">{tasks.length}</span>
+            Open tasks <span className="count">{tasks.items.length}</span>
           </h2>
-          {tasks.length === 0 ? (
-            <EmptyState>Every task is done and nothing is blocked.</EmptyState>
+          <FilterBar search={lists.openTasks} counts={tasks.counts} label="Filter open tasks" />
+          {tasks.items.length === 0 ? (
+            <EmptyState>
+              {lists.openTasks.active(taskFilters)
+                ? "No open tasks match these filters."
+                : "Every task is done and nothing is blocked."}
+            </EmptyState>
           ) : (
-            <TaskList tasks={tasks} />
+            <TaskList tasks={tasks.items} />
           )}
         </section>
 
-        <section aria-labelledby={prsId} className="overview-prs">
-          <h2 id={prsId} className="section-title">
-            Open pull requests <span className="count">{prs.length}</span>
-          </h2>
-          {prs.length === 0 ? (
-            <EmptyState>
-              {ws.prs.length === 0
-                ? "No GitHub sync has stored pull requests yet."
-                : "The last GitHub sync found no open pull requests."}
-            </EmptyState>
-          ) : (
-            <PullRequestList prs={prs.slice(0, PRS_SHOWN)} />
-          )}
-        </section>
+        <OpenPullRequests />
       </div>
     </Workspace>
   );
 }
 
+/** The first rows of the open PRs in the server's order (newest first); the heading counts all of them. */
+function OpenPullRequests(): ReactNode {
+  const headingId = useId();
+  const { items, counts } = useSuspenseInfiniteQuery(prPages(OPEN_PRS)).data;
+  const total = counts?.total ?? 0;
+  const stored = counts?.stored ?? 0;
+  return (
+    <section aria-labelledby={headingId} className="overview-prs">
+      <h2 id={headingId} className="section-title">
+        Open pull requests <span className="count">{total}</span>
+      </h2>
+      {total === 0 ? (
+        <EmptyState>
+          {stored === 0
+            ? "No GitHub sync has stored pull requests yet."
+            : "The last GitHub sync found no open pull requests."}
+        </EmptyState>
+      ) : (
+        <PullRequestList prs={items.slice(0, PRS_SHOWN)} />
+      )}
+      {total > PRS_SHOWN ? (
+        <Link to="/pull-requests" search={OPEN_PRS} className="text-link section-link">
+          All {total} open pull requests
+        </Link>
+      ) : (
+        stored > 0 && (
+          <Link to="/pull-requests" className="text-link section-link">
+            All pull requests
+          </Link>
+        )
+      )}
+    </section>
+  );
+}
+
+/** The attention control stays on the Open tasks list; the feed names the reason it applies. */
 function Feed({ dir }: { dir: Directory }): ReactNode {
   const headingId = useId();
-  const query = Route.useLoaderDeps();
+  const { attention, agentId, taskId } = Route.useLoaderDeps();
+  const query = Route.useLoaderData({ select: (data) => data.feed });
+  const filtered = attention !== undefined || agentId !== undefined || taskId !== undefined;
+  return (
+    <section aria-labelledby={headingId} className="overview-feed">
+      <h2 id={headingId} className="section-title">
+        Latest updates
+      </h2>
+      {attention !== undefined && (
+        <p className="quiet">
+          Only updates on open tasks that need attention: {ATTENTION_LABELS[attention]}
+        </p>
+      )}
+      {query === null ? (
+        <>
+          <FeedFilters dir={dir} counts={null} />
+          <EmptyState>No updates match these filters.</EmptyState>
+        </>
+      ) : (
+        <FeedPages dir={dir} query={query} filtered={filtered} />
+      )}
+    </section>
+  );
+}
+
+function FeedPages({
+  dir,
+  query,
+  filtered,
+}: {
+  dir: Directory;
+  query: UpdateQuery;
+  filtered: boolean;
+}): ReactNode {
   const select = useCallback(
     (data: InfiniteData<UpdatesPage, string | undefined>) => adaptUpdatePages(data.pages, dir),
     [dir],
   );
   const pages = useSuspenseInfiniteQuery({ ...updatePages(query), select });
   const { items, counts } = pages.data;
-  const filtered = query.agentId !== undefined || query.taskId !== undefined;
   return (
-    <section aria-labelledby={headingId} className="overview-feed">
-      <h2 id={headingId} className="section-title">
-        Latest updates
-      </h2>
-      <FilterBar
-        search={lists.overviewFeed}
-        counts={{ agent: counts?.byAgent ?? {}, task: counts?.byTask ?? {} }}
-        label="Filter updates"
-        agents={dir.agents}
-      />
+    <>
+      <FeedFilters dir={dir} counts={counts} />
       {items.length === 0 ? (
         <EmptyState>
           {filtered ? "No updates match these filters." : "No agent has posted an update yet."}
@@ -173,6 +264,27 @@ function Feed({ dir }: { dir: Directory }): ReactNode {
         error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
         onShowMore={() => void pages.fetchNextPage()}
       />
-    </section>
+    </>
+  );
+}
+
+/**
+ * With no read (null counts), each facet shows only its active chip. Under a reason the Task chips offer only the
+ * reason's tasks, because the server's task counts leave out the feed's own `taskIds`.
+ */
+function FeedFilters({ dir, counts }: { dir: Directory; counts: UpdateCounts | null }): ReactNode {
+  const attentionIds = Route.useLoaderData({ select: (data) => data.attentionIds });
+  const byTask = counts?.byTask ?? {};
+  const task =
+    attentionIds === undefined
+      ? byTask
+      : Object.fromEntries(Object.entries(byTask).filter(([id]) => attentionIds.includes(id)));
+  return (
+    <FilterBar
+      search={lists.overviewFeed}
+      counts={{ agent: counts?.byAgent ?? {}, task }}
+      label="Filter updates"
+      agents={dir.agents}
+    />
   );
 }

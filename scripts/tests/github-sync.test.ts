@@ -112,11 +112,13 @@ function baseRoutes(): Routes {
   };
 }
 
-function stubGitHub(routes: Routes, reject?: Error) {
+function stubGitHub(routes: Routes, reject?: (init: RequestInit) => Error) {
   const calls: Call[] = [];
   const fetch: Fetch = async (url, init) => {
     calls.push({ url, init });
-    if (reject) throw reject;
+    // Node's fetch validates the request this way before it sends anything.
+    new Request(url, init);
+    if (reject) throw reject(init);
     const route = routes[url];
     if (route === undefined)
       return new Response(JSON.stringify({ message: `no canned response for ${url}` }), {
@@ -183,7 +185,7 @@ function output() {
 interface RunOptions {
   open?: OpenPr[];
   saveError?: Error;
-  reject?: Error;
+  reject?: (init: RequestInit) => Error;
   mode?: number;
   env?: Record<string, string | undefined>;
   printToProcess?: boolean;
@@ -208,6 +210,14 @@ async function run(routes: Routes, options: RunOptions = {}) {
     stdout: stdout.text(),
     stderr: stderr.text(),
   };
+}
+
+/** Every 8-character run of `secret` that appears in the printed output. */
+function printedParts(chunks: readonly string[], secret: string): string[] {
+  const printed = chunks.join("");
+  return Array.from({ length: secret.length - 7 }, (_, i) => secret.slice(i, i + 8)).filter(
+    (part) => printed.includes(part),
+  );
 }
 
 function captureProcessOutput() {
@@ -245,13 +255,13 @@ function captureProcessOutput() {
 }
 
 describe("only GET requests to api.github.com", () => {
-  test("every request of a full run is a GET to https://api.github.com/ that refuses redirects", async () => {
+  test("every request of a full run is a GET to https://api.github.com/ that never follows a redirect", async () => {
     const result = await run(baseRoutes());
     assert.equal(result.code, 0, result.stderr);
     assert.ok(result.calls.length > 0, "the run sent requests");
     for (const { url, init } of result.calls) {
       assert.equal(init.method, "GET", url);
-      assert.equal(init.redirect, "error", url);
+      assert.equal(init.redirect, "manual", url);
       assert.ok(url.startsWith("https://api.github.com/"), url);
     }
   });
@@ -305,11 +315,30 @@ describe("the token is never printed", () => {
       line: /^github-sync failed: GitHub GET \/orgs\/HX-Infratstructure\/repos\?type=all&per_page=100 -> 401: Bad credentials\n$/,
     },
     {
-      name: "fetch rejects",
+      name: "fetch rejects with the header value in its message, as Node 22 does for an invalid header",
       routes: baseRoutes(),
-      options: { reject: new Error("socket hang up") },
+      options: {
+        reject: (init) =>
+          new TypeError(
+            `Headers.append: "${new Headers(init.headers).get("authorization")}" is an invalid header value.`,
+          ),
+      },
       code: 1,
-      line: /^github-sync failed: .*socket hang up/,
+      line: /^github-sync failed: GitHub GET \/orgs\/HX-Infratstructure\/repos\?type=all&per_page=100 -> request failed \(TypeError\)\n$/,
+    },
+    {
+      name: "fetch cannot connect",
+      routes: baseRoutes(),
+      options: {
+        reject: () =>
+          new TypeError("fetch failed", {
+            cause: Object.assign(new Error("connect ECONNREFUSED 140.82.121.6:443"), {
+              code: "ECONNREFUSED",
+            }),
+          }),
+      },
+      code: 1,
+      line: /^github-sync failed: GitHub GET \/orgs\/HX-Infratstructure\/repos\?type=all&per_page=100 -> request failed \(ECONNREFUSED\)\n$/,
     },
     {
       name: "store.save throws",
@@ -334,13 +363,40 @@ describe("the token is never printed", () => {
         new Headers(result.calls[0]?.init.headers).get("authorization"),
         `Bearer ${TOKEN}`,
       );
+      assert.deepEqual(printedParts(captured.chunks, TOKEN), [], "no part of the token is printed");
       assert.ok(
         captured.chunks.some((chunk) => scenario.line.test(chunk)),
         `no result line in ${inspect(captured.chunks)}`,
       );
-      assert.ok(!captured.chunks.join("").includes(TOKEN), "the token appeared in printed output");
     });
   }
+
+  test("a two-line token file is refused, under Node's own header validation, without printing any part of it", async () => {
+    const lines = ["ghp_FirstLineOfATwoLineTokenFile00001", "SecondLineOfATwoLineTokenFile00002"];
+    const captured = captureProcessOutput();
+    let result: Awaited<ReturnType<typeof run>>;
+    try {
+      result = await run(baseRoutes(), {
+        env: { GITHUB_TOKEN_FILE: tokenFile(0o600, `${lines.join("\n")}\n`) },
+        printToProcess: true,
+      });
+    } finally {
+      captured.restore();
+    }
+    assert.equal(result.code, 1);
+    for (const line of lines) {
+      assert.deepEqual(printedParts(captured.chunks, line), [], "no part of the token is printed");
+    }
+    assert.equal(result.calls.length, 0, "no request was sent");
+    assert.ok(
+      captured.chunks.some((chunk) =>
+        /^github-sync failed: GITHUB_TOKEN_FILE \S+ must hold one token of printable ASCII, with no space, line break or control character inside\n$/.test(
+          chunk,
+        ),
+      ),
+      `no refusal line in ${inspect(captured.chunks)}`,
+    );
+  });
 });
 
 describe("token file rules", () => {
@@ -386,6 +442,18 @@ describe("token file rules", () => {
       path: () => tokenFile(0o600, " \n"),
       reason: /is empty/,
     },
+    ...Object.entries({
+      "two lines": "ghp_one\nghp_two\n",
+      "a space inside": "ghp_one two\n",
+      "a tab inside": "ghp_one\ttwo\n",
+      "a control character inside": "ghp_one\u0007two\n",
+      "a non-ASCII character": "ghp_oné\n",
+    }).map(([shape, content]) => ({
+      name: `a token file with ${shape}`,
+      path: () => tokenFile(0o600, content),
+      reason:
+        /must hold one token of printable ASCII, with no space, line break or control character inside\n$/,
+    })),
   ];
   for (const { name, path, reason } of unusable) {
     test(`${name} is refused before any request or store call`, async () => {
@@ -419,7 +487,6 @@ describe("PR state", () => {
       open: [
         { id: 101, repo: "alpha", number: 1 },
         { id: 105, repo: "alpha", number: 5 },
-        { id: 900, repo: "retired", number: 9 },
       ],
     });
     assert.equal(result.code, 0, result.stderr);
@@ -435,10 +502,6 @@ describe("PR state", () => {
     assert.ok(
       !result.urls.includes(pullUrl("alpha", 1)),
       "a PR still in the open list is not fetched again",
-    );
-    assert.ok(
-      !result.urls.some((url) => url.includes("/retired/")),
-      "a repository outside this run is not reconciled",
     );
     assert.equal(
       result.stdout,
@@ -476,6 +539,69 @@ describe("PR state", () => {
     assert.equal(
       result.stderr,
       "github-sync failed: GitHub GET /repos/HX-Infratstructure/alpha/pulls/7 -> 500: Server Error\n",
+    );
+  });
+
+  test("a stored open PR is rechecked when its repository is archived or no longer in the org list", async () => {
+    const routes: Routes = {
+      [reposUrl]: { body: [repo("alpha"), repo("attic", "main", true)] },
+      ...quietRepo("alpha"),
+      [pullUrl("attic", 3)]: {
+        body: pull("attic", 303, 3, {
+          state: "closed",
+          closed_at: daysAgo(40),
+          updated_at: daysAgo(40),
+        }),
+      },
+      [pullUrl("retired", 9)]: { status: 404, body: { message: "Not Found" } },
+    };
+    const result = await run(routes, {
+      open: [
+        { id: 303, repo: "attic", number: 3 },
+        { id: 900, repo: "retired", number: 9 },
+      ],
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(result.db.saved[0]?.prs, [row("attic", 303, 3, "closed", null)]);
+    assert.deepEqual(result.db.saved[0]?.stateUpdates, [{ id: 900, state: "gone" }]);
+    assert.equal(
+      result.stdout,
+      "github-sync gone repo=retired number=9 id=900\n" +
+        "github-sync ok org=HX-Infratstructure repos=1 heads=1 empty=0 open=0 merged=0 closed=1 requests=6 ms=0\n",
+    );
+  });
+
+  for (const status of [301, 302, 307, 308]) {
+    test(`a stored open PR whose repository left the org (${status}) is marked gone, and the redirect is not followed`, async () => {
+      const moved = `${API}/repos/elsewhere/beyond/pulls/4`;
+      const routes: Routes = {
+        [reposUrl]: { body: [repo("alpha")] },
+        ...quietRepo("alpha"),
+        [pullUrl("transferred", 4)]: { status, body: { message: "Moved Permanently", url: moved } },
+      };
+      const result = await run(routes, { open: [{ id: 404, repo: "transferred", number: 4 }] });
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(result.db.saved[0]?.stateUpdates, [{ id: 404, state: "gone" }]);
+      assert.deepEqual(result.db.saved[0]?.prs, []);
+      assert.ok(!result.urls.includes(moved), "the redirect target was never requested");
+      assert.equal(
+        result.stdout,
+        "github-sync gone repo=transferred number=4 id=404\n" +
+          "github-sync ok org=HX-Infratstructure repos=1 heads=1 empty=0 open=0 merged=0 closed=0 requests=5 ms=0\n",
+      );
+    });
+  }
+
+  test("a redirect anywhere else still fails the run", async () => {
+    const result = await run({
+      [reposUrl]: { status: 301, body: { message: "Moved Permanently" } },
+    });
+    assert.equal(result.code, 1);
+    assert.equal(result.db.calls.save, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "github-sync failed: GitHub GET /orgs/HX-Infratstructure/repos?type=all&per_page=100 -> 301: Moved Permanently\n",
     );
   });
 });
@@ -616,7 +742,10 @@ describe("the database store", () => {
         url: `https://github.com/${ORG}/alpha/pull/${number}`,
         fetched_at,
       });
-      const prsInDb = async () => (await t.services.listWorkspace()).prs;
+      const prsInDb = async () =>
+        [...(await t.services.listGithubPrs({ limit: 100 })).items].sort(
+          (a, b) => a.repo.localeCompare(b.repo) || a.number - b.number,
+        );
       const reposInDb = async () => (await t.services.listWorkspace()).repos;
       const minutesLater = (minutes: number) => new Date(NOW.getTime() + minutes * 60 * 1000);
 

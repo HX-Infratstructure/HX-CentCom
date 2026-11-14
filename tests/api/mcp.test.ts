@@ -123,7 +123,6 @@ describe("strict inputs", () => {
     options: [{ label: "Adopt", recommended: true }],
     blocks: [CC1_TASK],
     sourceUrl: SOURCE_URL,
-    recommendedBy: "CC1",
   };
 
   it("refuses a request_decision summary over 140 characters in the SDK schema check, as text", async () => {
@@ -143,18 +142,17 @@ describe("strict inputs", () => {
     });
   });
 
-  it("leaves request_decision's recommendedBy rule to the service's 400", async () => {
+  it("records the calling agent as request_decision's recommender, and refuses a sent recommendedBy", async () => {
     const client = await api.mcp(cc1);
-    const { recommendedBy, ...unattributed } = decision;
-    const error = toolError(
-      await client.callTool({ name: "request_decision", arguments: unattributed }),
-    );
-    expect(error.code).toBe("invalid");
-    expect(error.issues?.map((i) => i.path)).toContain("recommendedBy");
+    const refused = await client.callTool({
+      name: "request_decision",
+      arguments: { ...decision, recommendedBy: "Agent Zero" },
+    });
+    expect(toolErrorText(refused)).toContain("Unrecognized key(s) in object: 'recommendedBy'");
 
     const accepted = await client.callTool({ name: "request_decision", arguments: decision });
     expect(toolValue(accepted)).toMatchObject({
-      decision: { recommended_by: recommendedBy, status: "Pending" },
+      decision: { recommended_by: "CC1", status: "Pending" },
     });
   });
 });

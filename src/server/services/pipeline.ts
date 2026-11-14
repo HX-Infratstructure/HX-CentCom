@@ -61,10 +61,16 @@ export type RootRef = {
   readonly [K in RootKind]: { readonly kind: K; readonly id: string };
 }[RootKind];
 export type RootRow<R extends RootRef> = RootRows[R["kind"]];
-/** A root read FOR UPDATE, tagged with its kind so that `authorize` can tell whose row it is. */
-export type LockedRoot = {
-  readonly [K in RootKind]: { readonly kind: K; readonly row: RootRows[K] };
-}[RootKind];
+type Locked = { readonly [K in RootKind]: { readonly kind: K; readonly row: RootRows[K] } };
+/**
+ * A root read FOR UPDATE, tagged with its kind so that `authorize` can tell whose row it is. A RAID item also carries
+ * the agent of the task it blocks, whom the RAID row scope admits (P2-1).
+ */
+export type LockedRoot =
+  | Locked["task"]
+  | Locked["decision"]
+  | Locked["lesson"]
+  | (Locked["raid_item"] & { readonly blockedTaskAgent: string | null });
 
 type WriteEnv = {
   readonly at: string;
@@ -77,6 +83,16 @@ export type WriteContext<I> = WriteEnv & {
   insertUpdates(rows: readonly NewTaskUpdate[]): Promise<TaskUpdate[]>;
 };
 
+/** What one committed write gives its after-commit work. `activityId` is the id of the write's activity row. */
+export type Committed<T extends Json> = {
+  readonly value: T;
+  readonly activityId: string;
+  readonly at: string;
+  readonly actor: Actor;
+};
+
+type AfterCommit<T extends Json> = (committed: Committed<T>) => Promise<void>;
+
 export interface UpdatePlan<S extends z.ZodTypeAny, R extends RootRef, T extends Json> {
   readonly action: ActivityAction;
   readonly input: S;
@@ -88,6 +104,11 @@ export interface UpdatePlan<S extends z.ZodTypeAny, R extends RootRef, T extends
       readonly bumpedVersion: number;
     },
   ): Promise<Applied<T>>;
+  /**
+   * Runs once the write's transaction has committed, and only for the call that committed it: never for a replay or a
+   * rolled-back write. The writer awaits it, and logs and swallows a throw, so it never fails the committed write.
+   */
+  afterCommit?: AfterCommit<T>;
 }
 
 export interface CreatePlan<S extends z.ZodTypeAny, T extends Json> {
@@ -140,7 +161,8 @@ export function createWriter(db: Db, deps: ServiceDeps): Writer {
       const expectedVersion = checkedVersion(opts.expectedVersion);
       const hash = requestHash({ action: plan.action, root: plan.root, input, expectedVersion });
       const env = writeEnv();
-      return idempotentWrite(db, actor, plan.action, key, hash, env.at, async (tx) => {
+      const { afterCommit } = plan;
+      return idempotentWrite(db, actor, plan.action, key, hash, env.at, afterCommit, async (tx) => {
         const locked = await lockRoot(tx, plan.root);
         authorize(actor, plan.action, locked);
         if (expectedVersion !== null && expectedVersion !== locked.row.version) {
@@ -166,7 +188,7 @@ export function createWriter(db: Db, deps: ServiceDeps): Writer {
       const key = idempotencyKey(opts.idempotencyKey);
       const hash = requestHash({ action: plan.action, root: null, input, expectedVersion: null });
       const env = writeEnv();
-      return idempotentWrite(db, actor, plan.action, key, hash, env.at, async (tx) => {
+      return idempotentWrite(db, actor, plan.action, key, hash, env.at, undefined, async (tx) => {
         authorize(actor, plan.action, null);
         return plan.apply(tx, {
           ...env,
@@ -214,23 +236,35 @@ async function idempotentWrite<T extends Json>(
   key: string | null,
   hash: string,
   at: string,
+  afterCommit: AfterCommit<T> | undefined,
   body: (tx: Tx) => Promise<Applied<T>>,
 ): Promise<WriteResult<T>> {
-  const result = await db.transaction(async (tx): Promise<WriteResult<T>> => {
+  type Outcome = { readonly result: WriteResult<T>; readonly activityId: string | null };
+  const { result, activityId } = await db.transaction(async (tx): Promise<Outcome> => {
     if (key !== null) {
       const prior = await claim(tx, key, actor.agentId, hash, at);
-      if (prior) return prior as WriteResult<T>;
+      if (prior) return { result: prior as WriteResult<T>, activityId: null };
     }
     const applied = await body(tx);
-    await insertActivity(tx, actor.agentId, action, applied.activity, at);
+    const id = await insertActivity(tx, actor.agentId, action, applied.activity, at);
     if (key !== null) {
       await tx
         .update(idempotency)
         .set({ status: applied.status, response: applied.value })
         .where(and(eq(idempotency.key, key), eq(idempotency.actor, actor.agentId)));
     }
-    return { value: applied.value, status: applied.status, replayed: false };
+    return {
+      result: { value: applied.value, status: applied.status, replayed: false },
+      activityId: id,
+    };
   });
+  if (afterCommit !== undefined && activityId !== null) {
+    try {
+      await afterCommit({ value: result.value, activityId, at, actor });
+    } catch (error) {
+      console.error(`after-commit work of ${action} ${activityId} failed`, error);
+    }
+  }
   if (key !== null && !result.replayed) await pruneExpired(db, at);
   return result;
 }
@@ -373,14 +407,20 @@ async function lockRoot(tx: Tx, root: RootRef): Promise<LockedRoot> {
           "Decision",
         ),
       };
-    case "raid_item":
-      return {
-        kind: root.kind,
-        row: await one(
-          tx.select().from(raidItems).where(eq(raidItems.id, root.id)).for("update"),
-          "RAID item",
-        ),
-      };
+    case "raid_item": {
+      // PostgreSQL refuses FOR UPDATE on the nullable side of an outer join, and the task stays unlocked here so the
+      // lock order (item, then task) is unchanged.
+      const { row, blockedTaskAgent } = await one(
+        tx
+          .select({ row: raidItems, blockedTaskAgent: engineeringTasks.agent })
+          .from(raidItems)
+          .leftJoin(engineeringTasks, eq(engineeringTasks.id, raidItems.blocked_task_id))
+          .where(eq(raidItems.id, root.id))
+          .for("update", { of: raidItems }),
+        "RAID item",
+      );
+      return { kind: root.kind, row, blockedTaskAgent };
+    }
     case "lesson":
       return {
         kind: root.kind,
@@ -451,18 +491,23 @@ async function insertActivity(
   action: ActivityAction,
   record: ActivityRecord,
   at: string,
-): Promise<void> {
-  await tx.insert(activityLog).values({
-    actor: actorId,
-    action,
-    entity: record.entity,
-    entity_id: record.entityId,
-    before: record.before,
-    after: record.after,
-    run_id: record.runId ?? null,
-    commit_sha: record.commitSha ?? null,
-    created_at: at,
-  });
+): Promise<string> {
+  const [row] = await tx
+    .insert(activityLog)
+    .values({
+      actor: actorId,
+      action,
+      entity: record.entity,
+      entity_id: record.entityId,
+      before: record.before,
+      after: record.after,
+      run_id: record.runId ?? null,
+      commit_sha: record.commitSha ?? null,
+      created_at: at,
+    })
+    .returning({ id: activityLog.id });
+  if (!row) throw new Error("activity insert returned no row");
+  return row.id;
 }
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;

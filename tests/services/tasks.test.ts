@@ -102,7 +102,7 @@ describe("T3 (R2): an agent writes only its own tasks and only requests decision
 
   it("lets CC2 post to its own task, the control for the case above", async () => {
     // Catches: a scope check that rejects everyone, which would make the 403 above meaningless.
-    await h.svc.postProgress(h.as.CC2, "IRP-04", { note: "t3 own", source: "mcp" }, {});
+    await h.svc.postProgress(h.as.CC2, "IRP-04", { note: "t3 own", source: "api" }, {});
     expect(await updatesFor("IRP-04", "t3 own")).toHaveLength(1);
   });
 

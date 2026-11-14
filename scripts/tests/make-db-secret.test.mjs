@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { scramSha256Verifier } from "../../deploy/hx9/make-db-secret.mjs";
 
 const script = fileURLToPath(new URL("../../deploy/hx9/make-db-secret.mjs", import.meta.url));
 const VERIFIER = /^SCRAM-SHA-256\$4096:([A-Za-z0-9+/=]+)\$([A-Za-z0-9+/=]+):([A-Za-z0-9+/=]+)$/;
 const ENV_LINE =
   /^DATABASE_URL=postgres:\/\/centcom_app:([A-Za-z0-9_-]{43})@192\.168\.50\.209:5432\/centcom\n$/;
 const hmac = (key, text) => createHmac("sha256", key).update(text).digest();
+const sha256 = (data) => createHash("sha256").update(data).digest();
+const xor = (a, b) => Buffer.from(a.map((byte, i) => byte ^ b[i]));
 const mode = (path) => statSync(path).mode & 0o777;
 
 // The SCRAM-SHA-256 exchange in section 3 of https://www.rfc-editor.org/rfc/rfc7677.txt (password "pencil").
@@ -24,28 +25,52 @@ const rfc = {
   clientProof: "dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ=",
   serverSignature: "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=",
 };
+const rfcAuthMessage = [rfc.clientFirstBare, rfc.serverFirst, rfc.clientFinalWithoutProof].join(
+  ",",
+);
 
-test("the verifier's keys reproduce the RFC 7677 server signature and client proof", () => {
+/** What a SCRAM-SHA-256 client sends, and the server signature it then expects (RFC 5802 section 3). */
+function clientSide(password, salt, authMessage) {
+  const salted = pbkdf2Sync(password, salt, 4096, 32, "sha256");
+  const clientKey = hmac(salted, "Client Key");
+  return {
+    clientProof: xor(clientKey, hmac(sha256(clientKey), authMessage)).toString("base64"),
+    serverSignature: hmac(hmac(salted, "Server Key"), authMessage).toString("base64"),
+  };
+}
+
+/** What PostgreSQL does with the stored verifier: check the client's proof, and sign the exchange. */
+function serverSide(verifier, authMessage, clientProof) {
+  const [, , storedKey, serverKey] = VERIFIER.exec(verifier);
+  const clientKey = xor(
+    Buffer.from(clientProof, "base64"),
+    hmac(Buffer.from(storedKey, "base64"), authMessage),
+  );
+  return {
+    accepted: sha256(clientKey).toString("base64") === storedKey,
+    serverSignature: hmac(Buffer.from(serverKey, "base64"), authMessage).toString("base64"),
+  };
+}
+
+/** A fresh exchange for `password` against `verifier`, with the salt the verifier carries. */
+function login(verifier, password) {
+  const [, salt] = VERIFIER.exec(verifier);
+  const nonce = randomBytes(18).toString("base64");
+  const authMessage = `n=centcom_app,r=${nonce},r=${nonce}srv,s=${salt},i=4096,c=biws,r=${nonce}srv`;
+  const client = clientSide(password, Buffer.from(salt, "base64"), authMessage);
+  const server = serverSide(verifier, authMessage, client.clientProof);
+  return server.accepted && server.serverSignature === client.serverSignature;
+}
+
+test("the test's SCRAM client reproduces the RFC 7677 client proof and server signature", () => {
   const salt = /,s=([^,]+),i=4096$/.exec(rfc.serverFirst)[1];
-  const [, verifierSalt, storedKey, serverKey] = VERIFIER.exec(
-    scramSha256Verifier("pencil", Buffer.from(salt, "base64")),
-  );
-  assert.equal(verifierSalt, salt);
-
-  const authMessage = [rfc.clientFirstBare, rfc.serverFirst, rfc.clientFinalWithoutProof].join(",");
-  assert.equal(
-    hmac(Buffer.from(serverKey, "base64"), authMessage).toString("base64"),
-    rfc.serverSignature,
-  );
-
-  const clientSignature = hmac(Buffer.from(storedKey, "base64"), authMessage);
-  const clientKey = Buffer.from(rfc.clientProof, "base64").map(
-    (byte, i) => byte ^ clientSignature[i],
-  );
-  assert.equal(createHash("sha256").update(clientKey).digest("base64"), storedKey);
+  assert.deepEqual(clientSide("pencil", Buffer.from(salt, "base64"), rfcAuthMessage), {
+    clientProof: rfc.clientProof,
+    serverSignature: rfc.serverSignature,
+  });
 });
 
-test("the CLI writes app.env and create-role.sql privately, never prints the password, and keeps it on a rerun", (t) => {
+test("the CLI writes app.env and create-role.sql privately, never shows the password, and keeps it on a rerun", (t) => {
   const root = mkdtempSync(join(tmpdir(), "make-db-secret-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -63,20 +88,21 @@ test("the CLI writes app.env and create-role.sql privately, never prints the pas
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr);
-    const password = ENV_LINE.exec(readFileSync(envPath, "utf8"))?.[1];
+    const env = readFileSync(envPath, "utf8");
+    const password = ENV_LINE.exec(env)?.[1];
     assert.ok(password, "app.env holds exactly the centcom_app DATABASE_URL");
+    const url = new URL(env.slice("DATABASE_URL=".length).trim());
+    assert.deepEqual(
+      [url.protocol, url.username, url.password, url.host, url.pathname],
+      ["postgres:", "centcom_app", password, "192.168.50.209:5432", "/centcom"],
+    );
+
     const sql = readFileSync(sqlPath, "utf8");
     const verifier = /PASSWORD '([^']+)'/.exec(sql)?.[1] ?? "";
-    const salt = VERIFIER.exec(verifier)?.[1];
-    assert.ok(
-      salt,
-      `create-role.sql holds a SCRAM-SHA-256 verifier, got ${JSON.stringify(verifier)}`,
-    );
-    assert.equal(
-      scramSha256Verifier(password, Buffer.from(salt, "base64")),
-      verifier,
-      "the verifier is for the app.env password",
-    );
+    assert.match(verifier, VERIFIER, "create-role.sql holds a SCRAM-SHA-256 verifier");
+    assert.ok(!sql.includes(password), "create-role.sql never holds the clear password");
+    assert.ok(login(verifier, password), "the verifier accepts the app.env password");
+    assert.ok(!login(verifier, `${password}x`), "the verifier refuses another password");
     for (const statement of [
       "CREATE ROLE centcom_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD",
       "CREATE DATABASE centcom OWNER centcom_app;",
@@ -85,6 +111,7 @@ test("the CLI writes app.env and create-role.sql privately, never prints the pas
     ]) {
       assert.ok(sql.includes(statement), `create-role.sql has: ${statement}`);
     }
+
     assert.equal(result.stdout, `${envPath} 600\n${sqlPath} 600\n`);
     for (const secret of [password, verifier]) {
       assert.ok(
@@ -99,11 +126,12 @@ test("the CLI writes app.env and create-role.sql privately, never prints the pas
     assert.deepEqual(readdirSync(home), [".config"]);
     assert.deepEqual(readdirSync(join(home, ".config")), ["hx-centcom"]);
     assert.deepEqual(readdirSync(cwd), []);
-    return { password, verifier };
+    return { env, password, verifier };
   };
 
   const first = run();
   const second = run();
-  assert.equal(second.password, first.password, "a rerun keeps the password");
+  assert.equal(second.env, first.env, "a rerun leaves app.env as it was");
   assert.notEqual(second.verifier, first.verifier, "a rerun writes a new SQL file with a new salt");
+  assert.ok(login(second.verifier, first.password), "the new verifier is for the same password");
 });

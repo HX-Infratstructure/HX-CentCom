@@ -1,5 +1,13 @@
 import { Link, useRouter } from "@tanstack/react-router";
-import { Gavel, GraduationCap, LayoutDashboard, ListTodo, TriangleAlert } from "lucide-react";
+import {
+  Gavel,
+  GitPullRequest,
+  GraduationCap,
+  History,
+  LayoutDashboard,
+  ListTodo,
+  TriangleAlert,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { toAppError } from "./adapt";
 import { ErrorState } from "./list-states";
@@ -11,6 +19,8 @@ const NAV = [
   { to: "/decisions", label: "Decisions", icon: Gavel, exact: false },
   { to: "/raid", label: "RAID", icon: TriangleAlert, exact: false },
   { to: "/lessons", label: "Lessons", icon: GraduationCap, exact: false },
+  { to: "/pull-requests", label: "Pull requests", icon: GitPullRequest, exact: false },
+  { to: "/activity", label: "Activity", icon: History, exact: false },
 ] as const;
 
 /** The app chrome. `page` is the page's h1; the active nav item comes from the router. */
@@ -18,11 +28,12 @@ export function Workspace({ page, children }: { page: string; children: ReactNod
   return (
     <div className="app-shell">
       <aside className="workspace-rail">
-        <Link to="/" className="brand">
+        <Link to="/" className="brand" aria-label="HX-CentCom overview">
           <span className="brand-mark" aria-hidden="true">
             HX
           </span>
-          <span className="brand-name">
+          {/* At phone width the seven nav icons need the brand's room, so only the mark stays. */}
+          <span className="brand-name max-[480px]:hidden">
             HX-CentCom<small>Hana-X Central Command</small>
           </span>
         </Link>
@@ -31,7 +42,7 @@ export function Workspace({ page, children }: { page: string; children: ReactNod
             <Link
               key={to}
               to={to}
-              activeOptions={{ exact }}
+              activeOptions={{ exact, includeSearch: false }}
               aria-label={label}
               className="rail-link"
             >

@@ -173,7 +173,7 @@ describe("0002 matches schema-raid.ts", () => {
     expect(lesson.get("lessons_enforced_by_ref")).toContain(SOURCE_REF_PATTERN);
   });
 
-  it("widens the activity_log CHECKs to A1's lists plus B4's", async () => {
+  it("widens the activity_log CHECKs to the task lists plus the RAID and lesson ones", async () => {
     const activity = await checkDefs("activity_log");
     expect(quoted(activity.get("activity_log_action_check") ?? "")).toEqual(
       [...ACTIVITY_ACTIONS].sort(),

@@ -1,6 +1,5 @@
-import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { toAppError } from "./adapt";
 import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
 import { ErrorState } from "./list-states";
@@ -9,7 +8,6 @@ import {
   GATE_TYPE_LABELS,
   type AppError,
   type DecisionView,
-  type Outcome,
   type OwnerActions,
 } from "./model";
 import { AgentBadge, Fact, Facts, SourceLink, Time } from "./record-parts";
@@ -232,15 +230,6 @@ type FormState =
   | { readonly phase: "recorded" }
   | { readonly phase: "failed"; readonly error: AppError };
 
-/**
- * HX-7 serves plain HTTP, which is not a secure context, so `crypto.randomUUID` does not exist there;
- * `getRandomValues` does.
- */
-function newIdempotencyKey(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 function formText(form: FormData, name: string): string {
   const value = form.get(name);
   return typeof value === "string" ? value : "";
@@ -258,9 +247,6 @@ function DecideForm({
   owner: OwnerActions;
 }): ReactNode {
   const [state, setState] = useState<FormState>({ phase: "editing" });
-  // A submit whose input equals the last one reuses its key, so a retry after a lost response replays instead of
-  // deciding twice. A changed input gets a new key, so this form never causes idempotency_mismatch.
-  const attempt = useRef<{ readonly body: string; readonly key: string } | null>(null);
   const headingId = useId();
   const wordsId = useId();
   const sourceId = useId();
@@ -284,20 +270,9 @@ function DecideForm({
       decisionText: formText(form, "decisionText"),
       sourceUrl: formText(form, "sourceUrl"),
     };
-    const body = JSON.stringify([decision.id, input.status, input.decisionText, input.sourceUrl]);
-    const key = attempt.current?.body === body ? attempt.current.key : newIdempotencyKey();
-    attempt.current = { body, key };
     setState({ phase: "sending" });
-    const outcome = await owner
-      .decide({ id: decision.id, version: decision.version }, input, key)
-      .catch((error: unknown): Outcome => ({ ok: false, error: toAppError(error) }));
-    if (outcome.ok) {
-      setState({ phase: "recorded" });
-      owner.reload();
-      return;
-    }
-    setState({ phase: "failed", error: outcome.error });
-    if (outcome.error.code === "version_conflict") owner.reload();
+    const outcome = await owner.decide({ id: decision.id, version: decision.version }, input);
+    setState(outcome.ok ? { phase: "recorded" } : { phase: "failed", error: outcome.error });
   }
 
   const sending = state.phase === "sending";

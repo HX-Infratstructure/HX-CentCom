@@ -21,7 +21,7 @@ import {
 } from "@/server/services";
 import { MAX_BODY_BYTES } from "./endpoint";
 import { errorResponse, HttpError, toErrorBody } from "./errors";
-import { filterTasks, myWork, taskDetail } from "./views";
+import { filterTasks } from "./views";
 
 const SERVER_NAME = "hx-centcom";
 const SERVER_VERSION = "1.0.0";
@@ -137,13 +137,12 @@ const TOOLS: readonly McpTool[] = [
       "One task with its version and progress, its requirements and the decisions that block it. Page its updates with list_updates.",
     write: false,
     input: z.object({ taskId: taskIdArg }).strict(),
-    run: async ({ taskId }, { services }) =>
-      read(taskDetail(await services.listWorkspace(), taskId)),
+    run: async ({ taskId }, { services }) => read(await services.getTask(taskId)),
   }),
   tool({
     name: "list_decisions",
     description:
-      "Owner decisions with full descriptions, pending first, with filter counts. Filters: status, gateType. status not_pending returns every decision that is not Pending. limit 1-100 (default 20); pass nextCursor back as cursor.",
+      "Owner decisions with full descriptions, pending first, with filter counts. Filters: status, gateType. status not_pending returns every decision that is not Pending; not_pending, Decided, Deferred and Superseded list the newest decision first. limit 1-100 (default 20); pass nextCursor back as cursor.",
     write: false,
     input: decisionQueryInput.removeDefault().strict(),
     run: async (args, { services }) => read(await services.listDecisions(args)),
@@ -154,15 +153,7 @@ const TOOLS: readonly McpTool[] = [
       "An agent's open tasks, their open requirements and the pending decisions that concern it. Pass agentId, or omit it to use the agent of your key.",
     write: false,
     input: z.object({ agentId: z.string().min(1).optional() }).strict(),
-    run: async ({ agentId }, { services, actor }) => {
-      const who = agentId ?? actor?.agentId;
-      if (who === undefined) {
-        throw ServiceError.invalid("my_work needs agentId when no bearer key is sent.", [
-          { path: "agentId", message: "required without a bearer key" },
-        ]);
-      }
-      return read(myWork(await services.listWorkspace(), who));
-    },
+    run: async ({ agentId }, { services, actor }) => read(await services.myWork(actor, agentId)),
   }),
   tool({
     name: "list_updates",
@@ -187,7 +178,7 @@ const TOOLS: readonly McpTool[] = [
         actor,
         taskId,
         { ...input, source: "mcp" },
-        { idempotencyKey, expectedVersion },
+        { idempotencyKey, expectedVersion, via: "mcp" },
       );
       return fromWrite(result, result.value.update);
     },
@@ -218,10 +209,7 @@ const TOOLS: readonly McpTool[] = [
       "Ask the owner for a decision. summary is the one-line view, description the full text; blocks lists the task ids it blocks. sourceUrl is required: an http(s) URL, or hx15:<absolute path> for a record only on HX-15.",
     write: true,
     destructive: false,
-    input: requestDecisionInput
-      .innerType()
-      .extend({ idempotencyKey: writeArgs.idempotencyKey })
-      .strict(),
+    input: requestDecisionInput.extend({ idempotencyKey: writeArgs.idempotencyKey }).strict(),
     run: async ({ idempotencyKey, ...input }, { services, actor }) => {
       const result = await services.requestDecision(actor, input, { idempotencyKey });
       return fromWrite(result, result.value);
@@ -238,7 +226,7 @@ const TOOLS: readonly McpTool[] = [
   tool({
     name: "add_raid_item",
     description:
-      "Add a RAID item. sourceUrl is required: an http(s) URL, or hx15:<absolute path> for a record only on HX-15. Give only your type's fields; a dependency needs blockedTaskId and blockingRef. A high or critical issue without decisionId opens a pending policy decision.",
+      "Add a RAID item. sourceUrl is required: an http(s) URL, or hx15:<absolute path> for a record only on HX-15. Give only your type's fields; a dependency needs blockedTaskId, a task assigned to you, and blockingRef. A high or critical issue without decisionId opens a pending policy decision.",
     write: true,
     destructive: false,
     input: createRaidItemInput
@@ -253,7 +241,7 @@ const TOOLS: readonly McpTool[] = [
   tool({
     name: "update_raid_item",
     description:
-      "Change fields of a RAID item you own or created (the owner may change any). An absent field stays and null clears it; type cannot change. Closing a dependency unblocks its task once no other open dependency blocks it.",
+      "Change fields of a RAID item you own or created, or of a dependency that blocks a task assigned to you (the owner may change any). An absent field stays and null clears it; type cannot change. A dependency is moved onto, or closed on, only a task assigned to you; closing it unblocks that task once no other open dependency blocks it.",
     write: true,
     destructive: true,
     input: updateRaidItemInput

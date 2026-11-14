@@ -13,6 +13,8 @@ import type {
   UpdateSource,
 } from "@/server/db/schema";
 import type { Actor } from "./actor";
+import type { GithubPrQueryInput, GithubPrsPage } from "./github";
+import type { WebhookConfig } from "./webhook";
 import type {
   ActivityQueryInput,
   DecideInput,
@@ -29,11 +31,13 @@ export type MintedKey = { readonly plaintext: string; readonly keyHash: string }
  * What `createServices` takes besides the database. `now` is read once per write, and every timestamp that write
  * stores comes from that one reading. `mintKey` must return a new key per call, its `plaintext` in the
  * `hxc_<slug>_<32 url-safe chars>` format and its `keyHash` the sha256 hex of it: resolveActor checks that format and
- * looks keys up by that hash.
+ * looks keys up by that hash. `fetch` sends the decided webhook to `webhook`'s URLs; a null `webhook` sends nothing.
  */
 export type ServiceDeps = {
   readonly now: () => Date;
   readonly mintKey: (agentId: string) => MintedKey;
+  readonly fetch: typeof fetch;
+  readonly webhook: WebhookConfig | null;
 };
 
 export type Agent = typeof agents.$inferSelect;
@@ -52,7 +56,11 @@ export type Progress = {
   readonly total: number;
   readonly percent: number | null;
 };
-export type Task = TaskRow & { readonly progress: Progress };
+/**
+ * `stale` (F9): null without a commit_sha or a GitHub mirror row for the task's repository; false when the SHA is a
+ * case-insensitive prefix of that repository's head, an open PR's head or a merged PR's merge commit; else true.
+ */
+export type Task = TaskRow & { readonly progress: Progress; readonly stale: boolean | null };
 
 /** Facet counts for filter chips (R12). Each facet applies every filter except its own; none uses the cursor. */
 export type UpdateCounts = {
@@ -70,15 +78,28 @@ export type DecisionCounts = {
   readonly byStatus: Readonly<Partial<Record<DecisionStatus, number>>>;
 };
 
+/** Activity facet counts, under the same rule as UpdateCounts; `entityId` and `since` apply to every count. */
+export type ActivityCounts = {
+  readonly total: number;
+  readonly byActor: Readonly<Record<string, number>>;
+  readonly byEntity: Readonly<Record<string, number>>;
+};
+
 /** A keyset page in the list's order. `nextCursor` is opaque, and null on the last page. */
 export type Page<T> = { readonly items: readonly T[]; readonly nextCursor: string | null };
 export type UpdatesPage = Page<TaskUpdate> & { readonly counts: UpdateCounts };
-/** Pending first, then the latest request; a decision with no recorded request time sorts last. */
+export type ActivityPage = Page<ActivityEntry> & { readonly counts: ActivityCounts };
+/**
+ * Pending first, then the latest request; a decision with no recorded request time sorts last. A status filter that
+ * admits no Pending decision lists the newest decision first instead, with a cursor the default order refuses.
+ */
 export type DecisionsPage = Page<Decision> & { readonly counts: DecisionCounts };
 
 /**
  * One snapshot. `updates`, `updatesCursor` and `counts.updates` equal `listUpdates({})` at that snapshot, and
- * `counts.decisions` equals `listDecisions({}).counts`.
+ * `counts.decisions` equals `listDecisions({}).counts`. Tasks, requirements, agents, status labels and repository heads
+ * are whole: no API creates them, so they stay bounded. `decisions` holds every Pending decision and every decision
+ * whose `blocks` holds a task that is not done; `listDecisions` pages the rest, and `listGithubPrs` the pull requests.
  */
 export type Workspace = {
   readonly tasks: readonly Task[];
@@ -88,9 +109,26 @@ export type Workspace = {
   readonly decisions: readonly Decision[];
   readonly agents: readonly Agent[];
   readonly statusLabels: readonly StatusLabel[];
-  readonly prs: readonly PullRequest[];
   readonly repos: readonly RepoHead[];
   readonly counts: { readonly updates: UpdateCounts; readonly decisions: DecisionCounts };
+};
+
+/** One task with its requirements and every decision whose `blocks` holds it, whatever its status. */
+export type TaskDetail = {
+  readonly task: Task;
+  readonly requirements: readonly Requirement[];
+  readonly decisions: readonly Decision[];
+};
+
+/**
+ * The agent's tasks that are not done, their requirements that are not PASS, and the Pending decisions it requested or
+ * that block one of those tasks.
+ */
+export type MyWork = {
+  readonly agentId: string;
+  readonly tasks: readonly Task[];
+  readonly openRequirements: readonly Requirement[];
+  readonly pendingDecisions: readonly Decision[];
 };
 
 export type CreateOptions = {
@@ -100,6 +138,11 @@ export type CreateOptions = {
 export type UpdateOptions = CreateOptions & {
   /** If-Match: compared with the addressed resource's version; a mismatch is `version_conflict` (409). */
   readonly expectedVersion?: number | undefined;
+};
+/** `via` is set only by the MCP adapter. REST builds its options from headers alone, so no body can set it. */
+export type PostProgressOptions = UpdateOptions & {
+  /** Admits source mcp, which any other caller gets 400 for. */
+  readonly via?: "mcp" | undefined;
 };
 
 /** REST: status `status`, body `value`, and `Idempotency-Replayed: true` when `replayed`. */
@@ -113,6 +156,8 @@ export type TaskRef = { readonly id: string; readonly version: number };
 export type PostedProgress = {
   readonly update: TaskUpdate;
   readonly task: TaskRef & { readonly status: string };
+  /** Present only when this update opened a Pending decision by moving the task into Ready for owner (F7a). */
+  readonly decision?: Decision;
 };
 export type SetRequirementResult = {
   readonly requirement: Requirement;
@@ -126,6 +171,17 @@ export type DecidedDecision = {
 /** `plaintext` exists only in this return value: never stored, logged or kept for replay. */
 export type IssuedKey = { readonly keyId: string; readonly plaintext: string };
 export type RevokedKey = { readonly keyId: string; readonly revokedAt: string };
+/**
+ * F5. `reverted` is the target activity id, `version` the entity's version after the revert (a requirement's own), and
+ * `systemUpdates` the one update a task revert posts.
+ */
+export type RevertResult = {
+  readonly reverted: string;
+  readonly entity: "task" | "requirement" | "raid_item" | "lesson";
+  readonly entityId: string;
+  readonly version: number;
+  readonly systemUpdates: readonly TaskUpdate[];
+};
 
 /**
  * SPEC §4's ten names and their arguments, plus `listDecisions`. Every write takes whatever `resolveActor` returned;
@@ -135,13 +191,20 @@ export interface Services {
   resolveActor(authHeader: string | null): Promise<Actor | null>;
   listWorkspace(): Promise<Workspace>;
   listUpdates(query?: UpdateQueryInput): Promise<UpdatesPage>;
-  listActivity(query?: ActivityQueryInput): Promise<Page<ActivityEntry>>;
+  listActivity(query?: ActivityQueryInput): Promise<ActivityPage>;
   listDecisions(query?: DecisionQueryInput): Promise<DecisionsPage>;
+  /** One decision, whatever its status; 404 for an unknown id. */
+  getDecision(decisionId: string): Promise<Decision>;
+  /** 404 for an unknown task. */
+  getTask(taskId: string): Promise<TaskDetail>;
+  /** The work of `agentId`, else of the actor's agent; 400 at agentId with neither, 404 for an unknown agent. */
+  myWork(actor: Actor | null, agentId?: string): Promise<MyWork>;
+  listGithubPrs(query?: GithubPrQueryInput): Promise<GithubPrsPage>;
   postProgress(
     actor: Actor | null,
     taskId: string,
     input: PostProgressInput,
-    opts?: UpdateOptions,
+    opts?: PostProgressOptions,
   ): Promise<WriteResult<PostedProgress>>;
   setRequirement(
     actor: Actor | null,
@@ -163,4 +226,10 @@ export interface Services {
   /** Not idempotent by design: a replay would have to store the plaintext. */
   issueKey(actor: Actor | null, agentId: string, label: string): Promise<IssuedKey>;
   revokeKey(actor: Actor | null, keyId: string): Promise<RevokedKey>;
+  /** Owner only. 401, 403, then 400 for a non-uuid id, 404, 409 not_revertible, then the writer's checks. */
+  revertActivity(
+    actor: Actor | null,
+    activityId: string,
+    opts?: CreateOptions,
+  ): Promise<WriteResult<RevertResult>>;
 }

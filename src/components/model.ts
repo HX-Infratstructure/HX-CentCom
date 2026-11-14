@@ -1,3 +1,4 @@
+import type { RecordKind } from "./open-record";
 import type * as S from "./server-types";
 
 /*
@@ -34,6 +35,14 @@ export const BLOCKED_ON_LABELS = {
   dependency: "Blocked by a dependency",
 } as const satisfies Record<Exclude<S.BlockedOn, "none">, string>;
 
+/** Why an open task needs the owner's attention, in chip order. One task can have several reasons. */
+export const ATTENTION_LABELS = {
+  blocked: "Blocked",
+  owner: "Waiting on the owner",
+  stale: "Stale commit",
+} as const;
+export type Attention = keyof typeof ATTENTION_LABELS;
+
 export const UPDATE_SOURCE_LABELS = {
   api: "API",
   mcp: "MCP",
@@ -50,15 +59,16 @@ export const UPDATE_KIND_LABELS = {
 } as const satisfies Record<S.UpdateKind, string>;
 
 /**
- * `github_prs.state` is open text, so this registry is the closed set the UI knows rather than a server union. `gone`
- * means GitHub answered 404 for a PR stored as open.
+ * The PR query's closed `state` filter. The `github_prs.state` column is still open text, so a stored row can hold a
+ * value outside it; `PullRequestView.state` keeps that raw text. `gone` means GitHub answered 404 for a PR stored as
+ * open.
  */
 export const PR_STATE_LABELS = {
   open: "Open",
   closed: "Closed",
   merged: "Merged",
   gone: "Gone (404 on GitHub)",
-} as const;
+} as const satisfies Record<S.GithubPrState, string>;
 export type PrState = keyof typeof PR_STATE_LABELS;
 
 export const REQUIREMENT_STATE_LABELS = {
@@ -89,7 +99,36 @@ export const ACTIVITY_ACTION_LABELS = {
   "raid.update": "RAID item updated",
   "lesson.create": "Lesson created",
   "lesson.update": "Lesson updated",
+  "activity.revert": "Change reverted",
 } as const satisfies Record<S.ActivityAction, string>;
+
+/**
+ * The logged actions that offer Revert in owner mode: the four updates. The server's own rule stays the
+ * authority, and a row it refuses answers 409 not_revertible with the reason. A new action does not compile until it
+ * says whether the UI offers Revert.
+ */
+const OFFERS_REVERT = {
+  "task.progress": true,
+  "requirement.set": true,
+  "decision.request": false,
+  "decision.decide": false,
+  "key.issue": false,
+  "key.revoke": false,
+  "key.bootstrap": false,
+  "raid.create": false,
+  "raid.update": true,
+  "lesson.create": false,
+  "lesson.update": true,
+  "activity.revert": false,
+} as const satisfies Record<S.ActivityAction, boolean>;
+
+/**
+ * A row offers Revert when its action does and the row is an update. A create logs no before, so it has nothing to
+ * restore.
+ */
+export function offersRevert(entry: Pick<S.ActivityEntry, "action" | "before">): boolean {
+  return OFFERS_REVERT[entry.action] && entry.before !== null;
+}
 
 export const RAID_TYPE_LABELS = {
   risk: "Risk",
@@ -180,7 +219,37 @@ export type TaskView = Omit<S.Task, "agent" | "status" | "source_url" | "updated
   readonly source: SourceRef;
   readonly updatedAt: Instant;
   readonly requirements: readonly RequirementView[];
+  /** Ids of the Pending decisions that list this task in `blocks`. Complete: the workspace holds every Pending one. */
+  readonly pendingDecisions: readonly string[];
 };
+
+/** Blocked tasks first, then the rest of the unfinished work in workspace order. */
+export function openTasks(tasks: readonly TaskView[]): readonly TaskView[] {
+  const open = tasks.filter((t) => t.blocked_on !== "none" || t.group !== "done");
+  return [
+    ...open.filter((t) => t.blocked_on !== "none"),
+    ...open.filter((t) => t.blocked_on === "none"),
+  ];
+}
+
+/**
+ * The one definition of each reason. `stale` holds only for `true`: `null` means the server has no GitHub data for
+ * the commit, which is not a finding.
+ */
+const NEEDS_ATTENTION: { readonly [A in Attention]: (task: TaskView) => boolean } = {
+  blocked: (t) => t.blocked_on !== "none",
+  owner: (t) =>
+    t.group === "ready_for_owner" ||
+    t.blocked_on === "owner_decision" ||
+    t.blocked_on === "assignment" ||
+    t.pendingDecisions.length > 0,
+  stale: (t) => t.stale === true,
+};
+
+/** Every reason the task needs attention, in chip order. The overview filter and the stale badge both read it. */
+export function attentionOf(task: TaskView): readonly Attention[] {
+  return (Object.keys(ATTENTION_LABELS) as Attention[]).filter((a) => NEEDS_ATTENTION[a](task));
+}
 
 /**
  * Who posted an update. A system update is an automation post with no source; `trigger` is the agent whose action
@@ -330,17 +399,46 @@ export type PullRequestView = Omit<S.PullRequest, "state" | "url" | "fetched_at"
   readonly fetchedAt: Instant;
 };
 
+/**
+ * The PR read's counts plus `stored`: every PR stored under the other filters, in any state, summed over `byState`
+ * (which leaves out only the state filter). Under `state: "open"`, `total` is the open count and `stored` tells "no
+ * sync yet" from "no open pull requests".
+ */
+export type PrCountsView = S.GithubPrCounts & { readonly stored: number };
+
+/**
+ * One field a logged update changed, as display text: `field` is the column name in words, and `from` and `to` use the
+ * page's label where the field has a vocabulary. `edited` is a long text or a list, which is named but never printed.
+ */
+export type ActivityChange =
+  | { readonly kind: "value"; readonly field: string; readonly from: string; readonly to: string }
+  | { readonly kind: "edited"; readonly field: string };
+
+/** One logged action. `actor`, `before`, `after` and `created_at` are resolved away. */
+export type ActivityView = Omit<S.ActivityEntry, "actor" | "before" | "after" | "created_at"> & {
+  readonly by: AgentRef;
+  /** What the action changed, for the row and the Revert dialog. Empty for a create and for bookkeeping alone. */
+  readonly changes: readonly ActivityChange[];
+  /**
+   * The sheet that shows the changed record: the record itself for a task, decision, RAID item or lesson; a
+   * requirement's task; null for an agent key, or a requirement whose snapshots name no task.
+   */
+  readonly opens: { readonly kind: RecordKind; readonly id: string } | null;
+  /** Whether the row offers Revert in owner mode (`offersRevert`). */
+  readonly revertible: boolean;
+  readonly createdAt: Instant;
+};
+
 export type WorkspaceView = Directory & {
   readonly tasks: readonly TaskView[];
   readonly decisions: readonly DecisionView[];
-  readonly prs: readonly PullRequestView[];
 };
 
 type WithoutStatus<T> = T extends unknown ? Omit<T, "status"> : never;
 
 /**
- * A service error as the server types it, or a failure that never reached the service. The HTTP status is left out:
- * the REST body (`{ error: { code, message } }`) does not carry it, and the code already says everything the UI needs.
+ * A service error as the server types it, or a failure that never reached the service. The HTTP status is left out
+ * because the code already says everything the UI needs.
  */
 export type AppError =
   WithoutStatus<S.ServiceErrorBody> | { readonly code: "unreachable"; readonly message: string };
@@ -349,17 +447,15 @@ export type Outcome = { readonly ok: true } | { readonly ok: false; readonly err
 
 /**
  * Owner capability. A route builds it only while an owner key is present, so holding one is owner mode; a component
- * that receives null has no way to offer an owner action.
+ * that receives null has no way to offer an owner action. Every method resolves and never rejects. A resend after a
+ * lost answer replays the first request instead of writing twice. After `ok` or `version_conflict` the page's data is
+ * already refreshing.
  */
 export interface OwnerActions {
-  /** `target.version` is sent as If-Match. Reusing `idempotencyKey` with the same input replays the first result. */
-  decide(
-    target: Pick<DecisionView, "id" | "version">,
-    input: S.DecideInput,
-    idempotencyKey: string,
-  ): Promise<Outcome>;
-  /** Refetch the data behind the open sheet: after a recorded decision and after a version conflict. */
-  reload(): void;
+  /** `target.version` is sent as If-Match. */
+  decide(target: Pick<DecisionView, "id" | "version">, input: S.DecideInput): Promise<Outcome>;
+  /** The server decides whether the change can be reverted; a refusal comes back as the outcome's error. */
+  revert(activityId: string): Promise<Outcome>;
   /** Forget the owner key. Called only from an explicit action, so a refused key never discards typed text. */
   rejectKey(): void;
 }

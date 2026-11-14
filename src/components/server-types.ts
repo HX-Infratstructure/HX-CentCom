@@ -14,13 +14,18 @@ import type {
 } from "@/server/services";
 
 export type {
+  ActivityCounts,
   ActivityEntry,
+  ActivityPage,
   Agent,
   DecideInput,
   Decision,
   DecisionCounts,
   DecisionsPage,
   ErrorCode,
+  GithubPrCounts,
+  GithubPrState,
+  GithubPrsPage,
   Issue,
   Lesson,
   LessonCounts,

@@ -4,6 +4,7 @@ export const ERROR_STATUS = {
   forbidden: 403,
   not_found: 404,
   version_conflict: 409,
+  not_revertible: 409,
   idempotency_mismatch: 422,
 } as const;
 
@@ -76,6 +77,14 @@ export class ServiceError extends Error {
       status: ERROR_STATUS.version_conflict,
       message: `The resource is at version ${currentVersion}.`,
       currentVersion,
+    });
+  }
+
+  static notRevertible(activityId: string, reason: string): ServiceError {
+    return new ServiceError({
+      code: "not_revertible",
+      status: ERROR_STATUS.not_revertible,
+      message: `Activity ${activityId} cannot be reverted: ${reason}.`,
     });
   }
 

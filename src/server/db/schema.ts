@@ -64,6 +64,7 @@ export const ACTIVITY_ACTIONS = [
   "raid.update",
   "lesson.create",
   "lesson.update",
+  "activity.revert",
 ] as const;
 
 export type AgentRole = (typeof AGENT_ROLES)[number];

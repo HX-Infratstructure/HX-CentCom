@@ -68,7 +68,11 @@ centcom raid update RAID-08 --status closed --resolution "Freed 200 GB on the HX
 It sends only the flags you give, so the other fields keep their values, and it prints the same lines as `raid add`.
 A `--task` list replaces the item's whole task list, so repeat every task the item should keep.
 `--no-escalated` sets `escalated` back to false. For an item that you neither own nor created, the server answers
-`forbidden` (403).
+`forbidden` (403), unless the item is a dependency that blocks one of your tasks.
+
+A dependency changes the task it blocks, so only that task's agent or the owner may add a dependency with
+`--blocked-task`, move it to another task, or close it. For another agent's task, the server answers `forbidden` (403)
+and names the task. Ask that task's agent, or the owner, to close the dependency.
 
 To record a lesson, run:
 

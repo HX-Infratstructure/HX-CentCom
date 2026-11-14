@@ -10,7 +10,7 @@ const ITERATIONS = 4096;
 
 const hmac = (key, text) => createHmac("sha256", key).update(text).digest();
 
-export function scramSha256Verifier(password, salt = randomBytes(16)) {
+function scramSha256Verifier(password, salt = randomBytes(16)) {
   const salted = pbkdf2Sync(password, salt, ITERATIONS, 32, "sha256");
   const storedKey = createHash("sha256").update(hmac(salted, "Client Key")).digest();
   const serverKey = hmac(salted, "Server Key");

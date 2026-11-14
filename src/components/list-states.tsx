@@ -23,6 +23,7 @@ export const ERROR_COPY = {
   forbidden: "This key is not allowed to make that change.",
   not_found: "This record no longer exists.",
   version_conflict: "This record changed after you opened it.",
+  not_revertible: "This change cannot be reverted.",
   invalid: "Some fields need a change.",
   idempotency_mismatch: "An earlier request used the same request key with different content.",
   unreachable: "The request did not complete.",
@@ -30,17 +31,20 @@ export const ERROR_COPY = {
 
 export function ErrorState({
   error,
+  title = ERROR_COPY[error.code],
   retry,
   children,
 }: {
   error: AppError;
+  /** Replaces the code's generic title when the action knows the cause better. */
+  title?: string | undefined;
   retry?: (() => void) | undefined;
   /** Extra guidance or actions for this error, placed under the message. */
   children?: ReactNode;
 }): ReactNode {
   return (
     <div role="alert" className="error-state">
-      <p className="error-title">{ERROR_COPY[error.code]}</p>
+      <p className="error-title">{title}</p>
       {error.message !== "" && <p className="quiet">{error.message}</p>}
       {children}
       {retry !== undefined && (
@@ -58,6 +62,8 @@ const SINGULAR = {
   decisions: "decision",
   lessons: "lesson",
   "RAID items": "RAID item",
+  "pull requests": "pull request",
+  "activity entries": "activity entry",
 } as const;
 
 export type ShowMoreProps = {

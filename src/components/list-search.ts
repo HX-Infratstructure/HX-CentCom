@@ -73,7 +73,7 @@ export interface ListSearch<F extends Facets> {
   filters(search: SearchOf<F>): FiltersOf<F>;
   active(filters: FiltersOf<F>): boolean;
   /**
-   * Faceting for a list the route already holds in full. Counts follow A1's UpdateCounts rule: each facet applies
+   * Faceting for a list the route already holds in full. Counts follow the UpdateCounts rule: each facet applies
    * every filter except its own.
    */
   local<T>(

@@ -1,4 +1,5 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, arrayContains, eq, inArray, isNull, sql } from "drizzle-orm";
+import type { ZodString } from "zod";
 import type { Tx } from "@/server/db/client";
 import {
   agentKeys,
@@ -11,17 +12,21 @@ import {
 } from "@/server/db/schema";
 import { ServiceError, type Issue } from "./errors";
 import {
+  bodyProgressInput,
   decideInput,
   issueKeyInput,
-  postProgressInput,
+  mcpProgressInput,
+  parse,
   requestDecisionInput,
   revokeKeyInput,
   setRequirementInput,
+  sourceRef,
 } from "./inputs";
 import type { BootstrapPlan, CreatePlan, UpdatePlan } from "./pipeline";
 import { computeProgress, NO_REQUIREMENTS } from "./reads";
 import type {
   DecidedDecision,
+  Decision,
   IssuedKey,
   MintedKey,
   PostedProgress,
@@ -61,14 +66,86 @@ async function nextDecisionId(tx: Tx): Promise<string> {
   return formatDecisionId(row.n);
 }
 
-export function postProgressPlan(
-  taskId: string,
-): UpdatePlan<typeof postProgressInput, TaskRoot, PostedProgress> {
+type ProgressInput = typeof bodyProgressInput | typeof mcpProgressInput;
+type ProgressPlan = UpdatePlan<ProgressInput, TaskRoot, PostedProgress>;
+type ProgressContext = Parameters<ProgressPlan["apply"]>[1];
+
+const DRAFT = requestDecisionInput.shape;
+
+/** Cuts to the field's limit in UTF-16 units, the unit zod counts, without splitting a surrogate pair. */
+function cut(text: string, field: ZodString): string {
+  const max = field.maxLength ?? text.length;
+  if (text.length <= max) return text;
+  const last = text.charCodeAt(max - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
+}
+
+/**
+ * F7a (CC1's design H1). It runs under the task's row lock in the progress write's transaction, and opens its decision
+ * through requestDecisionPlan as openIssueDecision does, so the progress write's one activity row records it. A
+ * Pending decision that already blocks the task opens nothing, and one system update names it instead.
+ */
+async function openReadyForOwnerDecision(
+  tx: Tx,
+  ctx: ProgressContext,
+  status: string,
+): Promise<Decision | null> {
+  const { before: task, input } = ctx;
+  const [pending] = await tx
+    .select({ id: ownerDecisions.id })
+    .from(ownerDecisions)
+    .where(
+      and(eq(ownerDecisions.status, "Pending"), arrayContains(ownerDecisions.blocks, [task.id])),
+    )
+    .orderBy(ownerDecisions.id)
+    .limit(1);
+  if (pending) {
+    await ctx.insertUpdates([
+      {
+        task_id: task.id,
+        kind: "system",
+        status: null,
+        note: `${task.id} is ${status}; ${pending.id} is already pending, so no decision was opened.`,
+        links: [],
+        source: null,
+      },
+    ]);
+    return null;
+  }
+  const source =
+    input.prUrl ??
+    input.links?.[0]?.url ??
+    (sourceRef.safeParse(task.source_url).success ? task.source_url : undefined);
+  if (source === undefined) {
+    throw ServiceError.invalid("The decision for Ready for owner has no source.", [
+      { path: "prUrl", message: `give prUrl or a link; task ${task.id} has no usable source_url` },
+    ]);
+  }
+  const links = (input.links ?? []).map((l) => `- ${l.label}: ${l.url}`);
+  const draft = parse(requestDecisionInput, {
+    question: input.decision?.question ?? cut(`Accept ${task.id}: ${task.title}?`, DRAFT.question),
+    subject: cut(`${task.id}: ${task.title}`, DRAFT.subject),
+    summary: cut(`Ready for owner: ${task.title}`, DRAFT.summary),
+    description: cut(
+      links.length === 0 ? input.note : `${input.note}\n\nLinks:\n${links.join("\n")}`,
+      DRAFT.description,
+    ),
+    gateType: input.decision?.gateType ?? (input.prUrl === undefined ? "scope" : "merge"),
+    options: [],
+    blocks: [task.id],
+    sourceUrl: source,
+  });
+  return (await requestDecisionPlan.apply(tx, { ...ctx, input: draft })).value.decision;
+}
+
+/** `via` is "mcp" only from the MCP adapter, so only it records source mcp. */
+export function postProgressPlan(taskId: string, via: "mcp" | undefined): ProgressPlan {
   return {
     action: "task.progress",
-    input: postProgressInput,
+    input: via === "mcp" ? mcpProgressInput : bodyProgressInput,
     root: { kind: "task", id: taskId },
-    async apply(tx, { input, before, bumpedVersion, insertUpdates }) {
+    async apply(tx, ctx) {
+      const { input, before, bumpedVersion, insertUpdates } = ctx;
       let label: StatusLabel | undefined;
       if (input.status !== undefined) {
         [label] = await tx.select().from(statusLabels).where(eq(statusLabels.id, input.status));
@@ -94,20 +171,43 @@ export function postProgressPlan(
       if (!update) throw new Error("task update insert returned no row");
       const status = label?.id ?? before.status;
       const group = label ? groupForStatus(label, before.group) : before.group;
-      if (label) {
+      // F9: a commitSha repins the task, so `stale` follows the commit an agent or the hook last posted. The activity
+      // row records the commit only then, so a revert restores it and other rows keep their shape.
+      const repin = input.commitSha === undefined ? null : { commit_sha: input.commitSha };
+      if (label || repin) {
         await tx
           .update(engineeringTasks)
-          .set({ status, group })
+          .set({ ...(label ? { status, group } : {}), ...repin })
           .where(eq(engineeringTasks.id, before.id));
       }
+      const decision =
+        group === "ready_for_owner" && before.group !== "ready_for_owner"
+          ? await openReadyForOwnerDecision(tx, ctx, status)
+          : null;
       return {
         status: 201,
-        value: { update, task: { id: before.id, version: bumpedVersion, status } },
+        value: {
+          update,
+          task: { id: before.id, version: bumpedVersion, status },
+          ...(decision ? { decision } : {}),
+        },
         activity: {
           entity: "task",
           entityId: before.id,
-          before: { status: before.status, group: before.group, version: before.version },
-          after: { status, group, version: bumpedVersion, update_id: update.id },
+          before: {
+            status: before.status,
+            group: before.group,
+            version: before.version,
+            ...(repin ? { commit_sha: before.commit_sha } : {}),
+          },
+          after: {
+            status,
+            group,
+            version: bumpedVersion,
+            update_id: update.id,
+            ...repin,
+            ...(decision ? { effects: { decisionId: decision.id } } : {}),
+          },
           runId: input.runId,
           commitSha: input.commitSha,
         },
@@ -200,15 +300,6 @@ export const requestDecisionPlan: CreatePlan<typeof requestDecisionInput, Reques
     input.blocks.forEach((taskId, i) => {
       if (!known.has(taskId)) issues.push({ path: `blocks.${i}`, message: `no task ${taskId}` });
     });
-    if (input.recommendedBy !== undefined) {
-      const [recommender] = await tx
-        .select({ id: agents.id })
-        .from(agents)
-        .where(eq(agents.id, input.recommendedBy));
-      if (!recommender) {
-        issues.push({ path: "recommendedBy", message: `no agent ${input.recommendedBy}` });
-      }
-    }
     if (issues.length > 0) throw ServiceError.invalid("The request body is invalid.", issues);
     const id = await nextDecisionId(tx);
     const [decision] = await tx
@@ -222,7 +313,7 @@ export const requestDecisionPlan: CreatePlan<typeof requestDecisionInput, Reques
         gate_type: input.gateType,
         options: input.options,
         blocks: input.blocks,
-        recommended_by: input.recommendedBy ?? null,
+        recommended_by: input.options.some((o) => o.recommended) ? actor.agentId : null,
         requested_by: actor.agentId,
         requested_at: at,
         source_url: input.sourceUrl,

@@ -1,5 +1,5 @@
 /**
- * B4's tables (SPEC §6.1): the RAID register and the lessons log. drizzle-kit reads only schema.ts, so migration 0002
+ * The RAID register and lessons log tables (SPEC §6.1). drizzle-kit reads only schema.ts, so migration 0002
  * is hand-written; tests/raid/schema.test.ts fails when 0002 and this file disagree.
  */
 import { sql, type SQL } from "drizzle-orm";

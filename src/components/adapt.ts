@@ -1,8 +1,20 @@
 import type * as S from "./server-types";
 import {
+  DECISION_STATUS_LABELS,
+  GATE_TYPE_LABELS,
+  LESSON_STATUS_LABELS,
   PR_STATE_LABELS,
+  RAID_STATUS_LABELS,
+  RAID_TYPE_LABELS,
+  REQUIREMENT_STATE_LABELS,
+  SEVERITY_LABELS,
+  TASK_GROUP_LABELS,
+  VALIDATION_STATE_LABELS,
   assertNever,
+  offersRevert,
   toInstant,
+  type ActivityChange,
+  type ActivityView,
   type AgentDirectory,
   type AgentRef,
   type AppError,
@@ -10,6 +22,7 @@ import {
   type DecisionView,
   type Directory,
   type LessonView,
+  type PrCountsView,
   type PrState,
   type PullRequestView,
   type RaidView,
@@ -37,12 +50,27 @@ export function adaptWorkspace(ws: S.Workspace): WorkspaceView {
     list.push(requirementView(r, dir.agents));
     requirements.set(r.task_id, list);
   }
+  const pendingDecisions = new Map<string, string[]>();
+  for (const d of ws.decisions) {
+    if (d.status !== "Pending") continue;
+    for (const taskId of d.blocks) {
+      const list = pendingDecisions.get(taskId) ?? [];
+      list.push(d.id);
+      pendingDecisions.set(taskId, list);
+    }
+  }
   return {
     ...dir,
-    tasks: ws.tasks.map((t) => taskView(t, dir, requirements.get(t.id) ?? [])),
+    tasks: ws.tasks.map((t) =>
+      taskView(t, dir, requirements.get(t.id) ?? [], pendingDecisions.get(t.id) ?? []),
+    ),
     decisions: ws.decisions.map((d) => decisionView(d, dir.agents)),
-    prs: ws.prs.map(pullRequestView),
   };
+}
+
+/** One decision, for the sheet's by-id read of a decision the workspace does not hold. */
+export function adaptDecision(d: S.Decision, agents: AgentDirectory): DecisionView {
+  return decisionView(d, agents);
 }
 
 /** Pages of an infinite query, newest first. Every page carries the same counts, so the first page's are used. */
@@ -67,6 +95,32 @@ export function adaptDecisionPages(
   };
 }
 
+/** Pages of the PR read, in the server's order (newest id first), with the first page's counts. */
+export function adaptPullRequestPages(pages: readonly S.GithubPrsPage[]): {
+  readonly items: readonly PullRequestView[];
+  readonly counts: PrCountsView | null;
+} {
+  const counts = pages[0]?.counts;
+  return {
+    items: pages.flatMap((page) => page.items.map(pullRequestView)),
+    counts:
+      counts === undefined
+        ? null
+        : { ...counts, stored: Object.values(counts.byState).reduce((sum, n) => sum + n, 0) },
+  };
+}
+
+/** Pages of the activity log, newest first, with the first page's counts. */
+export function adaptActivityPages(
+  pages: readonly S.ActivityPage[],
+  dir: Directory,
+): { readonly items: readonly ActivityView[]; readonly counts: S.ActivityCounts | null } {
+  return {
+    items: pages.flatMap((page) => page.items.map((entry) => activityView(entry, dir))),
+    counts: pages[0]?.counts ?? null,
+  };
+}
+
 export function adaptRaid(
   items: readonly S.RaidItem[],
   agents: AgentDirectory,
@@ -81,6 +135,36 @@ export function adaptLessons(
   return items.map((lesson) => lessonView(lesson, agents));
 }
 
+type ErrorBody = Readonly<Record<string, unknown>>;
+
+/**
+ * One parser per service error code. A new server code does not compile until it has one, so it can never fall
+ * through to `unreachable` and lose its message. A parser that returns null found the body malformed.
+ */
+const ERROR_PARSERS: {
+  readonly [C in S.ErrorCode]: (
+    body: ErrorBody,
+    message: string,
+  ) => Extract<AppError, { code: C }> | null;
+} = {
+  invalid: (body, message) => ({ code: "invalid", message, issues: parseIssues(body["issues"]) }),
+  unauthorized: (_, message) => ({ code: "unauthorized", message }),
+  forbidden: (_, message) => ({ code: "forbidden", message }),
+  not_found: (_, message) => ({ code: "not_found", message }),
+  version_conflict: (body, message) => {
+    const currentVersion = body["currentVersion"];
+    return typeof currentVersion === "number"
+      ? { code: "version_conflict", message, currentVersion }
+      : null;
+  },
+  not_revertible: (_, message) => ({ code: "not_revertible", message }),
+  idempotency_mismatch: (_, message) => ({ code: "idempotency_mismatch", message }),
+};
+
+function isErrorCode(value: unknown): value is S.ErrorCode {
+  return typeof value === "string" && Object.hasOwn(ERROR_PARSERS, value);
+}
+
 /**
  * The one parser for failures. It accepts the REST error body (`{ error: { code, message } }`), a bare service error
  * body, or a thrown value; anything that is not a known service error is `unreachable`.
@@ -88,27 +172,11 @@ export function adaptLessons(
 export function toAppError(error: unknown): AppError {
   const wrapped = isRecord(error) ? error["error"] : undefined;
   const body = isRecord(wrapped) ? wrapped : error;
-  const message = isRecord(body) ? body["message"] : undefined;
-  if (isRecord(body) && typeof message === "string") {
-    switch (body["code"]) {
-      case "version_conflict": {
-        const currentVersion = body["currentVersion"];
-        if (typeof currentVersion === "number") {
-          return { code: "version_conflict", message, currentVersion };
-        }
-        break;
-      }
-      case "invalid":
-        return { code: "invalid", message, issues: parseIssues(body["issues"]) };
-      case "unauthorized":
-        return { code: "unauthorized", message };
-      case "forbidden":
-        return { code: "forbidden", message };
-      case "not_found":
-        return { code: "not_found", message };
-      case "idempotency_mismatch":
-        return { code: "idempotency_mismatch", message };
-    }
+  if (isRecord(body)) {
+    const { code, message } = body;
+    const parsed =
+      isErrorCode(code) && typeof message === "string" ? ERROR_PARSERS[code](body, message) : null;
+    if (parsed !== null) return parsed;
   }
   if (error instanceof Error) return { code: "unreachable", message: error.message };
   return { code: "unreachable", message: "The server sent no readable answer." };
@@ -153,7 +221,12 @@ function requirementView(r: S.Requirement, agents: AgentDirectory): RequirementV
   };
 }
 
-function taskView(t: S.Task, dir: Directory, requirements: readonly RequirementView[]): TaskView {
+function taskView(
+  t: S.Task,
+  dir: Directory,
+  requirements: readonly RequirementView[],
+  pendingDecisions: readonly string[],
+): TaskView {
   const { agent, status, source_url, updated_at, ...rest } = t;
   return {
     ...rest,
@@ -162,6 +235,7 @@ function taskView(t: S.Task, dir: Directory, requirements: readonly RequirementV
     source: sourceRef(source_url),
     updatedAt: toInstant(updated_at),
     requirements,
+    pendingDecisions,
   };
 }
 
@@ -219,6 +293,128 @@ function recommendation(d: S.Decision, agents: AgentDirectory): DecisionView["re
   return { option: option.label, by: agentRef(d.recommended_by, agents) };
 }
 
+function activityView(entry: S.ActivityEntry, dir: Directory): ActivityView {
+  const { actor, before, after, created_at, ...rest } = entry;
+  return {
+    ...rest,
+    by: agentRef(actor, dir.agents),
+    opens: recordOf(entry),
+    changes: changesOf(entry, dir),
+    revertible: offersRevert(entry),
+    createdAt: toInstant(created_at),
+  };
+}
+
+/** Keys a write sets whatever it changed, or that point at its side effects. None of them says what changed. */
+const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
+  "id",
+  "version",
+  "created_by",
+  "updated_by",
+  "update_id",
+  "effects",
+  "reverts",
+]);
+
+/** A timestamp (`decided_at`, `revoked_at`) says when, which the row's own time already shows. */
+function isBookkeeping(key: string): boolean {
+  return BOOKKEEPING_KEYS.has(key) || key.endsWith("_at");
+}
+
+/** Longer text, or text on several lines, is named as edited instead of printed. */
+const SHORT_TEXT = 40;
+
+/** The page's labels for coded fields. A task's status is a status label id, so the directory resolves it instead. */
+const FIELD_LABELS: {
+  readonly [E in S.ActivityEntity]?: Readonly<Record<string, Readonly<Record<string, string>>>>;
+} = {
+  task: { group: TASK_GROUP_LABELS },
+  requirement: { state: REQUIREMENT_STATE_LABELS },
+  decision: { status: DECISION_STATUS_LABELS, gate_type: GATE_TYPE_LABELS },
+  raid_item: {
+    type: RAID_TYPE_LABELS,
+    status: RAID_STATUS_LABELS,
+    severity: SEVERITY_LABELS,
+    validation_state: VALIDATION_STATE_LABELS,
+  },
+  lesson: { status: LESSON_STATUS_LABELS },
+};
+
+/** Only an update has both snapshots; a create has no before, so it shows no change. */
+function changesOf(entry: S.ActivityEntry, dir: Directory): readonly ActivityChange[] {
+  const { before, after } = entry;
+  if (!isRecord(before) || !isRecord(after)) return [];
+  const keys = new Set([...Object.keys(after), ...Object.keys(before)]);
+  return [...keys].flatMap((key): ActivityChange[] => {
+    const from = valueAt(before, key);
+    const to = valueAt(after, key);
+    if (isBookkeeping(key) || JSON.stringify(from) === JSON.stringify(to)) return [];
+    const field = key.replace(/_/g, " ");
+    if (!isShort(from) || !isShort(to)) return [{ kind: "edited", field }];
+    return [
+      {
+        kind: "value",
+        field,
+        from: valueText(entry.entity, key, from, dir),
+        to: valueText(entry.entity, key, to, dir),
+      },
+    ];
+  });
+}
+
+/** A missing key and an empty string both read as no value, so neither shows as a change from the other. */
+function valueAt(snapshot: Readonly<Record<string, unknown>>, key: string): unknown {
+  const value = snapshot[key];
+  return value === undefined || value === "" ? null : value;
+}
+
+type Scalar = string | number | boolean | null;
+
+function isShort(value: unknown): value is Scalar {
+  if (typeof value === "string") return value.length <= SHORT_TEXT && !value.includes("\n");
+  return value === null || typeof value === "number" || typeof value === "boolean";
+}
+
+function valueText(entity: S.ActivityEntity, key: string, value: Scalar, dir: Directory): string {
+  if (value === null) return "none";
+  if (typeof value !== "string") return String(value);
+  if (entity === "task" && key === "status") return statusRef(value, dir.statuses).label;
+  if (key === "commit_sha") return value.slice(0, 7);
+  return labelIn(labelIn(FIELD_LABELS[entity], key), value) ?? value;
+}
+
+function labelIn<T>(table: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
+  return table !== undefined && Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/** A requirement opens its task's sheet; `after` names it, and `before` too when the write changed a requirement. */
+function recordOf(entry: S.ActivityEntry): ActivityView["opens"] {
+  switch (entry.entity) {
+    case "task":
+      return { kind: "task", id: entry.entity_id };
+    case "decision":
+      return { kind: "decision", id: entry.entity_id };
+    case "raid_item":
+      return { kind: "raid", id: entry.entity_id };
+    case "lesson":
+      return { kind: "lesson", id: entry.entity_id };
+    case "requirement": {
+      const taskId = textField(entry.after, "task_id") ?? textField(entry.before, "task_id");
+      return taskId === null ? null : { kind: "task", id: taskId };
+    }
+    case "agent_key":
+      return null;
+    default:
+      return assertNever(entry.entity);
+  }
+}
+
+function textField(snapshot: unknown, key: string): string | null {
+  if (!isRecord(snapshot)) return null;
+  const value = snapshot[key];
+  return typeof value === "string" ? value : null;
+}
+
 function pullRequestView(p: S.PullRequest): PullRequestView {
   const { state, url, fetched_at, ...rest } = p;
   return {
@@ -239,7 +435,9 @@ function prRef(url: string): NonNullable<UpdateView["pr"]> {
   return { source, number: number === undefined ? null : Number(number) };
 }
 
-/** B4's `BLOCKING_REF_PATTERN`: `task:<id>`, `decision:<id>` or an http(s) URL. Anything else stays text. */
+/**
+ * `BLOCKING_REF_PATTERN` in schema-raid.ts: `task:<id>`, `decision:<id>` or an http(s) URL. Anything else stays text.
+ */
 function blockingRef(raw: string): BlockingRef {
   const [, kind, id] = /^(task|decision):(\S+)$/.exec(raw) ?? [];
   if ((kind === "task" || kind === "decision") && id !== undefined) return { kind, id };

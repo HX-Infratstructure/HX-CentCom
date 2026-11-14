@@ -5,7 +5,7 @@ import type { Agent, Decision, Workspace } from "./server-types";
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
-// Names the seed roster does not use (tests/fixround/agent-roster.test.ts).
+// Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
 const AGENTS: readonly Agent[] = [
   { id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true },
 ];
@@ -45,7 +45,6 @@ function inbox(decisions: readonly Decision[]) {
     decisions,
     agents: AGENTS,
     statusLabels: [],
-    prs: [],
     repos: [],
     counts: {
       updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { routeTree } from "@/routeTree.gen";
 import type { Agent, StatusLabel, Task, UpdatesPage, Workspace } from "./server-types";
 
-// Names the seed roster does not use (tests/fixround/agent-roster.test.ts).
+// Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
 const AGENTS: readonly Agent[] = [
   { id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true },
   { id: "beacon", display_name: "Beacon", role: "agent", color: "sky", active: true },
@@ -40,6 +40,7 @@ function task(fields: Pick<Task, "id" | "title"> & Partial<Task>): Task {
     version: 1,
     updated_at: "2026-11-14T08:10:00.123456+00:00",
     progress: { proven: 0, total: 0, percent: null },
+    stale: null,
     ...fields,
   };
 }
@@ -53,7 +54,6 @@ function workspace(tasks: readonly Task[]): Workspace {
     decisions: [],
     agents: AGENTS,
     statusLabels: STATUSES,
-    prs: [],
     repos: [],
     counts: {
       updates: NO_UPDATES.counts,

@@ -187,7 +187,7 @@ describe("idempotency and versions on RAID and lesson writes", () => {
     expect(await rows()).toBe(before + 1);
   });
 
-  it("adds exactly one activity row per write, with B4's action and entity, and none for a refused write", async () => {
+  it("adds exactly one activity row per write, with its action and entity, and none for a refused write", async () => {
     const { item } = (await h.svc.createRaidItem(h.as.CC1, risk, { idempotencyKey: "a" })).value;
     await h.svc.createRaidItem(h.as.CC1, risk, { idempotencyKey: "a" });
     await h.svc.updateRaidItem(h.as.CC1, item.id, { mitigation: "watch it" });

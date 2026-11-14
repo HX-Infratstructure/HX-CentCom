@@ -63,12 +63,15 @@ describe("T15 automation 2: closing a dependency unblocks its task", () => {
   });
 
   it("keeps the task blocked until its last open dependency closes", async () => {
-    const first = await dependency(h.as.CC2, "HX12-01", "task:IRP-04");
-    const last = await dependency(h.as.CC2, "HX12-01", "decision:D-07");
+    // Only HX12-01's agent or the owner may pin or close a dependency on it (P2-1).
+    const openCode = await h.svc.resolveActor(await h.auth("OpenCode"));
+    if (!openCode) throw new Error("no OpenCode actor");
+    const first = await dependency(openCode, "HX12-01", "task:IRP-04");
+    const last = await dependency(openCode, "HX12-01", "decision:D-07");
     const before = await task("HX12-01");
-    await h.svc.updateRaidItem(h.as.CC2, first, { status: "closed" });
+    await h.svc.updateRaidItem(openCode, first, { status: "closed" });
     expect(await task("HX12-01")).toEqual(before);
-    await h.svc.updateRaidItem(h.as.CC2, last, { status: "closed" });
+    await h.svc.updateRaidItem(openCode, last, { status: "closed" });
     expect(await task("HX12-01")).toEqual({ blocked_on: "none", version: before.version + 1 });
     expect((await systemNotes("HX12-01")).map((u) => u.note)).toEqual([
       `${first} is closed. HX12-01 stays blocked: ${last} still open.`,
@@ -77,16 +80,16 @@ describe("T15 automation 2: closing a dependency unblocks its task", () => {
   });
 
   it("clears only a dependency block: a task blocked on assignment stays blocked", async () => {
-    // RO-01 is seeded with blocked_on assignment.
+    // RO-01 is seeded with blocked_on assignment and no agent, so only the owner pins or closes a dependency on it.
     const ids = [
-      await dependency(h.as.CC2, "RO-01", "decision:D-01"),
-      await dependency(h.as.CC2, "RO-01", "decision:D-03"),
-      await dependency(h.as.CC2, "RO-01", "task:HX14-02"),
+      await dependency(h.as.OWNER, "RO-01", "decision:D-01"),
+      await dependency(h.as.OWNER, "RO-01", "decision:D-03"),
+      await dependency(h.as.OWNER, "RO-01", "task:HX14-02"),
     ];
     const before = await task("RO-01");
     expect(before.blocked_on).toBe("assignment");
     for (const id of ids) {
-      const closed = await h.svc.updateRaidItem(h.as.CC2, id, { status: "closed" });
+      const closed = await h.svc.updateRaidItem(h.as.OWNER, id, { status: "closed" });
       expect(closed.value.systemUpdates).toHaveLength(1);
     }
     expect(await task("RO-01")).toEqual(before);

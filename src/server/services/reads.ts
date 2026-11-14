@@ -4,7 +4,24 @@
  * breaks the tie. Each read runs in one REPEATABLE READ, READ ONLY transaction, so its items and counts come from one
  * snapshot.
  */
-import { and, desc, eq, gte, isNotNull, lt, ne, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  arrayContains,
+  arrayOverlaps,
+  desc,
+  eq,
+  exists,
+  getTableColumns,
+  gte,
+  inArray,
+  isNotNull,
+  lt,
+  ne,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Db, Tx } from "@/server/db/client";
 import {
@@ -19,6 +36,7 @@ import {
   taskUpdates,
   type RequirementState,
 } from "@/server/db/schema";
+import type { Actor } from "./actor";
 import { ServiceError } from "./errors";
 import {
   activityQueryInput,
@@ -28,12 +46,17 @@ import {
   type Parsed,
 } from "./inputs";
 import type {
-  ActivityEntry,
+  ActivityCounts,
+  ActivityPage,
   Decision,
   DecisionCounts,
   DecisionsPage,
+  MyWork,
   Page,
   Progress,
+  Requirement,
+  Task,
+  TaskDetail,
   UpdateCounts,
   UpdatesPage,
   Workspace,
@@ -43,20 +66,21 @@ const SNAPSHOT = { isolationLevel: "repeatable read", accessMode: "read only" } 
 
 const isoMicros = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/);
 const feedCursor = z.tuple([isoMicros, z.string().uuid()]);
-const decisionCursor = z.tuple([
-  z.boolean(),
-  z.union([isoMicros, z.literal("-infinity")]),
-  z.string().min(1).max(100),
-]);
+const instantOrNone = z.union([isoMicros, z.literal("-infinity")]);
+const decisionId = z.string().min(1).max(100);
+const decisionCursor = z.tuple([z.boolean(), instantOrNone, decisionId]);
+/** The literal tag keeps a history cursor from parsing as a default one, and the other way round. */
+const historyCursor = z.tuple([z.literal("decided"), instantOrNone, decisionId]);
 
 type FeedKey = z.output<typeof feedCursor>;
 type DecisionKey = z.output<typeof decisionCursor>;
+type HistoryKey = z.output<typeof historyCursor>;
 
-function encodeCursor(key: FeedKey | DecisionKey): string {
+function encodeCursor(key: FeedKey | DecisionKey | HistoryKey): string {
   return Buffer.from(JSON.stringify(key), "utf8").toString("base64url");
 }
 
-function decodeCursor<S extends typeof feedCursor | typeof decisionCursor>(
+function decodeCursor<S extends typeof feedCursor | typeof decisionCursor | typeof historyCursor>(
   shape: S,
   cursor: string,
 ): z.output<S> {
@@ -95,49 +119,153 @@ export function computeProgress(
   );
 }
 
+const task = engineeringTasks;
+
+/** The task's SHA (7-40 hex) is a case-insensitive prefix of `sha` (GitHub's 40). */
+const pins = (sha: AnyPgColumn) =>
+  sql`left(lower(${sha}), length(${task.commit_sha})) = lower(${task.commit_sha})`;
+
+/** F9, one expression in the only Task loader, so every read of a task agrees on it. */
+const stale = sql<boolean | null>`case
+  when ${task.commit_sha} is null then null
+  when not exists (select 1 from ${githubRepos} where ${githubRepos.name} = ${task.repository}) then null
+  when exists (
+    select 1 from ${githubRepos} where ${githubRepos.name} = ${task.repository} and ${pins(githubRepos.head_sha)}
+  ) or exists (
+    select 1 from ${githubPrs} where ${githubPrs.repo} = ${task.repository} and (
+      (${githubPrs.state} = 'open' and ${pins(githubPrs.head_sha)})
+      or (${githubPrs.state} = 'merged' and ${pins(githubPrs.merge_commit_sha)})
+    )
+  ) then false
+  else true end`;
+
+/** The tasks that `where` selects, in board order, with their requirements and computed fields. */
+async function tasksWith(
+  tx: Tx,
+  where?: SQL,
+): Promise<{ readonly tasks: Task[]; readonly requirements: Requirement[] }> {
+  const rows = await tx
+    .select({ ...getTableColumns(task), stale })
+    .from(task)
+    .where(where)
+    .orderBy(sql`${task.start_date} asc nulls last`, task.id);
+  const requirements = await tx
+    .select()
+    .from(taskRequirements)
+    .where(inArray(taskRequirements.task_id, tx.select({ id: task.id }).from(task).where(where)))
+    .orderBy(taskRequirements.task_id, taskRequirements.created_at, taskRequirements.id);
+  const progress = computeProgress(requirements);
+  return {
+    tasks: rows.map((t) => ({ ...t, progress: progress.get(t.id) ?? NO_REQUIREMENTS })),
+    requirements,
+  };
+}
+
+/** The workspace's decision order: the earliest request first, unrecorded request times last. */
+const WORKSPACE_DECISION_ORDER = [
+  sql`${ownerDecisions.requested_at} asc nulls last`,
+  ownerDecisions.id,
+];
+
 export async function listWorkspace(db: Db): Promise<Workspace> {
   return db.transaction(async (tx) => {
-    const taskRows = await tx
-      .select()
-      .from(engineeringTasks)
-      .orderBy(sql`${engineeringTasks.start_date} asc nulls last`, engineeringTasks.id);
-    const requirements = await tx
-      .select()
-      .from(taskRequirements)
-      .orderBy(taskRequirements.task_id, taskRequirements.created_at, taskRequirements.id);
+    const { tasks, requirements } = await tasksWith(tx);
+    const blocksOpenTask = exists(
+      tx
+        .select({ id: task.id })
+        .from(task)
+        .where(and(sql`${task.id} = any(${ownerDecisions.blocks})`, ne(task.group, "done"))),
+    );
     const decisions = await tx
       .select()
       .from(ownerDecisions)
-      .orderBy(sql`${ownerDecisions.requested_at} asc nulls last`, ownerDecisions.id);
+      .where(or(eq(ownerDecisions.status, "Pending"), blocksOpenTask))
+      .orderBy(...WORKSPACE_DECISION_ORDER);
     const agentRows = await tx.select().from(agents).orderBy(agents.id);
     const labels = await tx.select().from(statusLabels).orderBy(statusLabels.id);
-    const prs = await tx.select().from(githubPrs).orderBy(githubPrs.repo, githubPrs.number);
     const repos = await tx.select().from(githubRepos).orderBy(githubRepos.name);
     const feed = await queryUpdates(tx, parse(updateQueryInput, {}));
     const decisionCounts = await countDecisions(tx, parse(decisionQueryInput, {}));
-    const progress = computeProgress(requirements);
     return {
-      tasks: taskRows.map((t) => ({ ...t, progress: progress.get(t.id) ?? NO_REQUIREMENTS })),
+      tasks,
       updates: feed.items,
       updatesCursor: feed.nextCursor,
       requirements,
       decisions,
       agents: agentRows,
       statusLabels: labels,
-      prs,
       repos,
       counts: { updates: feed.counts, decisions: decisionCounts },
     };
   }, SNAPSHOT);
 }
 
+export async function getTask(db: Db, taskId: string): Promise<TaskDetail> {
+  return db.transaction(async (tx) => {
+    const {
+      tasks: [found],
+      requirements,
+    } = await tasksWith(tx, eq(task.id, taskId));
+    if (!found) throw ServiceError.notFound("Task", taskId);
+    const decisions = await tx
+      .select()
+      .from(ownerDecisions)
+      .where(arrayContains(ownerDecisions.blocks, [taskId]))
+      .orderBy(...WORKSPACE_DECISION_ORDER);
+    return { task: found, requirements, decisions };
+  }, SNAPSHOT);
+}
+
+export async function myWork(db: Db, actor: Actor | null, agentId?: string): Promise<MyWork> {
+  const who = agentId ?? actor?.agentId;
+  if (who === undefined) {
+    throw ServiceError.invalid("agentId is required when no bearer key is sent.", [
+      { path: "agentId", message: "required without a bearer key" },
+    ]);
+  }
+  return db.transaction(async (tx) => {
+    const [agent] = await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, who));
+    if (!agent) throw ServiceError.notFound("Agent", who);
+    const { tasks, requirements } = await tasksWith(
+      tx,
+      and(eq(task.agent, who), ne(task.group, "done")),
+    );
+    const taskIds = tasks.map((t) => t.id);
+    const pendingDecisions = await tx
+      .select()
+      .from(ownerDecisions)
+      .where(
+        and(
+          eq(ownerDecisions.status, "Pending"),
+          or(
+            eq(ownerDecisions.requested_by, who),
+            taskIds.length === 0 ? undefined : arrayOverlaps(ownerDecisions.blocks, taskIds),
+          ),
+        ),
+      )
+      .orderBy(...WORKSPACE_DECISION_ORDER);
+    return {
+      agentId: who,
+      tasks,
+      openRequirements: requirements.filter((r) => r.state !== "PASS"),
+      pendingDecisions,
+    };
+  }, SNAPSHOT);
+}
+
 export async function listUpdates(db: Db, raw: unknown): Promise<UpdatesPage> {
   const query = parse(updateQueryInput, raw);
+  if (query.taskId !== undefined && query.taskIds !== undefined) {
+    throw ServiceError.invalid("Give taskId or taskIds, not both.", [
+      { path: "taskIds", message: "cannot be combined with taskId" },
+    ]);
+  }
   return db.transaction((tx) => queryUpdates(tx, query), SNAPSHOT);
 }
 
 type UpdateFacet = "agent" | "task" | "source";
 
+/** `taskIds` belongs to the task facet with `taskId`, so `byTask` drops both and every other count applies them. */
 function updateFilters(query: Parsed<typeof updateQueryInput>, except?: UpdateFacet): SQL[] {
   const filters: (SQL | undefined)[] = [
     except !== "agent" && query.agentId !== undefined
@@ -145,6 +273,9 @@ function updateFilters(query: Parsed<typeof updateQueryInput>, except?: UpdateFa
       : undefined,
     except !== "task" && query.taskId !== undefined
       ? eq(taskUpdates.task_id, query.taskId)
+      : undefined,
+    except !== "task" && query.taskIds !== undefined
+      ? inArray(taskUpdates.task_id, query.taskIds)
       : undefined,
     except !== "source" && query.source !== undefined
       ? eq(taskUpdates.source, query.source)
@@ -174,7 +305,7 @@ const feedKey = (row: { readonly created_at: string; readonly id: string }): Fee
 async function page<T>(
   query: { limit(n: number): PromiseLike<T[]> },
   limit: number,
-  key: (row: T) => FeedKey | DecisionKey,
+  key: (row: T) => FeedKey | DecisionKey | HistoryKey,
 ): Promise<Page<T>> {
   const rows = await query.limit(limit + 1);
   const items = rows.slice(0, limit);
@@ -226,53 +357,113 @@ async function queryUpdates(tx: Tx, query: Parsed<typeof updateQueryInput>): Pro
   return { ...feed, counts };
 }
 
-export async function listActivity(db: Db, raw: unknown): Promise<Page<ActivityEntry>> {
+type ActivityFacet = "actor" | "entity";
+
+/** Each facet count drops only its own filter; `entityId` and `since` always apply, as `since`/`until` do for updates. */
+function activityFilters(query: Parsed<typeof activityQueryInput>, except?: ActivityFacet): SQL[] {
+  const filters: (SQL | undefined)[] = [
+    except !== "actor" && query.actor !== undefined
+      ? eq(activityLog.actor, query.actor)
+      : undefined,
+    except !== "entity" && query.entity !== undefined
+      ? eq(activityLog.entity, query.entity)
+      : undefined,
+    query.entityId !== undefined ? eq(activityLog.entity_id, query.entityId) : undefined,
+    query.since !== undefined ? gte(activityLog.created_at, query.since) : undefined,
+  ];
+  return filters.filter((f): f is SQL => f !== undefined);
+}
+
+export async function listActivity(db: Db, raw: unknown): Promise<ActivityPage> {
   const query = parse(activityQueryInput, raw);
-  return db.transaction(
-    (tx) =>
-      page(
-        tx
-          .select()
-          .from(activityLog)
-          .where(
-            and(
-              query.actor !== undefined ? eq(activityLog.actor, query.actor) : undefined,
-              query.entity !== undefined ? eq(activityLog.entity, query.entity) : undefined,
-              query.entityId !== undefined ? eq(activityLog.entity_id, query.entityId) : undefined,
-              query.since !== undefined ? gte(activityLog.created_at, query.since) : undefined,
-              olderThan(activityLog.created_at, activityLog.id, query.cursor),
-            ),
-          )
-          .orderBy(desc(activityLog.created_at), desc(activityLog.id)),
-        query.limit,
-        feedKey,
-      ),
-    SNAPSHOT,
-  );
+  return db.transaction(async (tx) => {
+    const filters = activityFilters(query);
+    const entries = await page(
+      tx
+        .select()
+        .from(activityLog)
+        .where(and(...filters, olderThan(activityLog.created_at, activityLog.id, query.cursor)))
+        .orderBy(desc(activityLog.created_at), desc(activityLog.id)),
+      query.limit,
+      feedKey,
+    );
+    const [total] = await tx
+      .select({ n: count })
+      .from(activityLog)
+      .where(and(...filters));
+    const byActor = await tx
+      .select({ key: activityLog.actor, n: count })
+      .from(activityLog)
+      .where(and(...activityFilters(query, "actor")))
+      .groupBy(activityLog.actor);
+    const byEntity = await tx
+      .select({ key: activityLog.entity, n: count })
+      .from(activityLog)
+      .where(and(...activityFilters(query, "entity")))
+      .groupBy(activityLog.entity);
+    const counts: ActivityCounts = {
+      total: total?.n ?? 0,
+      byActor: Object.fromEntries(byActor.map((r) => [r.key, r.n])),
+      byEntity: Object.fromEntries(byEntity.map((r) => [r.key, r.n])),
+    };
+    return { ...entries, counts };
+  }, SNAPSHOT);
+}
+
+export async function getDecision(db: Db, decisionId: string): Promise<Decision> {
+  return db.transaction(async (tx) => {
+    const [decision] = await tx
+      .select()
+      .from(ownerDecisions)
+      .where(eq(ownerDecisions.id, decisionId));
+    if (!decision) throw ServiceError.notFound("Decision", decisionId);
+    return decision;
+  }, SNAPSHOT);
 }
 
 /**
- * requested_at may be null (not recorded), so it sorts as -infinity: the order stays total, and the cursor compares
- * the same three expressions as one row value.
+ * requested_at and decided_at may be null (not recorded), so they sort as -infinity: each order stays total, and its
+ * cursor compares the same expressions as one row value.
  */
 const pendingFirst = sql<boolean>`(${ownerDecisions.status} = 'Pending')`;
 const requestedAt = sql<string>`coalesce(${ownerDecisions.requested_at}, '-infinity'::timestamptz)`;
-const DECISION_ORDER = [desc(pendingFirst), desc(requestedAt), desc(ownerDecisions.id)];
+const decidedAt = sql<string>`coalesce(${ownerDecisions.decided_at}, '-infinity'::timestamptz)`;
 
-const decisionKey = (row: Decision): DecisionKey => [
-  row.status === "Pending",
-  row.requested_at ?? "-infinity",
-  row.id,
-];
+type DecisionOrder = {
+  readonly orderBy: readonly SQL[];
+  after(cursor: string | undefined): SQL | undefined;
+  key(row: Decision): DecisionKey | HistoryKey;
+};
 
-function afterDecision(cursor: string | undefined): SQL | undefined {
-  if (cursor === undefined) return undefined;
-  const [pending, requested, id] = decodeCursor(decisionCursor, cursor);
-  return sql`(${pendingFirst}, ${requestedAt}, ${ownerDecisions.id}) < (${pending}::boolean, ${requested}::timestamptz, ${id}::text)`;
-}
+/** Pending first, then the latest request. */
+const PENDING_FIRST: DecisionOrder = {
+  orderBy: [desc(pendingFirst), desc(requestedAt), desc(ownerDecisions.id)],
+  after(cursor) {
+    if (cursor === undefined) return undefined;
+    const [pending, requested, id] = decodeCursor(decisionCursor, cursor);
+    return sql`(${pendingFirst}, ${requestedAt}, ${ownerDecisions.id}) < (${pending}::boolean, ${requested}::timestamptz, ${id}::text)`;
+  },
+  key: (row) => [row.status === "Pending", row.requested_at ?? "-infinity", row.id],
+};
+
+/** P3-5: a history lists the newest decision first. */
+const NEWEST_DECIDED: DecisionOrder = {
+  orderBy: [desc(decidedAt), desc(ownerDecisions.id)],
+  after(cursor) {
+    if (cursor === undefined) return undefined;
+    const [, decided, id] = decodeCursor(historyCursor, cursor);
+    return sql`(${decidedAt}, ${ownerDecisions.id}) < (${decided}::timestamptz, ${id}::text)`;
+  },
+  key: (row) => ["decided", row.decided_at ?? "-infinity", row.id],
+};
 
 type DecisionFacet = "gateType" | "status";
 type DecisionQuery = Parsed<typeof decisionQueryInput>;
+
+/** A status filter that admits no Pending decision is a history. */
+function decisionOrder(status: DecisionQuery["status"]): DecisionOrder {
+  return status === undefined || status === "Pending" ? PENDING_FIRST : NEWEST_DECIDED;
+}
 
 function statusFilter(status: NonNullable<DecisionQuery["status"]>): SQL {
   return status === "not_pending"
@@ -317,15 +508,16 @@ async function countDecisions(
 
 export async function listDecisions(db: Db, raw: unknown): Promise<DecisionsPage> {
   const query = parse(decisionQueryInput, raw);
+  const order = decisionOrder(query.status);
   return db.transaction(async (tx) => {
     const decisions = await page(
       tx
         .select()
         .from(ownerDecisions)
-        .where(and(...decisionFilters(query), afterDecision(query.cursor)))
-        .orderBy(...DECISION_ORDER),
+        .where(and(...decisionFilters(query), order.after(query.cursor)))
+        .orderBy(...order.orderBy),
       query.limit,
-      decisionKey,
+      (row) => order.key(row),
     );
     return { ...decisions, counts: await countDecisions(tx, query) };
   }, SNAPSHOT);

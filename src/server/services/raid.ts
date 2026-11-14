@@ -1,5 +1,5 @@
 /**
- * The RAID register (SPEC §6.1). Every write is one plan object in A1's shape (writes.ts), run by A1's writer
+ * The RAID register (SPEC §6.1). Every write is one plan object in the shape of writes.ts, run by the shared writer
  * (pipeline.ts). Automations 1 and 2 run inside the plan whose write triggers them, in that write's transaction.
  */
 import { and, desc, eq, inArray, isNotNull, ne, notExists, sql, type SQL } from "drizzle-orm";
@@ -24,8 +24,9 @@ import {
 } from "@/server/db/schema-raid";
 import type { Actor } from "./actor";
 import { ServiceError, type Issue } from "./errors";
-import { parse, requestDecisionInput, sourceRef } from "./inputs";
+import { parse, pgInstant, requestDecisionInput, sourceRef } from "./inputs";
 import type { CreatePlan, UpdatePlan, WriteContext } from "./pipeline";
+import { authorizeTaskWrite } from "./policy";
 import type {
   CreateOptions,
   Decision,
@@ -40,7 +41,7 @@ export type RaidItem = typeof raidItems.$inferSelect;
 
 // §1 Shared helpers.
 
-/** reads.ts keeps its keyset helpers private; these order by (created_at desc, id desc) as A1's feeds do. */
+/** reads.ts keeps its keyset helpers private; these order by (created_at desc, id desc) as its feeds do. */
 export const SNAPSHOT = { isolationLevel: "repeatable read", accessMode: "read only" } as const;
 
 const isoMicros = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/);
@@ -50,36 +51,42 @@ export type Keyset = {
   olderThan(createdAt: AnyPgColumn, id: AnyPgColumn, cursor: string | undefined): SQL | undefined;
 };
 
+/** A cursor is the base64url JSON of its row's sort key. */
+export function encodeCursor(key: readonly Json[]): string {
+  return Buffer.from(JSON.stringify(key), "utf8").toString("base64url");
+}
+
+/** A cursor that is not `shape`'s, a cursor from another list included, is 400 at `cursor`. */
+export function decodeCursor<S extends z.ZodTypeAny>(shape: S, cursor: string): z.output<S> {
+  const malformed = () =>
+    ServiceError.invalid("The cursor is malformed.", [
+      { path: "cursor", message: "not a cursor from this API" },
+    ]);
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+  } catch {
+    throw malformed();
+  }
+  const parsed = shape.safeParse(decoded);
+  if (!parsed.success) throw malformed();
+  return parsed.data as z.output<S>;
+}
+
 export function keyset(idPattern: string): Keyset {
   const shape = z.tuple([isoMicros, z.string().regex(new RegExp(idPattern))]);
-  const decode = (cursor: string): z.output<typeof shape> => {
-    const malformed = () =>
-      ServiceError.invalid("The cursor is malformed.", [
-        { path: "cursor", message: "not a cursor from this API" },
-      ]);
-    let decoded: unknown;
-    try {
-      decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    } catch {
-      throw malformed();
-    }
-    const parsed = shape.safeParse(decoded);
-    if (!parsed.success) throw malformed();
-    return parsed.data;
-  };
   return {
-    encode: (row) =>
-      Buffer.from(JSON.stringify([row.created_at, row.id]), "utf8").toString("base64url"),
+    encode: (row) => encodeCursor([row.created_at, row.id]),
     olderThan(createdAt, id, cursor) {
       if (cursor === undefined) return undefined;
-      const [createdAtKey, idKey] = decode(cursor);
+      const [createdAtKey, idKey] = decodeCursor(shape, cursor);
       return sql`(${createdAt}, ${id}) < (${createdAtKey}::timestamptz, ${idKey}::text)`;
     },
   };
 }
 
 /** Fetches one row past `limit`; only that row's presence shows a next page exists. */
-export async function page<T extends { readonly created_at: string; readonly id: string }>(
+export async function page<T>(
   query: { limit(n: number): PromiseLike<T[]> },
   limit: number,
   encode: (row: T) => string,
@@ -124,7 +131,7 @@ const raidFields = {
     .enum(SEVERITIES)
     .nullable()
     .describe("Setting it records you as the rater; null clears it."),
-  reviewAt: z.string().datetime({ offset: true }).nullable(),
+  reviewAt: pgInstant.nullable(),
   taskIds: z
     .array(id)
     .max(20)
@@ -147,7 +154,7 @@ const raidFields = {
   blockedTaskId: id
     .nullable()
     .describe(
-      "Dependency only, required: the task it blocks. Closing the dependency unblocks a task blocked on dependency once no other open dependency blocks it.",
+      "Dependency only, required: the task it blocks, one assigned to you unless you are the owner. Closing the dependency unblocks a task blocked on dependency once no other open dependency blocks it.",
     ),
   blockingRef: z
     .string()
@@ -317,7 +324,7 @@ type References = Partial<
   >
 >;
 
-/** The referenced agent, tasks and decisions must exist, as A1 checks a decision's `blocks`. */
+/** The referenced agent, tasks and decisions must exist, as requestDecisionPlan checks a decision's `blocks`. */
 async function referenceIssues(tx: Tx, refs: References): Promise<Issue[]> {
   const issues: Issue[] = [];
   const [kind, target] = refs.blockingRef?.split(/:(.*)/s) ?? [];
@@ -401,13 +408,10 @@ function afterWith(item: RaidItem, effects: Effects): Json {
 
 const OPENS_DECISION: readonly Severity[] = ["high", "critical"];
 
-/** A1's decision input, with B4's source rule: an issue cited from HX-15 gives its decision that source. */
-const issueDecisionInput = requestDecisionInput.innerType().extend({ sourceUrl: sourceRef });
-
 /**
  * Automation 1 (SPEC §6.1; CC1: only while decision_id is null). Level-triggered on the stored row: an open or
- * monitored issue with severity high or critical and no decision. It runs A1's own requestDecisionPlan in this
- * transaction, so the decision draws its id from A1's sequence and records this actor and clock; the RAID write's
+ * monitored issue with severity high or critical and no decision. It runs requestDecisionPlan in this transaction,
+ * so the decision draws its id from the decision id sequence and records this actor and clock; the RAID write's
  * one activity row records it. The row is new or locked, so a repeat sees decision_id set; a replay never runs this.
  */
 async function openIssueDecision(
@@ -424,7 +428,7 @@ async function openIssueDecision(
   ) {
     return null;
   }
-  const input = parse(issueDecisionInput, {
+  const input = parse(requestDecisionInput, {
     question: `Owner decision needed for ${item.id}, a ${item.severity} issue: ${item.title}`,
     subject: item.id,
     summary: item.summary,
@@ -446,6 +450,41 @@ async function openIssueDecision(
   return { item: linked, decision };
 }
 
+type DependencyState = Pick<RaidItem, "type" | "status" | "blocked_task_id">;
+
+/** Automation 2's trigger: a dependency on a task moves into closed. */
+function closesDependency(before: DependencyState | null, after: DependencyState): boolean {
+  return (
+    after.type === "dependency" &&
+    before?.status !== "closed" &&
+    after.status === "closed" &&
+    after.blocked_task_id !== null
+  );
+}
+
+/**
+ * P2-1. Pinning a dependency on a task (a create, or a retarget onto it) or closing one on it writes that task, so it
+ * needs the owner or the task's agent. Moving a dependency away changes nothing on the task it leaves. It runs after
+ * the 400 checks, and on create before nextRaidId, so a refusal draws no id.
+ */
+async function authorizeDependencyTarget(
+  tx: Tx,
+  actor: Actor,
+  before: DependencyState | null,
+  after: DependencyState,
+): Promise<void> {
+  const taskId = after.blocked_task_id;
+  if (actor.role === "owner" || after.type !== "dependency" || taskId === null) return;
+  const pins = before === null || before.blocked_task_id !== taskId;
+  if (!pins && !closesDependency(before, after)) return;
+  const [task] = await tx
+    .select({ id: engineeringTasks.id, agent: engineeringTasks.agent })
+    .from(engineeringTasks)
+    .where(eq(engineeringTasks.id, taskId));
+  if (!task) throw new Error(`blocked task ${taskId} vanished after its reference check`);
+  authorizeTaskWrite(actor, task);
+}
+
 type Closed = {
   readonly systemUpdates: readonly TaskUpdate[];
   readonly unblockedTask: { readonly id: string; readonly version: number } | null;
@@ -465,14 +504,7 @@ async function closeDependency(
   after: RaidItem,
 ): Promise<Closed> {
   const taskId = after.blocked_task_id;
-  if (
-    after.type !== "dependency" ||
-    before.status === "closed" ||
-    after.status !== "closed" ||
-    taskId === null
-  ) {
-    return NOTHING_CLOSED;
-  }
+  if (taskId === null || !closesDependency(before, after)) return NOTHING_CLOSED;
   const [task] = await tx
     .select({ blocked_on: engineeringTasks.blocked_on })
     .from(engineeringTasks)
@@ -527,6 +559,11 @@ export const createRaidItemPlan: CreatePlan<typeof createRaidItemInput, RaidWrit
   async apply(tx, ctx) {
     const { actor, input, at } = ctx;
     throwIfAny(await referenceIssues(tx, input));
+    await authorizeDependencyTarget(tx, actor, null, {
+      type: input.type,
+      status: input.status,
+      blocked_task_id: input.blockedTaskId ?? null,
+    });
     const columns = withRequiredDefaults(input.type, raidColumns(input));
     const id = await nextRaidId(tx);
     const [inserted] = await tx
@@ -575,6 +612,7 @@ export function updateRaidItemPlan(
       const columns = raidColumns(input);
       const merged = { ...before, ...columns };
       throwIfAny([...raidShapeIssues(before.type, merged), ...(await referenceIssues(tx, input))]);
+      await authorizeDependencyTarget(tx, actor, before, merged);
       const [updated] = await tx
         .update(raidItems)
         .set({

@@ -18,6 +18,7 @@ export const POLICY: Readonly<Record<ActivityAction, Rule>> = {
   "raid.update": "own-row",
   "lesson.create": "any",
   "lesson.update": "own-row",
+  "activity.revert": "owner",
 };
 
 /** An agent calling an owner action gets 403 before its body is parsed or its idempotency key claimed. */
@@ -29,6 +30,9 @@ export function gate(actor: Actor, action: ActivityAction): void {
 
 type Scope = { readonly editors: readonly (string | null)[]; readonly refusal: string };
 
+const taskRefusal = (agentId: string, taskId: string) =>
+  `${agentId} may write only its own tasks; ${taskId} is not one.`;
+
 /**
  * SPEC §6.1 actor scope: the agents besides the owner who may write the row, and the refusal for anyone else. Seed
  * RAID items and lessons have created_by null. No agent edits a decision.
@@ -37,13 +41,10 @@ function rowScope(root: LockedRoot, agentId: string, action: ActivityAction): Sc
   const { id } = root.row;
   switch (root.kind) {
     case "task":
-      return {
-        editors: [root.row.agent],
-        refusal: `${agentId} may write only its own tasks; ${id} is not one.`,
-      };
+      return { editors: [root.row.agent], refusal: taskRefusal(agentId, id) };
     case "raid_item":
       return {
-        editors: [root.row.owner_agent, root.row.created_by],
+        editors: [root.row.owner_agent, root.row.created_by, root.blockedTaskAgent],
         refusal: `${agentId} may edit only RAID items it owns or created; ${id} is not one.`,
       };
     case "lesson":
@@ -65,4 +66,13 @@ export function authorize(actor: Actor, action: ActivityAction, root: LockedRoot
   }
   const { editors, refusal } = rowScope(root, actor.agentId, action);
   if (!editors.includes(actor.agentId)) throw ServiceError.forbidden(refusal);
+}
+
+/** A write that changes a task's state through another row (a RAID dependency) needs the owner or the task's agent. */
+export function authorizeTaskWrite(
+  actor: Actor,
+  task: { readonly id: string; readonly agent: string | null },
+): void {
+  if (actor.role === "owner" || task.agent === actor.agentId) return;
+  throw ServiceError.forbidden(taskRefusal(actor.agentId, task.id));
 }

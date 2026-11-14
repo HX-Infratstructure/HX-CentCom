@@ -1,32 +1,28 @@
-import { useCallback, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useId, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import {
   infiniteQueryOptions,
   queryOptions,
+  skipToken,
   useInfiniteQuery,
-  useQueryClient,
+  useQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { adaptDecisionPages, adaptWorkspace, toAppError } from "@/components/adapt";
+import { adaptDecision, adaptDecisionPages, adaptWorkspace, toAppError } from "@/components/adapt";
 import { DecisionDetail, DecisionList } from "@/components/decision";
 import { detailFrom } from "@/components/detail";
 import { EmptyState, ErrorState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
-import {
-  DECISION_STATUS_LABELS,
-  splitInbox,
-  type AgentDirectory,
-  type OwnerActions,
-} from "@/components/model";
-import { forgetOwnerKey, useOwnerKey } from "@/components/owner-key";
+import { DECISION_STATUS_LABELS, splitInbox, type AgentDirectory } from "@/components/model";
 import { useOpenRecord } from "@/components/open-record";
-import type { DecisionsPage, DecisionStatus, GateType } from "@/components/server-types";
+import type { Decision, DecisionsPage, DecisionStatus, GateType } from "@/components/server-types";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
-import { listDecisions } from "@/lib/tasks.functions";
+import { useOwnerActions } from "@/lib/owner-actions";
+import { getDecision, listDecisions } from "@/lib/tasks.functions";
 import { tasksQuery } from "@/lib/task-data";
 
 type DecisionQuery = {
@@ -36,12 +32,24 @@ type DecisionQuery = {
 
 const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
 
-/** Facet counts for the filter bar: every filter applies except the facet's own (A1's DecisionCounts). */
+/** Facet counts for the filter bar: every filter applies except the facet's own (DecisionCounts). */
 function countsQuery(query: DecisionQuery) {
   return queryOptions({
     queryKey: ["decisions", "counts", query],
     queryFn: () => listDecisions({ data: { ...query, limit: 1 } }),
     select: (page) => page.counts,
+  });
+}
+
+/**
+ * The open sheet's decision when the workspace does not hold it: a decided one from History, a "Superseded by" or
+ * RAID link, or a deep link. null is a miss. It runs whenever a sheet is open, so its data is already cached when a
+ * decision the owner just decided leaves the workspace.
+ */
+function decisionById(id: string | undefined) {
+  return queryOptions({
+    queryKey: ["decisions", "one", id],
+    queryFn: id === undefined ? skipToken : () => getDecision({ data: { id } }),
   });
 }
 
@@ -92,6 +100,11 @@ function DecisionsPage(): ReactNode {
   );
   const owner = useOwnerActions();
   const record = useOpenRecord();
+  const selectDecision = useCallback(
+    (d: Decision | null) => (d === null ? null : adaptDecision(d, ws.agents)),
+    [ws.agents],
+  );
+  const byId = useQuery({ ...decisionById(record.id), select: selectDecision });
   const filtered = lists.decisions.active(filters);
 
   return (
@@ -127,7 +140,7 @@ function DecisionsPage(): ReactNode {
         />
       )}
       <DecisionDetail
-        detail={detailFrom(record.id, ws.decisions)}
+        detail={detailFrom(record.id, ws.decisions, byId)}
         owner={owner}
         onClose={record.close}
       />
@@ -247,36 +260,4 @@ function HistorySection({
       </div>
     </section>
   );
-}
-
-/** Owner mode exists only while this tab holds an owner key; the REST route checks it on every decision. */
-function useOwnerActions(): OwnerActions | null {
-  const key = useOwnerKey();
-  const queryClient = useQueryClient();
-  return useMemo(() => {
-    if (key === null) return null;
-    return {
-      async decide(target, input, idempotencyKey) {
-        const response = await fetch(`/api/v1/decisions/${encodeURIComponent(target.id)}/decide`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "Content-Type": "application/json",
-            "If-Match": String(target.version),
-            "Idempotency-Key": idempotencyKey,
-          },
-          body: JSON.stringify(input),
-        });
-        if (response.ok) return { ok: true };
-        const body: unknown = await response.json().catch(() => null);
-        return { ok: false, error: toAppError(body) };
-      },
-      reload() {
-        void queryClient.invalidateQueries({ queryKey: ["decisions"] });
-        void queryClient.invalidateQueries({ queryKey: ["updates"] });
-        void queryClient.invalidateQueries({ queryKey: tasksQuery.queryKey });
-      },
-      rejectKey: forgetOwnerKey,
-    };
-  }, [key, queryClient]);
 }

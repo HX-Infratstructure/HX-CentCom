@@ -16,7 +16,7 @@ const systemNotes = (taskId: string) =>
   );
 
 describe("T15 automation 3: a task that becomes done asks its agent for lessons", () => {
-  it("posts exactly one system update when a task moves to Complete, and leaves A1's answer as it was", async () => {
+  it("posts exactly one system update when a task moves to Complete, and leaves the answer as it was", async () => {
     // CC-01 is seeded In progress with agent CC1.
     const result = await h.svc.postProgress(h.as.CC1, "CC-01", {
       note: "Built.",

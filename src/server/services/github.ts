@@ -3,11 +3,26 @@
  * activity_log row. The sync is not an agent (activity_log.actor references agents), and copying GitHub's state is
  * not an actor's write.
  */
-import { eq, getTableColumns, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, lt, sql, type SQL } from "drizzle-orm";
+import { z } from "zod";
 import type { Db } from "@/server/db/client";
 import { githubPrs, githubRepos } from "@/server/db/schema";
+import { parse } from "./inputs";
+import {
+  count,
+  decodeCursor,
+  encodeCursor,
+  listCursor,
+  listLimit,
+  page,
+  SNAPSHOT,
+  tally,
+  text,
+} from "./raid";
+import type { Page, PullRequest } from "./types";
 
-export type GithubPrState = "open" | "closed" | "merged" | "gone";
+export const GITHUB_PR_STATES = ["open", "closed", "merged", "gone"] as const;
+export type GithubPrState = (typeof GITHUB_PR_STATES)[number];
 
 export type GithubRepoInput = {
   readonly name: string;
@@ -97,4 +112,73 @@ export async function listOpenGithubPrs(db: Db): Promise<GithubPrRef[]> {
     .select({ id: githubPrs.id, repo: githubPrs.repo, number: githubPrs.number })
     .from(githubPrs)
     .where(eq(githubPrs.state, "open"));
+}
+
+export const githubPrQueryInput = z
+  .object({
+    repo: text(200).optional(),
+    state: z.enum(GITHUB_PR_STATES).optional(),
+    limit: listLimit,
+    cursor: listCursor.optional(),
+  })
+  .default({});
+export type GithubPrQueryInput = z.input<typeof githubPrQueryInput>;
+
+/** Chip counts under the listRaid rule: each facet applies every filter but its own, and none uses the cursor. */
+export type GithubPrCounts = {
+  readonly total: number;
+  readonly byRepo: Readonly<Record<string, number>>;
+  readonly byState: Readonly<Partial<Record<GithubPrState, number>>>;
+};
+export type GithubPrsPage = Page<PullRequest> & { readonly counts: GithubPrCounts };
+
+/** GitHub fixes a PR's id at creation, while fetched_at moves on every sync, so the id alone orders and pages. */
+const prCursor = z.tuple([z.number().int().positive()]);
+
+type PrFacet = "repo" | "state";
+
+function prFilters(query: z.output<typeof githubPrQueryInput>, except?: PrFacet): SQL[] {
+  const filters: (SQL | undefined)[] = [
+    except !== "repo" && query.repo !== undefined ? eq(githubPrs.repo, query.repo) : undefined,
+    except !== "state" && query.state !== undefined ? eq(githubPrs.state, query.state) : undefined,
+  ];
+  return filters.filter((f): f is SQL => f !== undefined);
+}
+
+/** R12: the mirrored PRs, newest id first, in one REPEATABLE READ, READ ONLY snapshot. */
+export async function listGithubPrs(db: Db, raw: unknown): Promise<GithubPrsPage> {
+  const query = parse(githubPrQueryInput, raw);
+  return db.transaction(async (tx) => {
+    const after =
+      query.cursor === undefined
+        ? undefined
+        : lt(githubPrs.id, decodeCursor(prCursor, query.cursor)[0]);
+    const items = await page(
+      tx
+        .select()
+        .from(githubPrs)
+        .where(and(...prFilters(query), after))
+        .orderBy(desc(githubPrs.id)),
+      query.limit,
+      (row) => encodeCursor([row.id]),
+    );
+    const [total] = await tx
+      .select({ n: count })
+      .from(githubPrs)
+      .where(and(...prFilters(query)));
+    const byRepo = await tx
+      .select({ key: githubPrs.repo, n: count })
+      .from(githubPrs)
+      .where(and(...prFilters(query, "repo")))
+      .groupBy(githubPrs.repo);
+    const byState = await tx
+      .select({ key: githubPrs.state, n: count })
+      .from(githubPrs)
+      .where(and(...prFilters(query, "state")))
+      .groupBy(githubPrs.state);
+    return {
+      ...items,
+      counts: { total: total?.n ?? 0, byRepo: tally(byRepo), byState: tally(byState) },
+    };
+  }, SNAPSHOT);
 }

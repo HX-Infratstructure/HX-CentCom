@@ -1,4 +1,4 @@
-// The final-round seed fixes. Expected values are copied from their sources, never read off the seed:
+// Seeded decisions, labels and sources. Expected values are copied from their sources, never read off the seed:
 // - DECISION-SEED.md (docs/wu1-monday-reference): D-03's summary and description, and D-17 split out of D-03;
 // - the 0001 Lovable rows at 3e39a5c (lines 99-115): D-03's question, whose deploy half is kept;
 // - writes.ts GROUP_BY_STATUS and NEXT-BRIEFS.md "Post-B4 cleanup and final round": the "Ready for owner" label;

@@ -56,7 +56,7 @@ interface GitHubBranch {
   commit: { sha: string };
 }
 
-/** `null` is GitHub's 404 for a PR that the database still holds. */
+/** `null` is GitHub's 404 or redirect for a PR that the database still holds. */
 function prState(pull: GitHubPull | null): GithubPrState {
   if (pull === null) return "gone";
   return pull.merged_at ? "merged" : pull.state;
@@ -88,6 +88,15 @@ function describe(error: unknown): string {
   return error.cause instanceof Error ? `${error.message} (${error.cause.message})` : error.message;
 }
 
+/** A failed fetch's error code, such as ECONNREFUSED on its cause, or else its class name. Never free text. */
+function failureKind(error: unknown): string {
+  const cause =
+    error instanceof Error ? (error.cause as NodeJS.ErrnoException | undefined) : undefined;
+  const kind =
+    cause?.code ?? (error as NodeJS.ErrnoException | undefined)?.code ?? (error as Error)?.name;
+  return typeof kind === "string" && /^\w+$/.test(kind) ? kind : "unknown";
+}
+
 async function messageOf(res: Response): Promise<string> {
   const body: unknown = await res.json().catch(() => undefined);
   if (
@@ -108,7 +117,11 @@ function nextUrl(link: string | null): string | undefined {
 function gitHubApi(fetch: Fetch, token: string) {
   let requests = 0;
 
-  async function get(url: string, absentOn: readonly number[] = []): Promise<Response> {
+  /** A redirect is never followed, so the token goes nowhere else. It fails the run unless `absent` accepts it. */
+  async function get(
+    url: string,
+    absent: (status: number) => boolean = () => false,
+  ): Promise<Response> {
     if (!url.startsWith(`${API}/`)) throw new Error(`refusing to GET a URL outside ${API}/`);
     const path = url.slice(API.length);
     requests += 1;
@@ -116,7 +129,7 @@ function gitHubApi(fetch: Fetch, token: string) {
     try {
       res = await fetch(url, {
         method: "GET",
-        redirect: "error",
+        redirect: "manual",
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${token}`,
@@ -125,9 +138,10 @@ function gitHubApi(fetch: Fetch, token: string) {
         },
       });
     } catch (error) {
-      throw new Error(`GitHub GET ${path} -> ${describe(error)}`);
+      // The request carried the token, and a fetch error can quote a header value, so its message is never kept.
+      throw new Error(`GitHub GET ${path} -> request failed (${failureKind(error)})`);
     }
-    if (res.ok || absentOn.includes(res.status)) return res;
+    if (res.ok || absent(res.status)) return res;
     throw new Error(`GitHub GET ${path} -> ${res.status}${await messageOf(res)}`);
   }
 
@@ -157,13 +171,17 @@ function gitHubApi(fetch: Fetch, token: string) {
         },
       ),
     pull: async (repo: string, number: number): Promise<GitHubPull | null> => {
-      const res = await get(`${API}/repos/${ORG}/${repo}/pulls/${number}`, [404]);
+      // GitHub redirects a repository that was transferred out of the org, so its PRs are no longer HX's.
+      const res = await get(
+        `${API}/repos/${ORG}/${repo}/pulls/${number}`,
+        (status) => status === 404 || (status >= 300 && status < 400),
+      );
       return res.ok ? ((await res.json()) as GitHubPull) : null;
     },
     head: async (repo: string, branch: string): Promise<string | undefined> => {
       const res = await get(
         `${API}/repos/${ORG}/${repo}/branches/${encodeURIComponent(branch)}`,
-        [404, 409],
+        (status) => status === 404 || status === 409,
       );
       return res.ok ? ((await res.json()) as GitHubBranch).commit.sha : undefined;
     },
@@ -200,10 +218,10 @@ async function runSync({
     for (const pull of [...open, ...recent]) prs.set(pull.id, toPrRow(repo.name, pull));
   }
 
-  const synced = new Set(repos.map((repo) => repo.name));
+  // Every stored open PR is rechecked, including one whose repository is archived or has left the org list.
   const gone: OpenPr[] = [];
   for (const stored of await store.openPrs()) {
-    if (!synced.has(stored.repo) || prs.has(stored.id)) continue;
+    if (prs.has(stored.id)) continue;
     const pull = await gh.pull(stored.repo, stored.number);
     if (pull === null) gone.push(stored);
     else prs.set(pull.id, toPrRow(stored.repo, pull));

@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { adaptWorkspace } from "./adapt";
+import { adaptPullRequestPages } from "./adapt";
 import { PullRequestList } from "./pull-request";
-import type { PullRequest, Workspace } from "./server-types";
+import type { GithubPrsPage, PullRequest } from "./server-types";
 
 const REPO = "HX-Infratstructure/HX-Semantic-Router";
 
@@ -21,25 +21,13 @@ function pr(number: number, title: string, state: string): PullRequest {
   };
 }
 
-function workspaceWith(prs: readonly PullRequest[]): Workspace {
-  const updates = { total: 0, byAgent: {}, byTask: {}, bySource: {} };
-  return {
-    tasks: [],
-    updates: [],
-    updatesCursor: null,
-    requirements: [],
-    decisions: [],
-    agents: [],
-    statusLabels: [],
-    prs,
-    repos: [],
-    counts: { updates, decisions: { total: 0, byGateType: {}, byStatus: {} } },
-  };
+function pageWith(items: readonly PullRequest[]): GithubPrsPage {
+  return { items, nextCursor: null, counts: { total: items.length, byRepo: {}, byState: {} } };
 }
 
 /** Renders the rows as the sync stored them, through the same parse the routes use. */
 function renderRows(rows: readonly PullRequest[]) {
-  render(<PullRequestList prs={adaptWorkspace(workspaceWith(rows)).prs} />);
+  render(<PullRequestList prs={adaptPullRequestPages([pageWith(rows)]).items} />);
 }
 
 function rowOf(title: string): HTMLElement {

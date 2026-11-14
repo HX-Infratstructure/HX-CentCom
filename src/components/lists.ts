@@ -1,5 +1,6 @@
 import {
   ACTIVITY_ENTITY_LABELS,
+  ATTENTION_LABELS,
   DECISION_STATUS_LABELS,
   GATE_TYPE_LABELS,
   LESSON_STATUS_LABELS,
@@ -19,6 +20,11 @@ export const lists = {
   overviewFeed: listSearch({
     facets: { agent: facet.agent(), task: facet.open("Task") },
   }),
+  // The overview's open tasks, which the workspace holds in full, so the route filters and counts them itself. The
+  // route also narrows the feed to the ids of the rows this facet keeps.
+  openTasks: listSearch({
+    facets: { attention: facet.closed("Needs attention", ATTENTION_LABELS) },
+  }),
   // On /tasks the agent filter is page-wide: `board.agent` filters the board, the timeline and this log alike.
   updateLog: listSearch({
     facets: {
@@ -27,7 +33,7 @@ export const lists = {
       posted: facet.days("Posted"),
     },
   }),
-  // SPEC 6 asks for "agent, program"; no program column exists, so the board reads `repository` (CC1, B2 step 2).
+  // SPEC 6 asks for "agent, program"; no program column exists, so the board reads `repository`; CC1 chose this.
   board: listSearch({
     facets: { agent: facet.agent(), repo: facet.open("Repository") },
   }),

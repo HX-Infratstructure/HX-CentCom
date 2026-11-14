@@ -1,6 +1,5 @@
-// B4's actions are in POLICY, and row scope is decided by the one pipeline for tasks, RAID items and lessons. The
-// refusal texts are the ones the services already returned (policy.ts for tasks, B4's raid.ts for RAID items and
-// lessons), so the refactor that moved them keeps every word.
+// The RAID and lesson actions are in POLICY, and one pipeline decides row scope for tasks, RAID items and lessons.
+// Each refusal text is asserted word for word, so moving the scope check never changes what a refused caller reads.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "@/server/db/test-db";
 import { isServiceError, POLICY, type ServiceErrorBody } from "@/server/services";

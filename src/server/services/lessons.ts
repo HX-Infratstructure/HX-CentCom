@@ -1,6 +1,6 @@
 /**
- * The lessons log (SPEC §6.1), and automation 3: the lessons ask when a task becomes done. Writes run through A1's
- * writer (pipeline.ts).
+ * The lessons log (SPEC §6.1), and automation 3: the lessons ask when a task becomes done. Writes run through the
+ * shared writer (pipeline.ts).
  */
 import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
@@ -222,9 +222,9 @@ async function askForLessons(tx: Tx, ctx: ProgressCtx, status: string): Promise<
 }
 
 /**
- * Automation 3 (SPEC §6.1). Wraps A1's postProgressPlan at its wiring line, so the ask shares the progress write's
- * transaction, actor and clock, and a replay (which never runs apply) asks nothing. A1's value and activity row are
- * returned unchanged.
+ * Automation 3 (SPEC §6.1). Wraps postProgressPlan (writes.ts) at its wiring line, so the ask shares the progress
+ * write's transaction, actor and clock, and a replay (which never runs apply) asks nothing. The progress write's value
+ * and activity row are returned unchanged.
  */
 export function withLessonsAsk(plan: ProgressPlan): ProgressPlan {
   return {

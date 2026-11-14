@@ -2,7 +2,8 @@ import { isNotFound, isRedirect } from "@tanstack/react-router";
 import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/react-start";
 
 import { connectDb, requireEnv } from "@/server/db/client";
-import { createServices, isServiceError, type Services } from "@/server/services";
+import { createServices, isServiceError, webhookConfig, type Services } from "@/server/services";
+import { readSecretFile } from "../scripts/secret-file";
 import { renderErrorPage } from "./lib/error-page";
 
 const errorMiddleware = createMiddleware().server(async ({ next }) => {
@@ -31,13 +32,15 @@ const csrfMiddleware = createCsrfMiddleware({
 let services: Services | undefined;
 
 function openServices(): Services {
+  // Read before the pool opens, so a bad webhook setting fails like a missing DATABASE_URL and leaves nothing open.
+  const webhook = webhookConfig(process.env, readSecretFile);
   const handle = connectDb(requireEnv("DATABASE_URL"));
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     // A listener replaces Node's default exit, so one is added only where another (Nitro's graceful shutdown) already
     // did. That one closes the HTTP server without exiting; the process ends when the pool's sockets close too.
     if (process.listenerCount(signal) > 0) process.once(signal, () => void handle.close());
   }
-  return createServices(handle.db);
+  return createServices(handle.db, { webhook });
 }
 
 // The client build strips `.server()`, and the server imports with it.

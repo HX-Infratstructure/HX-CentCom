@@ -1,4 +1,4 @@
-// Test harness for the service-layer acceptance tests (SPEC §4, §7). This is the only file that knows A1's
+// Test harness for the service-layer acceptance tests (SPEC §4, §7). This is the only file that knows the services'
 // module paths and return shapes; every test file goes through it, and checks database state with plain SQL
 // against the SPEC §3 table and column names wherever it can. It uses only the public exports of
 // @/server/services and @/server/db/test-db.
@@ -86,7 +86,7 @@ export function conflictVersion(err: ServiceError): number {
   return body.currentVersion;
 }
 
-/** SPEC §3: progress is computed, PASS over total. Returned as the fraction, whatever scale A1 also reports. */
+/** SPEC §3: progress is computed, PASS over total. Returned as the fraction, whatever scale the services report. */
 export async function taskProgress(h: Harness, taskId: string): Promise<number> {
   const ws = await h.svc.listWorkspace();
   const task = ws.tasks.find((t) => t.id === taskId);

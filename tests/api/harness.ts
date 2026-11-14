@@ -82,7 +82,7 @@ export async function startApi(): Promise<Api> {
       context: { services: t.services },
       pathname: new URL(request.url).pathname,
       next: () => {
-        throw new Error("B1 handlers never call next()");
+        throw new Error("route handlers never call next()");
       },
     });
   };
