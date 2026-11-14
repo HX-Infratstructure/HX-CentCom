@@ -16,6 +16,11 @@ const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        rail: "rail-button justify-start bg-transparent text-[var(--rail-text)] hover:bg-[var(--rail-active)] data-[active=true]:bg-[var(--rail-active)] data-[active=true]:text-primary-foreground",
+        agent: "agent-card whitespace-normal",
+        quiet: "text-muted-foreground hover:text-foreground hover:bg-secondary shadow-none",
+        tab: "tab bg-transparent hover:bg-transparent shadow-none",
+
       },
       size: {
         default: "h-9 px-4 py-2",
