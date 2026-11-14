@@ -1,24 +1,7 @@
 import { Children, type ReactNode } from "react";
 import { CircleHelp, ShieldCheck, Terminal } from "lucide-react";
-import { formatUtc, formatUtcDay, relativeAge } from "./format";
+import { formatUtc, formatUtcDay, initials, relativeAge } from "./format";
 import { assertNever, type AgentRef, type Coverage, type Instant, type SourceRef } from "./model";
-
-/**
- * "Claude Code 01" reads "CC1" and "Agent Zero" "AZ": each word's first letter, a number word whole. A one-word name
- * keeps its capitals and digits ("OpenCode" reads "OC"), or else its first two letters ("Codex" reads "CO").
- */
-function initials(name: string): string {
-  const words = name.split(/\s+/).filter(Boolean);
-  if (words.length > 1) {
-    return words
-      .map((w) => (/^\d+$/.test(w) ? String(Number(w)) : w.charAt(0)))
-      .join("")
-      .toUpperCase()
-      .slice(0, 3);
-  }
-  const marks = name.match(/[A-Z0-9]/g) ?? [];
-  return marks.length >= 2 ? marks.slice(0, 3).join("") : name.slice(0, 2).toUpperCase();
-}
 
 /**
  * An agent's identity. `full` shows the role mark and the name; `chip` is the compact tinted name for rows and facts;

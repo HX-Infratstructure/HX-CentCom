@@ -79,11 +79,20 @@ function Assignee({ task }: { task: TaskView }): ReactNode {
   );
 }
 
-/** The main table: one section per group in workflow order, a colored edge on every row, a status battery per group. */
-export function TaskTable({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
+/**
+ * The main table: one section per group in workflow order, a colored edge on every row, a status battery per group.
+ * `compact` tightens the rows for a dashboard.
+ */
+export function TaskTable({
+  tasks,
+  compact = false,
+}: {
+  tasks: readonly TaskView[];
+  compact?: boolean | undefined;
+}): ReactNode {
   const groups = byGroup(tasks);
   return (
-    <div className="board-groups">
+    <div className="board-groups" data-compact={compact ? "true" : undefined}>
       {GROUPS.map((group) => {
         const rows = groups.get(group);
         return rows === undefined ? null : <GroupTable key={group} group={group} tasks={rows} />;
@@ -224,15 +233,39 @@ function ProvenCount({ progress }: { progress: Coverage }): ReactNode {
   );
 }
 
-/** How the group's tasks split across status labels, in the order the labels first appear. */
-function StatusBattery({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
+/** How tasks split across status labels: open labels first, then done ones, each in the order it first appears. */
+function statusParts(tasks: readonly TaskView[]): readonly { status: StatusRef; count: number }[] {
   const counts = new Map<string, { status: StatusRef; count: number }>();
   for (const { statusLabel } of tasks) {
     const entry = counts.get(statusLabel.id) ?? { status: statusLabel, count: 0 };
     entry.count += 1;
     counts.set(statusLabel.id, entry);
   }
-  const parts = [...counts.values()];
+  return [...counts.values()].sort((a, b) => Number(a.status.isDone) - Number(b.status.isDone));
+}
+
+/** Every task by status: one wide battery and a legend with each label's count and share. */
+export function StatusOverview({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
+  const parts = statusParts(tasks);
+  return (
+    <div className="status-overview">
+      <StatusBattery tasks={tasks} />
+      <ul className="battery-legend">
+        {parts.map((p) => (
+          <li key={p.status.id} data-hue={statusHue(p.status)}>
+            <span className="legend-swatch" aria-hidden="true" />
+            {p.status.label}
+            <span className="legend-count">{p.count}</span>
+            <span className="quiet">{Math.round((p.count / tasks.length) * 100)}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function StatusBattery({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
+  const parts = statusParts(tasks);
   const summary = parts.map((p) => `${p.status.label} ${p.count}`).join(", ");
   return (
     <span className="battery" role="img" aria-label={summary} title={summary}>
@@ -302,39 +335,6 @@ function TaskCard({ task: t }: { task: TaskView }): ReactNode {
         </p>
       )}
     </article>
-  );
-}
-
-/** Compact task rows: what it is, who has it, what blocks it, and how much is proven. */
-export function TaskList({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
-  return (
-    <ul className="record-list">
-      {tasks.map((t) => (
-        <li key={t.id}>
-          <article className="record-row">
-            <h3 className="row-title">
-              <RecordLink kind="task" id={t.id} className="row-link">
-                {t.title}
-              </RecordLink>
-            </h3>
-            <div className="row-meta">
-              <code className="record-id">{t.id}</code>
-              {t.assignee !== null ? (
-                <AgentBadge agent={t.assignee} variant="chip" />
-              ) : (
-                <span>Unassigned</span>
-              )}
-              <span>{t.statusLabel.label}</span>
-              <StaleBadge task={t} />
-            </div>
-            {t.blocked_on !== "none" && (
-              <p className="attention">{BLOCKED_ON_LABELS[t.blocked_on]}</p>
-            )}
-            <CoverageMeter progress={t.progress} compact />
-          </article>
-        </li>
-      ))}
-    </ul>
   );
 }
 

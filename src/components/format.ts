@@ -31,3 +31,20 @@ export function relativeAge(at: Instant, now: number): string {
   if (hours < 24) return `${hours} h ago`;
   return `${Math.floor(hours / 24)} d ago`;
 }
+
+/**
+ * "Claude Code 01" reads "CC1" and "Agent Zero" "AZ": each word's first letter, a number word whole. A one-word name
+ * keeps its capitals and digits ("OpenCode" reads "OC"), or else its first two letters ("Codex" reads "CO").
+ */
+export function initials(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return words
+      .map((w) => (/^\d+$/.test(w) ? String(Number(w)) : w.charAt(0)))
+      .join("")
+      .toUpperCase()
+      .slice(0, 3);
+  }
+  const marks = name.match(/[A-Z0-9]/g) ?? [];
+  return marks.length >= 2 ? marks.slice(0, 3).join("") : name.slice(0, 2).toUpperCase();
+}

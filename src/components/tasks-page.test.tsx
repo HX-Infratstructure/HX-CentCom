@@ -152,6 +152,13 @@ describe("the task board's agent filter", () => {
     expectChips("Repository", ["HX-CentCom 1", "HX-LiteLLM 1"]);
   });
 
+  it("names the chosen agent and its count on the Agent toolbar button, and leaves Repository unset", async () => {
+    await renderTasks("/tasks?agent=atlas", ROSTER, { agentId: "atlas" });
+
+    const buttons = screen.getByRole("group", { name: "Filter tasks" }).querySelectorAll("summary");
+    expect([...buttons].map((b) => b.textContent)).toEqual(["AgentAtlas2", "Repository"]);
+  });
+
   it("counts every task on the repository chips without the agent filter", async () => {
     await renderTasks("/tasks", ROSTER);
 

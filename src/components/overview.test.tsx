@@ -167,6 +167,10 @@ function section(name: string) {
     rowTitles: within(region)
       .queryAllByRole("heading", { level: 3 })
       .map((h) => h.textContent),
+    /** The task table's rows in document order: groups in workflow order, rows in each group's order. */
+    taskTitles: within(region)
+      .queryAllByRole("rowheader")
+      .map((h) => within(h).getByRole("link").textContent),
     prNumbers: within(region)
       .queryAllByText(/ #\d+$/)
       .map((e) => e.textContent),
@@ -175,10 +179,11 @@ function section(name: string) {
 }
 
 describe("the overview's open tasks", () => {
-  it("lists blocked tasks first, then unfinished ones, each in workspace order, and leaves out finished unblocked work", async () => {
+  it("groups the open tasks in workflow order, blocked tasks first in each group, and leaves out finished unblocked work", async () => {
     await renderOverview(
       workspace({
         tasks: [
+          task({ id: "IRP-30", title: "Tune the shadow thresholds" }),
           task({ id: "IRP-31", title: "Draft the shadow hook config", group: "backlog" }),
           task({
             id: "IRP-32",
@@ -214,13 +219,14 @@ describe("the overview's open tasks", () => {
     );
 
     const open = section("Open tasks");
-    expect(open.rowTitles).toEqual([
-      "Wire the eval dashboard",
-      "Close the benchmark run",
+    expect(open.taskTitles).toEqual([
       "Draft the shadow hook config",
+      "Wire the eval dashboard",
+      "Tune the shadow thresholds",
       "Write the release notes",
+      "Close the benchmark run",
     ]);
-    expect(open.heading).toBe("Open tasks 4");
+    expect(open.heading).toBe("Open tasks 5");
   });
 });
 
@@ -318,7 +324,7 @@ describe("the overview's needs-attention filter", () => {
     [
       "owner",
       "Waiting on the owner",
-      ["Assign the dashboard review", "Write the release notes", "Wire the eval dashboard"],
+      ["Assign the dashboard review", "Wire the eval dashboard", "Write the release notes"],
     ],
     ["stale", "Stale commit", ["Pin the router build"]],
   ] as const)(
@@ -327,7 +333,7 @@ describe("the overview's needs-attention filter", () => {
       const router = await renderOverview(ATTENTION, NO_PRS, `/?attention=${value}`);
 
       const open = section("Open tasks");
-      expect(open.rowTitles).toEqual(titles);
+      expect(open.taskTitles).toEqual(titles);
       expect(open.heading).toBe(`Open tasks ${titles.length}`);
       expect(chips().filter((c) => c.current)).toEqual([
         { name: `${label}${titles.length}`, current: true },
@@ -521,11 +527,132 @@ describe("the overview's needs-attention filter", () => {
     const feed = screen.getByRole("region", { name: /^Latest updates/ });
     expect(await within(feed).findByText(blockedUpdate.note)).toBeInTheDocument();
     expect(section("Latest updates").empty).toBeNull();
-    expect(section("Open tasks").rowTitles).toEqual(["Wire the eval dashboard"]);
+    expect(section("Open tasks").taskTitles).toEqual(["Wire the eval dashboard"]);
     expect(feedRequests()).toEqual([
       { data: { attention: "blocked" } },
       { data: { attention: "blocked" } },
     ]);
+  });
+});
+
+describe("the overview's number widgets", () => {
+  // The seed's shape: three backlog tasks (one blocked by a dependency, two waiting for an owner to assign them), two
+  // in progress (one waiting on an owner decision), two done.
+  const SEED_LIKE = workspace({
+    tasks: [
+      task({
+        id: "HX12-01",
+        title: "DeepAgents source-led rebuild",
+        group: "backlog",
+        status: "Waiting",
+        blocked_on: "dependency",
+        attention: ["blocked"],
+      }),
+      task({
+        id: "RO-01",
+        title: "Qdrant live acceptance",
+        agent: null,
+        group: "backlog",
+        status: "Waiting",
+        blocked_on: "assignment",
+        attention: ["blocked", "owner"],
+      }),
+      task({
+        id: "HX14-02",
+        title: "n8n Phase 2",
+        agent: null,
+        group: "backlog",
+        status: "Waiting",
+        blocked_on: "assignment",
+        attention: ["blocked", "owner"],
+      }),
+      task({
+        id: "IRP-04",
+        title: "Semantic controller Stage 2 qualification",
+        blocked_on: "owner_decision",
+        attention: ["blocked", "owner"],
+      }),
+      task({ id: "CC-01", title: "HX-CentCom WU1 build" }),
+      task({
+        id: "IRP-05",
+        title: "D3 adapter closeout",
+        group: "done",
+        status: "Complete",
+        open: false,
+      }),
+      task({
+        id: "IRP-UI",
+        title: "Agent Lab run contract",
+        group: "done",
+        status: "Complete",
+        open: false,
+      }),
+    ],
+    decisions: [
+      decision({ id: "D-01", question: "Merge PR #19?", blocks: ["IRP-04"] }),
+      decision({ id: "D-03", question: "Exact-release deploy GO?", blocks: ["IRP-04"] }),
+      decision({ id: "D-09", question: "Merge PR #83?" }),
+      decision({
+        id: "D-02",
+        question: "Adopt the standing directive?",
+        status: "Decided",
+        decision_text: "Adopted.",
+        decision_source_url: `https://github.com/${REPO}/issues/10#issuecomment-6870997761`,
+        decided_at: "2026-11-14T09:00:00.123456+00:00",
+      }),
+    ],
+  });
+  const TWO_OPEN_PRS: GithubPrsPage = {
+    items: [pr({ number: 19, state: "open", id: 1 }), pr({ number: 83, state: "open", id: 2 })],
+    nextCursor: null,
+    counts: { total: 2, byRepo: { [REPO]: 2 }, byState: { open: 2, merged: 1 } },
+  };
+
+  function widgets() {
+    return within(screen.getByRole("region", { name: "Summary" }))
+      .getAllByRole("link")
+      .map((widget) => widget.textContent);
+  }
+
+  it("counts open, blocked and owner-waiting tasks, pending decisions and open PRs", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS);
+
+    expect(widgets()).toEqual([
+      "Open tasks5",
+      "Blocked4",
+      "Waiting on the owner3",
+      "Pending decisions3",
+      "Open pull requests2",
+    ]);
+  });
+
+  it("keeps counting every open task while the open tasks list is filtered", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/?attention=owner");
+
+    expect(section("Open tasks").heading).toBe("Open tasks 3");
+    expect(widgets()[0]).toBe("Open tasks5");
+  });
+
+  it("opens the matching filter from each widget", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS);
+
+    const summary = within(screen.getByRole("region", { name: "Summary" }));
+    expect(summary.getByRole("link", { name: "Blocked 4" })).toHaveAttribute(
+      "href",
+      "/?attention=blocked#open-tasks",
+    );
+    expect(summary.getByRole("link", { name: "Waiting on the owner 3" })).toHaveAttribute(
+      "href",
+      "/?attention=owner#open-tasks",
+    );
+    expect(summary.getByRole("link", { name: "Pending decisions 3" })).toHaveAttribute(
+      "href",
+      "/decisions",
+    );
+    expect(summary.getByRole("link", { name: "Open pull requests 2" })).toHaveAttribute(
+      "href",
+      "/pull-requests?state=open",
+    );
   });
 });
 

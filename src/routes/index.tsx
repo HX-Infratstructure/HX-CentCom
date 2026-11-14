@@ -22,9 +22,9 @@ import {
 } from "@/components/model";
 import { PullRequestList } from "@/components/pull-request";
 import type { UpdateCounts, UpdatesPage } from "@/components/server-types";
-import { TaskList } from "@/components/task";
+import { StatusOverview, TaskTable } from "@/components/task";
 import { UpdateList } from "@/components/update-item";
-import { FilterBar } from "@/components/url-state";
+import { FilterBar, FilterLink } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { prPages, tasksQuery, updatePages, type PrQuery, type UpdateQuery } from "@/lib/task-data";
 
@@ -116,6 +116,8 @@ export const Route = createFileRoute("/")({
   component: Overview,
 });
 
+const OPEN_TASKS_ID = "open-tasks";
+
 function Overview(): ReactNode {
   const search = Route.useSearch();
   const { data: ws } = useSuspenseQuery(workspaceQuery);
@@ -127,32 +129,42 @@ function Overview(): ReactNode {
 
   return (
     <Workspace page="Overview" description={DESCRIPTION}>
-      <div className="overview">
-        <section aria-labelledby={decisionsId} className="overview-decisions">
-          <h2 id={decisionsId} className="section-title">
-            Needs your decision <span className="count">{pending.length}</span>
-          </h2>
-          {pending.length === 0 ? (
-            <EmptyState>No decision is waiting on you.</EmptyState>
-          ) : (
-            <>
-              <DecisionList decisions={pending.slice(0, DECISIONS_SHOWN)} />
-              <Link to="/decisions" className="text-link section-link">
-                {pending.length > DECISIONS_SHOWN
-                  ? `All ${pending.length} pending decisions`
-                  : "Decisions and history"}
-              </Link>
-            </>
-          )}
-        </section>
+      <div className="dashboard">
+        <SummaryWidgets tasks={ws.tasks} pendingDecisions={pending.length} />
 
-        <Feed dir={ws} tasks={ws.tasks} />
+        <div className="dashboard-columns">
+          <div className="dashboard-stack">
+            <section aria-labelledby={decisionsId} className="widget overview-decisions">
+              <h2 id={decisionsId} className="widget-title">
+                Needs your decision <span className="count">{pending.length}</span>
+              </h2>
+              {pending.length === 0 ? (
+                <EmptyState>No decision is waiting on you.</EmptyState>
+              ) : (
+                <>
+                  <DecisionList decisions={pending.slice(0, DECISIONS_SHOWN)} />
+                  <Link to="/decisions" className="text-link section-link">
+                    {pending.length > DECISIONS_SHOWN
+                      ? `All ${pending.length} pending decisions`
+                      : "Decisions and history"}
+                  </Link>
+                </>
+              )}
+            </section>
 
-        <section aria-labelledby={tasksId} className="overview-tasks">
-          <h2 id={tasksId} className="section-title">
-            Open tasks <span className="count">{tasks.items.length}</span>
-          </h2>
-          <FilterBar search={lists.openTasks} counts={tasks.counts} label="Filter open tasks" />
+            <OpenPullRequests />
+          </div>
+
+          <Feed dir={ws} tasks={ws.tasks} />
+        </div>
+
+        <section id={OPEN_TASKS_ID} aria-labelledby={tasksId} className="overview-tasks">
+          <div className="section-bar">
+            <h2 id={tasksId} className="section-title">
+              Open tasks <span className="count">{tasks.items.length}</span>
+            </h2>
+            <FilterBar search={lists.openTasks} counts={tasks.counts} label="Filter open tasks" />
+          </div>
           {tasks.items.length === 0 ? (
             <EmptyState>
               {lists.openTasks.active(taskFilters)
@@ -160,13 +172,97 @@ function Overview(): ReactNode {
                 : "Every task is done and nothing is blocked."}
             </EmptyState>
           ) : (
-            <TaskList tasks={tasks.items} />
+            <TaskTable tasks={tasks.items} compact />
           )}
         </section>
-
-        <OpenPullRequests />
       </div>
     </Workspace>
+  );
+}
+
+/**
+ * The dashboard's numbers, read from what the page already holds: the workspace's open tasks and their attention
+ * reasons, the pending decisions, and the open PR count. A blocked or owner number opens the open tasks under it.
+ */
+function SummaryWidgets({
+  tasks,
+  pendingDecisions,
+}: {
+  tasks: readonly TaskView[];
+  pendingDecisions: number;
+}): ReactNode {
+  const open = openTasks(tasks);
+  const needing = (reason: Attention) => open.filter((t) => t.attention.includes(reason)).length;
+  const openPrs = useSuspenseInfiniteQuery(prPages(OPEN_PRS)).data.counts?.total ?? 0;
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="summary">
+      <h2 id={headingId} className="sr-only">
+        Summary
+      </h2>
+      <ul className="number-widgets">
+        <li data-hue="blue">
+          <FilterLink
+            search={lists.openTasks}
+            set={{}}
+            hash={OPEN_TASKS_ID}
+            className="number-widget"
+          >
+            <WidgetNumber label="Open tasks" value={open.length} />
+          </FilterLink>
+        </li>
+        <li data-hue="red">
+          <FilterLink
+            search={lists.openTasks}
+            set={{ attention: "blocked" }}
+            hash={OPEN_TASKS_ID}
+            className="number-widget"
+          >
+            <WidgetNumber label={ATTENTION_LABELS.blocked} value={needing("blocked")} />
+          </FilterLink>
+        </li>
+        <li data-hue="purple">
+          <FilterLink
+            search={lists.openTasks}
+            set={{ attention: "owner" }}
+            hash={OPEN_TASKS_ID}
+            className="number-widget"
+          >
+            <WidgetNumber label={ATTENTION_LABELS.owner} value={needing("owner")} />
+          </FilterLink>
+        </li>
+        <li data-hue="orange">
+          <Link to="/decisions" className="number-widget">
+            <WidgetNumber label="Pending decisions" value={pendingDecisions} />
+          </Link>
+        </li>
+        <li data-hue="green">
+          <Link to="/pull-requests" search={OPEN_PRS} className="number-widget">
+            <WidgetNumber label="Open pull requests" value={openPrs} />
+          </Link>
+        </li>
+      </ul>
+      <div className="widget status-widget">
+        <h3 className="widget-title">
+          Tasks by status <span className="count">{tasks.length}</span>
+        </h3>
+        {tasks.length === 0 ? (
+          <p className="quiet">No tasks yet.</p>
+        ) : (
+          <StatusOverview tasks={tasks} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** One number card's content. The label comes first, so the card's link reads "Blocked 4". */
+function WidgetNumber({ label, value }: { label: string; value: number }): ReactNode {
+  return (
+    <>
+      <span className="number-label">{label}</span>
+      <span className="number-value">{value}</span>
+    </>
   );
 }
 
@@ -177,8 +273,8 @@ function OpenPullRequests(): ReactNode {
   const total = counts?.total ?? 0;
   const stored = counts?.stored ?? 0;
   return (
-    <section aria-labelledby={headingId} className="overview-prs">
-      <h2 id={headingId} className="section-title">
+    <section aria-labelledby={headingId} className="widget overview-prs">
+      <h2 id={headingId} className="widget-title">
         Open pull requests <span className="count">{total}</span>
       </h2>
       {total === 0 ? (
@@ -216,8 +312,8 @@ function Feed({ dir, tasks }: { dir: Directory; tasks: readonly TaskView[] }): R
   const query = feedQuery({ agentId, taskId }, attention, attentionIds);
   const filtered = attention !== undefined || agentId !== undefined || taskId !== undefined;
   return (
-    <section aria-labelledby={headingId} className="overview-feed">
-      <h2 id={headingId} className="section-title">
+    <section aria-labelledby={headingId} className="widget overview-feed">
+      <h2 id={headingId} className="widget-title">
         Latest updates
       </h2>
       {attention !== undefined && (

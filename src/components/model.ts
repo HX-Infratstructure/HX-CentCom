@@ -56,6 +56,25 @@ export function statusHue(status: StatusRef): BoardHue {
   return STATUS_HUES.get(status.id) ?? (status.isDone ? "green" : "blue");
 }
 
+/** Each gate type's pill color; the pill always carries the type's name, so color is never the only signal. */
+export const GATE_HUES = {
+  merge: "green",
+  deploy: "purple",
+  live_run: "orange",
+  host: "red",
+  scope: "blue",
+  assignment: "blue",
+  policy: "grey",
+} as const satisfies Record<S.GateType, BoardHue>;
+
+/** A PR state's pill color; a state outside the filter vocabulary reads grey. */
+export const PR_STATE_HUES = {
+  open: "green",
+  closed: "red",
+  merged: "purple",
+  gone: "grey",
+} as const satisfies Record<S.GithubPrState, BoardHue>;
+
 export const BLOCKED_ON_LABELS = {
   owner_decision: "Waiting on an owner decision",
   assignment: "Needs an owner to assign it",

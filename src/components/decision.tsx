@@ -5,6 +5,7 @@ import { DetailSheet } from "./detail-sheet";
 import { ErrorState } from "./list-states";
 import {
   DECISION_STATUS_LABELS,
+  GATE_HUES,
   GATE_TYPE_LABELS,
   type AppError,
   type DecisionView,
@@ -23,14 +24,18 @@ function decisionTitle(d: DecisionView): string {
 export function DecisionRow({ decision: d }: { decision: DecisionView }): ReactNode {
   return (
     <article className="record-row decision-row" data-status={d.status}>
-      <h3 className="row-title">
-        <RecordLink kind="decision" id={d.id} className="row-link">
-          {decisionTitle(d)}
-        </RecordLink>
-      </h3>
-      {d.question !== null && <p className="row-summary">{d.summary}</p>}
+      <span className="type-pill" data-hue={GATE_HUES[d.gate_type]}>
+        {GATE_TYPE_LABELS[d.gate_type]}
+      </span>
+      <div className="decision-main">
+        <h3 className="row-title">
+          <RecordLink kind="decision" id={d.id} className="row-link">
+            {decisionTitle(d)}
+          </RecordLink>
+        </h3>
+        {d.question !== null && <p className="row-summary">{d.summary}</p>}
+      </div>
       <div className="row-meta">
-        <span className="type-label">{GATE_TYPE_LABELS[d.gate_type]}</span>
         {d.status === "Pending" ? (
           d.requestedAt !== null && (
             <span>
