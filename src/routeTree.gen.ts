@@ -10,20 +10,30 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthRouteImport } from './routes/auth'
 import { Route as DecisionsRouteImport } from './routes/decisions'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as LessonsRouteImport } from './routes/lessons'
+import { Route as McpRouteImport } from './routes/mcp'
+import { Route as RaidRouteImport } from './routes/raid'
 import { Route as TasksRouteImport } from './routes/tasks'
-import { Route as ApiPublicJobsGithubSyncRouteImport } from './routes/api/public/jobs/github-sync'
+import { Route as ApiV1SplatRouteImport } from './routes/api/v1/$'
+import { Route as ApiV1ActivityRouteImport } from './routes/api/v1/activity'
+import { Route as ApiV1DecisionsRouteImport } from './routes/api/v1/decisions'
+import { Route as ApiV1KeysRouteImport } from './routes/api/v1/keys'
+import { Route as ApiV1LessonsRouteImport } from './routes/api/v1/lessons'
+import { Route as ApiV1RaidRouteImport } from './routes/api/v1/raid'
+import { Route as ApiV1UpdatesRouteImport } from './routes/api/v1/updates'
+import { Route as ApiV1WorkspaceRouteImport } from './routes/api/v1/workspace'
+import { Route as ApiV1KeysIdRouteImport } from './routes/api/v1/keys/$id'
+import { Route as ApiV1LessonsIdRouteImport } from './routes/api/v1/lessons/$id'
+import { Route as ApiV1RaidIdRouteImport } from './routes/api/v1/raid/$id'
+import { Route as ApiV1TasksIdRouteImport } from './routes/api/v1/tasks/$id'
+import { Route as ApiV1DecisionsIdDecideRouteImport } from './routes/api/v1/decisions/$id/decide'
+import { Route as ApiV1TasksIdRequirementsRouteImport } from './routes/api/v1/tasks/$id/requirements'
+import { Route as ApiV1TasksIdUpdatesRouteImport } from './routes/api/v1/tasks/$id/updates'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DecisionsRoute = DecisionsRouteImport.update({
@@ -31,9 +41,19 @@ const DecisionsRoute = DecisionsRouteImport.update({
   path: '/decisions',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
+const LessonsRoute = LessonsRouteImport.update({
+  id: '/lessons',
+  path: '/lessons',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RaidRoute = RaidRouteImport.update({
+  id: '/raid',
+  path: '/raid',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TasksRoute = TasksRouteImport.update({
@@ -41,71 +61,241 @@ const TasksRoute = TasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicJobsGithubSyncRoute = ApiPublicJobsGithubSyncRouteImport.update({
-  id: '/api/public/jobs/github-sync',
-  path: '/api/public/jobs/github-sync',
+const ApiV1SplatRoute = ApiV1SplatRouteImport.update({
+  id: '/api/v1/$',
+  path: '/api/v1/$',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1ActivityRoute = ApiV1ActivityRouteImport.update({
+  id: '/api/v1/activity',
+  path: '/api/v1/activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1DecisionsRoute = ApiV1DecisionsRouteImport.update({
+  id: '/api/v1/decisions',
+  path: '/api/v1/decisions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1KeysRoute = ApiV1KeysRouteImport.update({
+  id: '/api/v1/keys',
+  path: '/api/v1/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1LessonsRoute = ApiV1LessonsRouteImport.update({
+  id: '/api/v1/lessons',
+  path: '/api/v1/lessons',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1RaidRoute = ApiV1RaidRouteImport.update({
+  id: '/api/v1/raid',
+  path: '/api/v1/raid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1UpdatesRoute = ApiV1UpdatesRouteImport.update({
+  id: '/api/v1/updates',
+  path: '/api/v1/updates',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1WorkspaceRoute = ApiV1WorkspaceRouteImport.update({
+  id: '/api/v1/workspace',
+  path: '/api/v1/workspace',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1KeysIdRoute = ApiV1KeysIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1KeysRoute,
+} as any)
+const ApiV1LessonsIdRoute = ApiV1LessonsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1LessonsRoute,
+} as any)
+const ApiV1RaidIdRoute = ApiV1RaidIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1RaidRoute,
+} as any)
+const ApiV1TasksIdRoute = ApiV1TasksIdRouteImport.update({
+  id: '/api/v1/tasks/$id',
+  path: '/api/v1/tasks/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiV1DecisionsIdDecideRoute = ApiV1DecisionsIdDecideRouteImport.update({
+  id: '/$id/decide',
+  path: '/$id/decide',
+  getParentRoute: () => ApiV1DecisionsRoute,
+} as any)
+const ApiV1TasksIdRequirementsRoute =
+  ApiV1TasksIdRequirementsRouteImport.update({
+    id: '/requirements',
+    path: '/requirements',
+    getParentRoute: () => ApiV1TasksIdRoute,
+  } as any)
+const ApiV1TasksIdUpdatesRoute = ApiV1TasksIdUpdatesRouteImport.update({
+  id: '/updates',
+  path: '/updates',
+  getParentRoute: () => ApiV1TasksIdRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/auth': typeof AuthRoute
   '/decisions': typeof DecisionsRoute
-  '/reset-password': typeof ResetPasswordRoute
+  '/lessons': typeof LessonsRoute
+  '/mcp': typeof McpRoute
+  '/raid': typeof RaidRoute
   '/tasks': typeof TasksRoute
-  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
+  '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/v1/activity': typeof ApiV1ActivityRoute
+  '/api/v1/decisions': typeof ApiV1DecisionsRouteWithChildren
+  '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
+  '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
+  '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
+  '/api/v1/updates': typeof ApiV1UpdatesRoute
+  '/api/v1/workspace': typeof ApiV1WorkspaceRoute
+  '/api/v1/keys/$id': typeof ApiV1KeysIdRoute
+  '/api/v1/lessons/$id': typeof ApiV1LessonsIdRoute
+  '/api/v1/raid/$id': typeof ApiV1RaidIdRoute
+  '/api/v1/tasks/$id': typeof ApiV1TasksIdRouteWithChildren
+  '/api/v1/decisions/$id/decide': typeof ApiV1DecisionsIdDecideRoute
+  '/api/v1/tasks/$id/requirements': typeof ApiV1TasksIdRequirementsRoute
+  '/api/v1/tasks/$id/updates': typeof ApiV1TasksIdUpdatesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/auth': typeof AuthRoute
   '/decisions': typeof DecisionsRoute
-  '/reset-password': typeof ResetPasswordRoute
+  '/lessons': typeof LessonsRoute
+  '/mcp': typeof McpRoute
+  '/raid': typeof RaidRoute
   '/tasks': typeof TasksRoute
-  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
+  '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/v1/activity': typeof ApiV1ActivityRoute
+  '/api/v1/decisions': typeof ApiV1DecisionsRouteWithChildren
+  '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
+  '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
+  '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
+  '/api/v1/updates': typeof ApiV1UpdatesRoute
+  '/api/v1/workspace': typeof ApiV1WorkspaceRoute
+  '/api/v1/keys/$id': typeof ApiV1KeysIdRoute
+  '/api/v1/lessons/$id': typeof ApiV1LessonsIdRoute
+  '/api/v1/raid/$id': typeof ApiV1RaidIdRoute
+  '/api/v1/tasks/$id': typeof ApiV1TasksIdRouteWithChildren
+  '/api/v1/decisions/$id/decide': typeof ApiV1DecisionsIdDecideRoute
+  '/api/v1/tasks/$id/requirements': typeof ApiV1TasksIdRequirementsRoute
+  '/api/v1/tasks/$id/updates': typeof ApiV1TasksIdUpdatesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/auth': typeof AuthRoute
   '/decisions': typeof DecisionsRoute
-  '/reset-password': typeof ResetPasswordRoute
+  '/lessons': typeof LessonsRoute
+  '/mcp': typeof McpRoute
+  '/raid': typeof RaidRoute
   '/tasks': typeof TasksRoute
-  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
+  '/api/v1/$': typeof ApiV1SplatRoute
+  '/api/v1/activity': typeof ApiV1ActivityRoute
+  '/api/v1/decisions': typeof ApiV1DecisionsRouteWithChildren
+  '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
+  '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
+  '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
+  '/api/v1/updates': typeof ApiV1UpdatesRoute
+  '/api/v1/workspace': typeof ApiV1WorkspaceRoute
+  '/api/v1/keys/$id': typeof ApiV1KeysIdRoute
+  '/api/v1/lessons/$id': typeof ApiV1LessonsIdRoute
+  '/api/v1/raid/$id': typeof ApiV1RaidIdRoute
+  '/api/v1/tasks/$id': typeof ApiV1TasksIdRouteWithChildren
+  '/api/v1/decisions/$id/decide': typeof ApiV1DecisionsIdDecideRoute
+  '/api/v1/tasks/$id/requirements': typeof ApiV1TasksIdRequirementsRoute
+  '/api/v1/tasks/$id/updates': typeof ApiV1TasksIdUpdatesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/auth'
     | '/decisions'
-    | '/reset-password'
+    | '/lessons'
+    | '/mcp'
+    | '/raid'
     | '/tasks'
-    | '/api/public/jobs/github-sync'
+    | '/api/v1/$'
+    | '/api/v1/activity'
+    | '/api/v1/decisions'
+    | '/api/v1/keys'
+    | '/api/v1/lessons'
+    | '/api/v1/raid'
+    | '/api/v1/updates'
+    | '/api/v1/workspace'
+    | '/api/v1/keys/$id'
+    | '/api/v1/lessons/$id'
+    | '/api/v1/raid/$id'
+    | '/api/v1/tasks/$id'
+    | '/api/v1/decisions/$id/decide'
+    | '/api/v1/tasks/$id/requirements'
+    | '/api/v1/tasks/$id/updates'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/auth'
     | '/decisions'
-    | '/reset-password'
+    | '/lessons'
+    | '/mcp'
+    | '/raid'
     | '/tasks'
-    | '/api/public/jobs/github-sync'
+    | '/api/v1/$'
+    | '/api/v1/activity'
+    | '/api/v1/decisions'
+    | '/api/v1/keys'
+    | '/api/v1/lessons'
+    | '/api/v1/raid'
+    | '/api/v1/updates'
+    | '/api/v1/workspace'
+    | '/api/v1/keys/$id'
+    | '/api/v1/lessons/$id'
+    | '/api/v1/raid/$id'
+    | '/api/v1/tasks/$id'
+    | '/api/v1/decisions/$id/decide'
+    | '/api/v1/tasks/$id/requirements'
+    | '/api/v1/tasks/$id/updates'
   id:
     | '__root__'
     | '/'
-    | '/auth'
     | '/decisions'
-    | '/reset-password'
+    | '/lessons'
+    | '/mcp'
+    | '/raid'
     | '/tasks'
-    | '/api/public/jobs/github-sync'
+    | '/api/v1/$'
+    | '/api/v1/activity'
+    | '/api/v1/decisions'
+    | '/api/v1/keys'
+    | '/api/v1/lessons'
+    | '/api/v1/raid'
+    | '/api/v1/updates'
+    | '/api/v1/workspace'
+    | '/api/v1/keys/$id'
+    | '/api/v1/lessons/$id'
+    | '/api/v1/raid/$id'
+    | '/api/v1/tasks/$id'
+    | '/api/v1/decisions/$id/decide'
+    | '/api/v1/tasks/$id/requirements'
+    | '/api/v1/tasks/$id/updates'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AuthRoute: typeof AuthRoute
   DecisionsRoute: typeof DecisionsRoute
-  ResetPasswordRoute: typeof ResetPasswordRoute
+  LessonsRoute: typeof LessonsRoute
+  McpRoute: typeof McpRoute
+  RaidRoute: typeof RaidRoute
   TasksRoute: typeof TasksRoute
-  ApiPublicJobsGithubSyncRoute: typeof ApiPublicJobsGithubSyncRoute
+  ApiV1SplatRoute: typeof ApiV1SplatRoute
+  ApiV1ActivityRoute: typeof ApiV1ActivityRoute
+  ApiV1DecisionsRoute: typeof ApiV1DecisionsRouteWithChildren
+  ApiV1KeysRoute: typeof ApiV1KeysRouteWithChildren
+  ApiV1LessonsRoute: typeof ApiV1LessonsRouteWithChildren
+  ApiV1RaidRoute: typeof ApiV1RaidRouteWithChildren
+  ApiV1UpdatesRoute: typeof ApiV1UpdatesRoute
+  ApiV1WorkspaceRoute: typeof ApiV1WorkspaceRoute
+  ApiV1TasksIdRoute: typeof ApiV1TasksIdRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -117,13 +307,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/decisions': {
       id: '/decisions'
       path: '/decisions'
@@ -131,11 +314,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DecisionsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
+    '/lessons': {
+      id: '/lessons'
+      path: '/lessons'
+      fullPath: '/lessons'
+      preLoaderRoute: typeof LessonsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/raid': {
+      id: '/raid'
+      path: '/raid'
+      fullPath: '/raid'
+      preLoaderRoute: typeof RaidRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/tasks': {
@@ -145,23 +342,192 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/jobs/github-sync': {
-      id: '/api/public/jobs/github-sync'
-      path: '/api/public/jobs/github-sync'
-      fullPath: '/api/public/jobs/github-sync'
-      preLoaderRoute: typeof ApiPublicJobsGithubSyncRouteImport
+    '/api/v1/$': {
+      id: '/api/v1/$'
+      path: '/api/v1/$'
+      fullPath: '/api/v1/$'
+      preLoaderRoute: typeof ApiV1SplatRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/activity': {
+      id: '/api/v1/activity'
+      path: '/api/v1/activity'
+      fullPath: '/api/v1/activity'
+      preLoaderRoute: typeof ApiV1ActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/decisions': {
+      id: '/api/v1/decisions'
+      path: '/api/v1/decisions'
+      fullPath: '/api/v1/decisions'
+      preLoaderRoute: typeof ApiV1DecisionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/keys': {
+      id: '/api/v1/keys'
+      path: '/api/v1/keys'
+      fullPath: '/api/v1/keys'
+      preLoaderRoute: typeof ApiV1KeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/lessons': {
+      id: '/api/v1/lessons'
+      path: '/api/v1/lessons'
+      fullPath: '/api/v1/lessons'
+      preLoaderRoute: typeof ApiV1LessonsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/raid': {
+      id: '/api/v1/raid'
+      path: '/api/v1/raid'
+      fullPath: '/api/v1/raid'
+      preLoaderRoute: typeof ApiV1RaidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/updates': {
+      id: '/api/v1/updates'
+      path: '/api/v1/updates'
+      fullPath: '/api/v1/updates'
+      preLoaderRoute: typeof ApiV1UpdatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/workspace': {
+      id: '/api/v1/workspace'
+      path: '/api/v1/workspace'
+      fullPath: '/api/v1/workspace'
+      preLoaderRoute: typeof ApiV1WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/keys/$id': {
+      id: '/api/v1/keys/$id'
+      path: '/$id'
+      fullPath: '/api/v1/keys/$id'
+      preLoaderRoute: typeof ApiV1KeysIdRouteImport
+      parentRoute: typeof ApiV1KeysRoute
+    }
+    '/api/v1/lessons/$id': {
+      id: '/api/v1/lessons/$id'
+      path: '/$id'
+      fullPath: '/api/v1/lessons/$id'
+      preLoaderRoute: typeof ApiV1LessonsIdRouteImport
+      parentRoute: typeof ApiV1LessonsRoute
+    }
+    '/api/v1/raid/$id': {
+      id: '/api/v1/raid/$id'
+      path: '/$id'
+      fullPath: '/api/v1/raid/$id'
+      preLoaderRoute: typeof ApiV1RaidIdRouteImport
+      parentRoute: typeof ApiV1RaidRoute
+    }
+    '/api/v1/tasks/$id': {
+      id: '/api/v1/tasks/$id'
+      path: '/api/v1/tasks/$id'
+      fullPath: '/api/v1/tasks/$id'
+      preLoaderRoute: typeof ApiV1TasksIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/decisions/$id/decide': {
+      id: '/api/v1/decisions/$id/decide'
+      path: '/$id/decide'
+      fullPath: '/api/v1/decisions/$id/decide'
+      preLoaderRoute: typeof ApiV1DecisionsIdDecideRouteImport
+      parentRoute: typeof ApiV1DecisionsRoute
+    }
+    '/api/v1/tasks/$id/requirements': {
+      id: '/api/v1/tasks/$id/requirements'
+      path: '/requirements'
+      fullPath: '/api/v1/tasks/$id/requirements'
+      preLoaderRoute: typeof ApiV1TasksIdRequirementsRouteImport
+      parentRoute: typeof ApiV1TasksIdRoute
+    }
+    '/api/v1/tasks/$id/updates': {
+      id: '/api/v1/tasks/$id/updates'
+      path: '/updates'
+      fullPath: '/api/v1/tasks/$id/updates'
+      preLoaderRoute: typeof ApiV1TasksIdUpdatesRouteImport
+      parentRoute: typeof ApiV1TasksIdRoute
     }
   }
 }
 
+interface ApiV1DecisionsRouteChildren {
+  ApiV1DecisionsIdDecideRoute: typeof ApiV1DecisionsIdDecideRoute
+}
+
+const ApiV1DecisionsRouteChildren: ApiV1DecisionsRouteChildren = {
+  ApiV1DecisionsIdDecideRoute: ApiV1DecisionsIdDecideRoute,
+}
+
+const ApiV1DecisionsRouteWithChildren = ApiV1DecisionsRoute._addFileChildren(
+  ApiV1DecisionsRouteChildren,
+)
+
+interface ApiV1KeysRouteChildren {
+  ApiV1KeysIdRoute: typeof ApiV1KeysIdRoute
+}
+
+const ApiV1KeysRouteChildren: ApiV1KeysRouteChildren = {
+  ApiV1KeysIdRoute: ApiV1KeysIdRoute,
+}
+
+const ApiV1KeysRouteWithChildren = ApiV1KeysRoute._addFileChildren(
+  ApiV1KeysRouteChildren,
+)
+
+interface ApiV1LessonsRouteChildren {
+  ApiV1LessonsIdRoute: typeof ApiV1LessonsIdRoute
+}
+
+const ApiV1LessonsRouteChildren: ApiV1LessonsRouteChildren = {
+  ApiV1LessonsIdRoute: ApiV1LessonsIdRoute,
+}
+
+const ApiV1LessonsRouteWithChildren = ApiV1LessonsRoute._addFileChildren(
+  ApiV1LessonsRouteChildren,
+)
+
+interface ApiV1RaidRouteChildren {
+  ApiV1RaidIdRoute: typeof ApiV1RaidIdRoute
+}
+
+const ApiV1RaidRouteChildren: ApiV1RaidRouteChildren = {
+  ApiV1RaidIdRoute: ApiV1RaidIdRoute,
+}
+
+const ApiV1RaidRouteWithChildren = ApiV1RaidRoute._addFileChildren(
+  ApiV1RaidRouteChildren,
+)
+
+interface ApiV1TasksIdRouteChildren {
+  ApiV1TasksIdRequirementsRoute: typeof ApiV1TasksIdRequirementsRoute
+  ApiV1TasksIdUpdatesRoute: typeof ApiV1TasksIdUpdatesRoute
+}
+
+const ApiV1TasksIdRouteChildren: ApiV1TasksIdRouteChildren = {
+  ApiV1TasksIdRequirementsRoute: ApiV1TasksIdRequirementsRoute,
+  ApiV1TasksIdUpdatesRoute: ApiV1TasksIdUpdatesRoute,
+}
+
+const ApiV1TasksIdRouteWithChildren = ApiV1TasksIdRoute._addFileChildren(
+  ApiV1TasksIdRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AuthRoute: AuthRoute,
   DecisionsRoute: DecisionsRoute,
-  ResetPasswordRoute: ResetPasswordRoute,
+  LessonsRoute: LessonsRoute,
+  McpRoute: McpRoute,
+  RaidRoute: RaidRoute,
   TasksRoute: TasksRoute,
-  ApiPublicJobsGithubSyncRoute: ApiPublicJobsGithubSyncRoute,
+  ApiV1SplatRoute: ApiV1SplatRoute,
+  ApiV1ActivityRoute: ApiV1ActivityRoute,
+  ApiV1DecisionsRoute: ApiV1DecisionsRouteWithChildren,
+  ApiV1KeysRoute: ApiV1KeysRouteWithChildren,
+  ApiV1LessonsRoute: ApiV1LessonsRouteWithChildren,
+  ApiV1RaidRoute: ApiV1RaidRouteWithChildren,
+  ApiV1UpdatesRoute: ApiV1UpdatesRoute,
+  ApiV1WorkspaceRoute: ApiV1WorkspaceRoute,
+  ApiV1TasksIdRoute: ApiV1TasksIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

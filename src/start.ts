@@ -1,7 +1,9 @@
+import { isNotFound, isRedirect } from "@tanstack/react-router";
 import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/react-start";
 
+import { connectDb, requireEnv } from "@/server/db/client";
+import { createServices, isServiceError, type Services } from "@/server/services";
 import { renderErrorPage } from "./lib/error-page";
-import { attachSupabaseAuth } from "@/integrations/supabase/auth-attacher";
 
 const errorMiddleware = createMiddleware().server(async ({ next }) => {
   try {
@@ -25,13 +27,39 @@ const csrfMiddleware = createCsrfMiddleware({
   filter: (ctx) => ctx.handlerType === "serverFn",
 });
 
-// requestMiddleware runs on every request; functionMiddleware only on server functions, where
-// client sendContext is unvalidated input. Append to these arrays, never replace them.
-// Enabling Lovable Cloud adds functionMiddleware: [attachSupabaseAuth], the bearer token that
-// requireSupabaseAuth server functions need. Add it by hand only if Lovable Cloud or a
-// user-managed Supabase project is connected, no middleware here sets Authorization, and the
-// project did not intentionally replace it.
+// It cannot live in createStart's options factory, which runs on every request.
+let services: Services | undefined;
+
+function openServices(): Services {
+  const handle = connectDb(requireEnv("DATABASE_URL"));
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    // A listener replaces Node's default exit, so one is added only where another (Nitro's graceful shutdown) already
+    // did. That one closes the HTTP server without exiting; the process ends when the pool's sockets close too.
+    if (process.listenerCount(signal) > 0) process.once(signal, () => void handle.close());
+  }
+  return createServices(handle.db);
+}
+
+// The client build strips `.server()`, and the server imports with it.
+const servicesMiddleware = createMiddleware().server(({ next }) => {
+  services ??= openServices();
+  return next({ context: { services } });
+});
+
+// The browser gets a server function's error as its message alone, so a driver error would show the database's host
+// and port. A ServiceError is the caller's answer, and a redirect or notFound is router control flow.
+const unavailableMiddleware = createMiddleware({ type: "function" }).server(async ({ next }) => {
+  try {
+    return await next();
+  } catch (error) {
+    if (isServiceError(error) || isRedirect(error) || isNotFound(error)) throw error;
+    const ref = crypto.randomUUID().slice(0, 8);
+    console.error(`data service unavailable, reference ${ref}`, error);
+    throw new Error(`The data service is unavailable. Reference ${ref}.`);
+  }
+});
+
 export const startInstance = createStart(() => ({
-  functionMiddleware: [attachSupabaseAuth],
-  requestMiddleware: [errorMiddleware, csrfMiddleware],
+  requestMiddleware: [errorMiddleware, csrfMiddleware, servicesMiddleware],
+  functionMiddleware: [unavailableMiddleware],
 }));

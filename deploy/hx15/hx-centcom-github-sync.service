@@ -1,0 +1,10 @@
+[Unit]
+Description=HX-CentCom GitHub sync (GET requests only)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/hx-centcom/current
+EnvironmentFile=%h/.config/hx-centcom/app.env
+Environment=NODE_ENV=production GITHUB_TOKEN_FILE=%h/caio-notes/love-t.md
+ExecStart=%h/.local/bin/node --import tsx scripts/github-sync.ts
+TimeoutStartSec=120
