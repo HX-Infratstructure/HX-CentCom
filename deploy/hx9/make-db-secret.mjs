@@ -45,7 +45,13 @@ function readOrCreatePassword(envPath) {
     return password;
   }
   const line = text.split("\n").find((l) => l.startsWith("DATABASE_URL="));
-  const url = line && URL.parse(line.slice("DATABASE_URL=".length));
+  let url;
+  try {
+    // Not URL.parse, which needs Node 22.1.
+    url = line && new URL(line.slice("DATABASE_URL=".length));
+  } catch {
+    url = null;
+  }
   if (
     !url ||
     url.username !== ROLE ||

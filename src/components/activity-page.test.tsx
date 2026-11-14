@@ -272,6 +272,27 @@ const SUMMARY_EDITED = entry({
   revertible: true,
 });
 
+/* review_at is a RAID input (raid.ts), so a new review date is a change the row shows, unlike updated_at. */
+const REVIEW_MOVED = entry({
+  action: "raid.update",
+  entity: "raid_item",
+  entity_id: "RAID-09",
+  before: {
+    ...RAID_ROW,
+    review_at: "2026-11-20T00:00:00.000Z",
+    version: 2,
+    updated_at: "2026-11-14T16:24:57.214Z",
+  },
+  after: {
+    ...RAID_ROW,
+    review_at: "2026-11-27T00:00:00.000Z",
+    version: 3,
+    updated_at: "2026-11-14T17:02:11.508Z",
+    effects: {},
+  },
+  revertible: true,
+});
+
 const PENDING_DECISION = {
   id: "D-13",
   question: "Merge the shadow hook PR?",
@@ -485,6 +506,17 @@ describe("what each activity row changed", () => {
     await renderActivity("/activity", false);
 
     expect(changesOf("RAID item RAID-09")).toEqual([]);
+  });
+
+  it("shows a RAID item's new review date, which is an input and not a write time", async () => {
+    server.listWorkspace.mockResolvedValue(WORKSPACE);
+    server.listActivity.mockResolvedValue(page([REVIEW_MOVED]));
+    await renderActivity("/activity", false);
+
+    expect(changesOf("RAID item RAID-09")).toEqual([
+      "review at 2026-11-20T00:00:00.000Z → 2026-11-27T00:00:00.000Z",
+    ]);
+    expect(rowOf("RAID item RAID-09")).not.toHaveTextContent("updated at");
   });
 
   it("shows a decision's status change and not when it was decided, which the row's time already says", async () => {

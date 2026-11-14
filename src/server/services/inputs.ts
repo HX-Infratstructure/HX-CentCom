@@ -67,6 +67,12 @@ export const pgInstant = z
     "must be a UTC instant in years 0001-9999 with an offset within ±15:59",
   );
 
+/** pgInstant refuses a date such as 02-31 or year 0000, which the `::timestamptz` cast would turn into a 500. */
+export const isoMicros = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/)
+  .pipe(pgInstant);
+
 const id = z.string().trim().min(1).max(100);
 const commitSha = z
   .string()

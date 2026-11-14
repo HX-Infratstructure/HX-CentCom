@@ -60,14 +60,15 @@ export const UPDATE_KIND_LABELS = {
 
 /**
  * The PR query's closed `state` filter. The `github_prs.state` column is still open text, so a stored row can hold a
- * value outside it; `PullRequestView.state` keeps that raw text. `gone` means GitHub answered 404 or a redirect for a
- * PR stored as open.
+ * value outside it; `PullRequestView.state` keeps that raw text. `gone` means a PR stored as open is no longer in the
+ * org on GitHub. GitHub answered 404, or redirected out of the org or to a Location the sync refuses. A redirect after
+ * a rename inside the org is followed, and the PR keeps its real state.
  */
 export const PR_STATE_LABELS = {
   open: "Open",
   closed: "Closed",
   merged: "Merged",
-  gone: "Gone (404 or redirect on GitHub)",
+  gone: "Gone (no longer in the HX org on GitHub)",
 } as const satisfies Record<S.GithubPrState, string>;
 export type PrState = keyof typeof PR_STATE_LABELS;
 

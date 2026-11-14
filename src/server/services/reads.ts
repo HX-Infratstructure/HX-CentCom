@@ -41,6 +41,7 @@ import { ServiceError } from "./errors";
 import {
   activityQueryInput,
   decisionQueryInput,
+  isoMicros,
   parse,
   updateQueryInput,
   type Parsed,
@@ -65,7 +66,6 @@ import type {
 
 const SNAPSHOT = { isolationLevel: "repeatable read", accessMode: "read only" } as const;
 
-const isoMicros = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/);
 const feedCursor = z.tuple([isoMicros, z.string().uuid()]);
 const instantOrNone = z.union([isoMicros, z.literal("-infinity")]);
 const decisionId = z.string().min(1).max(100);

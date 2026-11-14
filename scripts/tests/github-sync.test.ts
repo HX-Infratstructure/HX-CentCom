@@ -30,6 +30,7 @@ interface Canned {
   status?: number;
   body: unknown;
   next?: string;
+  location?: string;
 }
 type Routes = Record<string, Canned>;
 interface Call {
@@ -49,6 +50,7 @@ function pull(repoName: string, id: number, number: number, fields: Record<strin
     state: "open",
     draft: false,
     head: { sha: `head-${id}` },
+    base: { repo: { name: repoName, owner: { login: ORG } } },
     merge_commit_sha: `test-merge-${id}`,
     html_url: `https://github.com/${ORG}/${repoName}/pull/${number}`,
     merged_at: null,
@@ -127,6 +129,7 @@ function stubGitHub(routes: Routes, reject?: (init: RequestInit) => Error) {
         status: 500,
       });
     const headers = new Headers();
+    if (route.location !== undefined) headers.set("Location", route.location);
     if (route.next !== undefined) {
       headers.set(
         "Link",
@@ -656,26 +659,151 @@ describe("PR state", () => {
     );
   });
 
+  const oldClosedPull = (repoName: string) =>
+    pull(repoName, 404, 4, { state: "closed", closed_at: daysAgo(40), updated_at: daysAgo(40) });
+  const sentToken = (call: { init: RequestInit }) =>
+    new Headers(call.init.headers).get("authorization") === `Bearer ${TOKEN}`;
+
   for (const status of [301, 302, 307, 308]) {
     test(`a stored open PR whose repository left the org (${status}) is marked gone, and the redirect is not followed`, async () => {
       const moved = `${API}/repos/elsewhere/beyond/pulls/4`;
       const routes: Routes = {
         [reposUrl]: { body: [repo("alpha")] },
         ...quietRepo("alpha"),
-        [pullUrl("transferred", 4)]: { status, body: { message: "Moved Permanently", url: moved } },
+        [pullUrl("transferred", 4)]: { status, location: moved, body: { message: "Moved" } },
+        [moved]: { body: oldClosedPull("beyond") },
       };
       const result = await run(routes, { open: [{ id: 404, repo: "transferred", number: 4 }] });
       assert.equal(result.code, 0, result.stderr);
       assert.deepEqual(result.db.saved[0]?.stateUpdates, [{ id: 404, state: "gone" }]);
       assert.deepEqual(result.db.saved[0]?.prs, []);
-      assert.ok(!result.urls.includes(moved), "the redirect target was never requested");
+      assert.equal(
+        result.urls.filter((url) => url === moved).length,
+        0,
+        "no request to the other org",
+      );
       assert.equal(
         result.stdout,
         "github-sync gone repo=transferred number=4 id=404\n" +
           "github-sync ok org=HX-Infratstructure repos=1 heads=1 empty=0 open=0 merged=0 closed=0 requests=5 ms=0\n",
       );
     });
+
+    test(`a stored open PR whose repository was renamed inside the org (${status}) takes GitHub's answer from one GET of the new URL`, async () => {
+      const renamed = pullUrl("renamed", 4);
+      const routes: Routes = {
+        [reposUrl]: { body: [repo("alpha")] },
+        ...quietRepo("alpha"),
+        [pullUrl("old-name", 4)]: { status, location: renamed, body: { message: "Moved" } },
+        [renamed]: { body: oldClosedPull("renamed") },
+      };
+      const result = await run(routes, { open: [{ id: 404, repo: "old-name", number: 4 }] });
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(result.db.saved[0]?.prs, [row("renamed", 404, 4, "closed", null)]);
+      assert.deepEqual(result.db.saved[0]?.stateUpdates, []);
+      const hops = result.calls.filter((call) => call.url === renamed);
+      assert.equal(hops.length, 1, "one GET of the new URL");
+      assert.ok(hops.every(sentToken), "the new URL on api.github.com gets the token");
+      assert.equal(
+        result.stdout,
+        "github-sync ok org=HX-Infratstructure repos=1 heads=1 empty=0 open=0 merged=0 closed=1 requests=6 ms=0\n",
+      );
+    });
   }
+
+  for (const location of [
+    `https://evil.example/repos/${ORG}/renamed/pulls/4`,
+    `https://api.github.com.evil.example/repos/${ORG}/renamed/pulls/4`,
+    `https://api.github.com@evil.example/repos/${ORG}/renamed/pulls/4`,
+    `http://api.github.com/repos/${ORG}/renamed/pulls/4`,
+    `https://api.github.com:8443/repos/${ORG}/renamed/pulls/4`,
+    `${API}/repos/${ORG}/renamed/pulls/5`,
+    `${API}/repos/${ORG}/renamed/pulls/4?page=2`,
+    `${API}/repositories/1457388817/pulls/5`,
+    `${API}/repositories/abc/pulls/4`,
+    `https://evil.example/repositories/1457388817/pulls/4`,
+    `/repos/${ORG}/renamed/pulls/4`,
+    "not a url",
+  ]) {
+    test(`a redirect to a Location that is not this PR on api.github.com in the org is marked gone without a request: ${location}`, async () => {
+      const routes: Routes = {
+        [reposUrl]: { body: [repo("alpha")] },
+        ...quietRepo("alpha"),
+        [pullUrl("old-name", 4)]: { status: 301, location, body: { message: "Moved" } },
+        [location]: { body: oldClosedPull("renamed") },
+      };
+      const result = await run(routes, { open: [{ id: 404, repo: "old-name", number: 4 }] });
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(result.db.saved[0]?.stateUpdates, [{ id: 404, state: "gone" }]);
+      assert.deepEqual(result.db.saved[0]?.prs, []);
+      assert.equal(result.calls.length, 5, result.urls.join(" "));
+      for (const call of result.calls) assert.ok(call.url.startsWith(`${API}/`), call.url);
+    });
+  }
+
+  const movedById = `${API}/repositories/1457388817/pulls/4`;
+  const movedByIdRoutes = (answer: Canned): Routes => ({
+    [reposUrl]: { body: [repo("alpha")] },
+    ...quietRepo("alpha"),
+    [pullUrl("old-name", 4)]: { status: 301, location: movedById, body: { message: "Moved" } },
+    [movedById]: answer,
+  });
+
+  test("a redirect to the PR by repository id in the org takes GitHub's answer and the repository's new name", async () => {
+    const result = await run(movedByIdRoutes({ body: oldClosedPull("renamed") }), {
+      open: [{ id: 404, repo: "old-name", number: 4 }],
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(result.db.saved[0]?.prs, [row("renamed", 404, 4, "closed", null)]);
+    assert.deepEqual(result.db.saved[0]?.stateUpdates, []);
+    const hops = result.calls.filter((call) => call.url === movedById);
+    assert.equal(hops.length, 1, "one GET of the repository-id URL");
+    assert.ok(hops.every(sentToken), "the URL on api.github.com gets the token");
+  });
+
+  for (const [why, answer] of [
+    [
+      "a repository now owned by another org",
+      {
+        body: pull("beyond", 404, 4, {
+          base: { repo: { name: "beyond", owner: { login: "elsewhere" } } },
+        }),
+      },
+    ],
+    ["a 404", { status: 404, body: { message: "Not Found" } }],
+  ] as const) {
+    test(`a redirect to the PR by repository id that answers with ${why} is marked gone after one GET`, async () => {
+      const result = await run(movedByIdRoutes(answer), {
+        open: [{ id: 404, repo: "old-name", number: 4 }],
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(result.db.saved[0]?.stateUpdates, [{ id: 404, state: "gone" }]);
+      assert.deepEqual(result.db.saved[0]?.prs, []);
+      assert.equal(
+        result.urls.filter((url) => url === movedById).length,
+        1,
+        "one GET of the repository-id URL",
+      );
+    });
+  }
+
+  test("a second redirect after the one hop is marked gone, and the second Location is not requested", async () => {
+    const renamed = pullUrl("renamed", 4);
+    const again = pullUrl("renamed-again", 4);
+    const routes: Routes = {
+      [reposUrl]: { body: [repo("alpha")] },
+      ...quietRepo("alpha"),
+      [pullUrl("old-name", 4)]: { status: 301, location: renamed, body: { message: "Moved" } },
+      [renamed]: { status: 307, location: again, body: { message: "Moved" } },
+      [again]: { body: oldClosedPull("renamed-again") },
+    };
+    const result = await run(routes, { open: [{ id: 404, repo: "old-name", number: 4 }] });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(result.db.saved[0]?.stateUpdates, [{ id: 404, state: "gone" }]);
+    assert.deepEqual(result.db.saved[0]?.prs, []);
+    assert.equal(result.urls.filter((url) => url === renamed).length, 1, "the one hop was made");
+    assert.equal(result.urls.filter((url) => url === again).length, 0, "no second hop");
+  });
 
   test("a redirect anywhere else still fails the run", async () => {
     const result = await run({
@@ -914,6 +1042,50 @@ describe("the database store", () => {
           },
         ],
         "the injected db still answers after main returned",
+      );
+    } finally {
+      await t.close();
+    }
+  });
+
+  test("a PR of a repository renamed inside the org is saved under the new name", async () => {
+    register();
+    const { createTestDb } = await import("../../src/server/db/test-db.ts");
+    const t = await createTestDb();
+    try {
+      const sync = async (routes: Routes) => {
+        const stderr = output();
+        const code = await main(
+          { GITHUB_TOKEN_FILE: tokenFile(0o600) },
+          { fetch: stubGitHub(routes).fetch, db: t.db, now: () => NOW, stdout: output(), stderr },
+        );
+        assert.equal(code, 0, stderr.text());
+      };
+      await sync({
+        [reposUrl]: { body: [repo("old-name")] },
+        ...quietRepo("old-name"),
+        [openUrl("old-name")]: { body: [pull("old-name", 404, 4)] },
+      });
+      const movedById = `${API}/repositories/1457388817/pulls/4`;
+      await sync({
+        [reposUrl]: { body: [] },
+        [pullUrl("old-name", 4)]: { status: 301, location: movedById, body: { message: "Moved" } },
+        [movedById]: {
+          body: pull("renamed", 404, 4, { state: "closed", closed_at: daysAgo(40) }),
+        },
+      });
+      const { items } = await t.services.listGithubPrs({ limit: 100 });
+      assert.deepEqual(
+        items.map(({ id, repo, number, state, url }) => ({ id, repo, number, state, url })),
+        [
+          {
+            id: 404,
+            repo: "renamed",
+            number: 4,
+            state: "closed",
+            url: `https://github.com/${ORG}/renamed/pull/4`,
+          },
+        ],
       );
     } finally {
       await t.close();

@@ -24,6 +24,8 @@ const hmac = (key, text) => createHmac("sha256", key).update(text).digest();
 const sha256 = (data) => createHash("sha256").update(data).digest();
 const xor = (a, b) => Buffer.from(a.map((byte, i) => byte ^ b[i]));
 const mode = (path) => statSync(path).mode & 0o777;
+// Node added URL.parse in 22.1.0. This preload gives the script the URL API of Node 22.0.
+const NODE_22_0_URL = "--import=data:text/javascript,delete URL.parse";
 
 // The SCRAM-SHA-256 exchange in section 3 of https://www.rfc-editor.org/rfc/rfc7677.txt (password "pencil").
 const rfc = {
@@ -90,8 +92,8 @@ test("the CLI writes app.env and create-role.sql privately, never shows the pass
   const envPath = join(dir, "app.env");
   const sqlPath = join(dir, "create-role.sql");
 
-  const run = () => {
-    const result = spawnSync(process.execPath, [script], {
+  const run = (...nodeArgs) => {
+    const result = spawnSync(process.execPath, [...nodeArgs, script], {
       cwd,
       env: { ...process.env, HOME: home },
       encoding: "utf8",
@@ -139,10 +141,42 @@ test("the CLI writes app.env and create-role.sql privately, never shows the pass
   };
 
   const first = run();
-  const second = run();
-  assert.equal(second.env, first.env, "a rerun leaves app.env as it was");
+  const second = run(NODE_22_0_URL);
+  assert.equal(second.env, first.env, "a rerun on Node 22.0 leaves app.env as it was");
   assert.notEqual(second.verifier, first.verifier, "a rerun writes a new SQL file with a new salt");
   assert.ok(login(second.verifier, first.password), "the new verifier is for the same password");
+});
+
+test("a rerun refuses an existing app.env whose DATABASE_URL is invalid, and changes nothing", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "make-db-secret-invalid-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, "home");
+  const dir = join(home, ".config", "hx-centcom");
+  const envPath = join(dir, "app.env");
+  mkdirSync(dir, { recursive: true });
+
+  for (const env of [
+    "DATABASE_URL=postgres://centcom_app:pw@[192.168.50.209/centcom\n",
+    "DATABASE_URL=postgres://other:pw@192.168.50.209:5432/centcom\n",
+    "PORT=3000\n",
+  ]) {
+    writeFileSync(envPath, env);
+    for (const nodeArgs of [[], [NODE_22_0_URL]]) {
+      const result = spawnSync(process.execPath, [...nodeArgs, script], {
+        cwd: root,
+        env: { ...process.env, HOME: home },
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 1, env);
+      assert.equal(
+        result.stderr,
+        `make-db-secret: ${envPath} exists, but its DATABASE_URL is not for centcom_app at 192.168.50.209:5432/centcom. It was left unchanged.\n`,
+      );
+      assert.equal(result.stdout, "");
+      assert.equal(readFileSync(envPath, "utf8"), env, "app.env is left unchanged");
+      assert.deepEqual(readdirSync(dir), ["app.env"], "no create-role.sql is written");
+    }
+  }
 });
 
 test("the CLI runs when started through a symlink, and an import of the module writes nothing", (t) => {

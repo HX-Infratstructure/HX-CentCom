@@ -1,13 +1,15 @@
 import { useCallback, useId, type ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
+  keepPreviousData,
+  useInfiniteQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
 import { adaptUpdatePages, adaptWorkspace, toAppError } from "@/components/adapt";
 import { DecisionList } from "@/components/decision";
-import { EmptyState, ShowMore } from "@/components/list-states";
+import { EmptyState, ErrorState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
 import {
   ATTENTION_LABELS,
@@ -72,10 +74,7 @@ export const Route = createFileRoute("/")({
       attention: lists.openTasks.filters(search).attention,
     };
   },
-  /**
-   * Returns the feed's read and the reason's tasks, so the feed keeps what this load fetched. Rebuilt from a workspace
-   * that refetched since, they could name a set of tasks no load fetched, and the feed would suspend.
-   */
+  /** Prefetches the feed read the first render derives from the same workspace, so server rendering has its data. */
   loader: async ({ context: { queryClient }, deps: { attention, ...feed } }) => {
     const workspace = queryClient.ensureQueryData(tasksQuery);
     // Only a reason makes the feed wait for the workspace, because its read names the reason's open tasks.
@@ -86,14 +85,12 @@ export const Route = createFileRoute("/")({
           : tasksNeeding(attention, adaptWorkspace(await workspace).tasks);
       const query = feedQuery(feed, attentionIds);
       if (query !== null) await queryClient.ensureInfiniteQueryData(updatePages(query));
-      return { feed: query, attentionIds };
     };
-    const [, feedRead] = await Promise.all([
+    await Promise.all([
       workspace,
       loadFeed(),
       queryClient.ensureInfiniteQueryData(prPages(OPEN_PRS)),
     ]);
-    return feedRead;
   },
   head: () => ({
     meta: [
@@ -143,7 +140,7 @@ function Overview(): ReactNode {
           )}
         </section>
 
-        <Feed dir={ws} />
+        <Feed dir={ws} tasks={ws.tasks} />
 
         <section aria-labelledby={tasksId} className="overview-tasks">
           <h2 id={tasksId} className="section-title">
@@ -202,11 +199,15 @@ function OpenPullRequests(): ReactNode {
   );
 }
 
-/** The attention control stays on the Open tasks list; the feed names the reason it applies. */
-function Feed({ dir }: { dir: Directory }): ReactNode {
+/**
+ * The attention control stays on the Open tasks list; the feed names the reason it applies. The reason's tasks come
+ * from the current workspace, so a refresh that changes them changes the feed's read.
+ */
+function Feed({ dir, tasks }: { dir: Directory; tasks: readonly TaskView[] }): ReactNode {
   const headingId = useId();
   const { attention, agentId, taskId } = Route.useLoaderDeps();
-  const query = Route.useLoaderData({ select: (data) => data.feed });
+  const attentionIds = attention === undefined ? undefined : tasksNeeding(attention, tasks);
+  const query = feedQuery({ agentId, taskId }, attentionIds);
   const filtered = attention !== undefined || agentId !== undefined || taskId !== undefined;
   return (
     <section aria-labelledby={headingId} className="overview-feed">
@@ -220,41 +221,55 @@ function Feed({ dir }: { dir: Directory }): ReactNode {
       )}
       {query === null ? (
         <>
-          <FeedFilters dir={dir} counts={null} />
+          <FeedFilters dir={dir} counts={null} attentionIds={attentionIds} />
           <EmptyState>No updates match these filters.</EmptyState>
         </>
       ) : (
-        <FeedPages dir={dir} query={query} filtered={filtered} />
+        <FeedPages dir={dir} query={query} filtered={filtered} attentionIds={attentionIds} />
       )}
     </section>
   );
 }
 
+/**
+ * Not a suspense read: the loader prefetched the first render's read, and a read a later refresh asks for loads while
+ * the previous one stays on screen.
+ */
 function FeedPages({
   dir,
   query,
   filtered,
+  attentionIds,
 }: {
   dir: Directory;
   query: UpdateQuery;
   filtered: boolean;
+  attentionIds: readonly string[] | undefined;
 }): ReactNode {
   const select = useCallback(
     (data: InfiniteData<UpdatesPage, string | undefined>) => adaptUpdatePages(data.pages, dir),
     [dir],
   );
-  const pages = useSuspenseInfiniteQuery({ ...updatePages(query), select });
-  const { items, counts } = pages.data;
+  const pages = useInfiniteQuery({
+    ...updatePages(query),
+    select,
+    placeholderData: keepPreviousData,
+  });
+  const items = pages.data?.items ?? [];
+  const counts = pages.data?.counts ?? null;
   return (
     <>
-      <FeedFilters dir={dir} counts={counts} />
-      {items.length === 0 ? (
+      <FeedFilters dir={dir} counts={counts} attentionIds={attentionIds} />
+      {pages.isPending && <p className="quiet">Loading updates.</p>}
+      {pages.isError && !pages.isFetchNextPageError && (
+        <ErrorState error={toAppError(pages.error)} retry={() => void pages.refetch()} />
+      )}
+      {pages.isSuccess && items.length === 0 && (
         <EmptyState>
           {filtered ? "No updates match these filters." : "No agent has posted an update yet."}
         </EmptyState>
-      ) : (
-        <UpdateList updates={items} />
       )}
+      {items.length > 0 && <UpdateList updates={items} />}
       <ShowMore
         shown={items.length}
         total={counts?.total}
@@ -272,8 +287,15 @@ function FeedPages({
  * With no read (null counts), each facet shows only its active chip. Under a reason the Task chips offer only the
  * reason's tasks, because the server's task counts leave out the feed's own `taskIds`.
  */
-function FeedFilters({ dir, counts }: { dir: Directory; counts: UpdateCounts | null }): ReactNode {
-  const attentionIds = Route.useLoaderData({ select: (data) => data.attentionIds });
+function FeedFilters({
+  dir,
+  counts,
+  attentionIds,
+}: {
+  dir: Directory;
+  counts: UpdateCounts | null;
+  attentionIds: readonly string[] | undefined;
+}): ReactNode {
   const byTask = counts?.byTask ?? {};
   const task =
     attentionIds === undefined

@@ -35,7 +35,7 @@ import {
 } from "@/server/db/schema-raid";
 import type { Actor } from "./actor";
 import { ServiceError, type Issue } from "./errors";
-import { parse, pgInstant, requestDecisionInput, sourceRef } from "./inputs";
+import { isoMicros, parse, pgInstant, requestDecisionInput, sourceRef } from "./inputs";
 import type { CreatePlan, UpdatePlan, WriteContext } from "./pipeline";
 import { authorizeTaskWrite } from "./policy";
 import type {
@@ -54,8 +54,6 @@ export type RaidItem = typeof raidItems.$inferSelect;
 
 /** reads.ts keeps its keyset helpers private; these order by (created_at desc, id desc) as its feeds do. */
 export const SNAPSHOT = { isolationLevel: "repeatable read", accessMode: "read only" } as const;
-
-const isoMicros = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/);
 
 export type Keyset = {
   encode(row: { readonly created_at: string; readonly id: string }): string;
@@ -548,7 +546,7 @@ async function releaseTask(
     .select({ blocked_on: engineeringTasks.blocked_on })
     .from(engineeringTasks)
     .where(eq(engineeringTasks.id, taskId))
-    .for("update");
+    .for("no key update");
   if (!task) throw new Error(`blocked task ${taskId} of ${item.id} vanished`);
   const stillOpen = and(
     eq(raidItems.type, "dependency"),
@@ -595,7 +593,9 @@ async function releaseTask(
 /**
  * Automation 2 (SPEC §6.1). A dependency's move into closed releases the task it is on, and an open dependency's move
  * to another task releases the task it left. Every release posts one system update that states the outcome. Tasks
- * lock in id order, so two crossing moves cannot deadlock.
+ * lock in id order, so two releases in one write cannot deadlock. The lock is FOR NO KEY UPDATE because the RAID row's
+ * foreign key already holds FOR KEY SHARE on its new task. FOR UPDATE would wait on that lock, so two crossing moves
+ * (A to B, B to A) would each wait on the other.
  */
 async function releaseDependencyTasks(
   tx: Tx,

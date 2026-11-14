@@ -303,7 +303,11 @@ function activityView(entry: S.ActivityEntry, dir: Directory): ActivityView {
   };
 }
 
-/** Keys a write sets whatever it changed, or that point at its side effects. None of them says what changed. */
+/**
+ * Keys a write sets whatever it changed, or that point at its side effects. None of them says what changed. The
+ * timestamps are the write's own clock, which the row's time already shows. An `_at` field a caller sets, such as a
+ * RAID item's `review_at`, is not listed, so a new value shows as a change.
+ */
 const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
   "id",
   "version",
@@ -312,12 +316,12 @@ const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
   "update_id",
   "effects",
   "reverts",
+  "created_at",
+  "updated_at",
+  "requested_at",
+  "decided_at",
+  "revoked_at",
 ]);
-
-/** A timestamp (`decided_at`, `revoked_at`) says when, which the row's own time already shows. */
-function isBookkeeping(key: string): boolean {
-  return BOOKKEEPING_KEYS.has(key) || key.endsWith("_at");
-}
 
 /** Longer text, or text on several lines, is named as edited instead of printed. */
 const SHORT_TEXT = 40;
@@ -346,7 +350,7 @@ function changesOf(entry: S.ActivityEntry, dir: Directory): readonly ActivityCha
   return [...keys].flatMap((key): ActivityChange[] => {
     const from = valueAt(before, key);
     const to = valueAt(after, key);
-    if (isBookkeeping(key) || JSON.stringify(from) === JSON.stringify(to)) return [];
+    if (BOOKKEEPING_KEYS.has(key) || JSON.stringify(from) === JSON.stringify(to)) return [];
     const field = key.replace(/_/g, " ");
     if (!isShort(from) || !isShort(to)) return [{ kind: "edited", field }];
     return [

@@ -37,10 +37,10 @@ function rowOf(title: string): HTMLElement {
 }
 
 describe("a pull request's state in the list", () => {
-  it("labels a PR that GitHub answered 404 or a redirect for as gone", () => {
+  it("labels a PR that is no longer in the HX org on GitHub as gone", () => {
     renderRows([pr(19, "Wire the MVP 4 release build", "gone")]);
     expect(rowOf("Wire the MVP 4 release build")).toHaveTextContent(
-      "Gone (404 or redirect on GitHub)",
+      "Gone (no longer in the HX org on GitHub)",
     );
   });
 

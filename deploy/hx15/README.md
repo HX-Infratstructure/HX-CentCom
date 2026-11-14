@@ -225,7 +225,16 @@ The sync sends the owner's token to GitHub in GET requests every 5 minutes. Use 
 
 Once the sync units are installed, every later `install.sh` and `rollback.sh` reinstalls them from the release it makes current. Without `--sync`, `install.sh` never enables the timer.
 
-Each run also fetches every PR that the database holds as `open` and that GitHub's open list no longer has. This covers a PR whose repository is archived or no longer in the organization's list. If GitHub answers 404 or a redirect for that PR, the sync sets its state to `gone` and prints `github-sync gone repo=<repo> number=<n> id=<id>` before its `github-sync ok` line. GitHub sends a redirect for a repository transferred out of the organization, and the sync never follows one. Any other error status fails the run, and so does a redirect on any other request.
+### Know when a pull request is gone
+
+Each run also fetches every PR that the database holds as `open` and that GitHub's open list no longer has. This covers a PR whose repository is archived or no longer in the organization's list. Every GET that the sync sends sets `redirect: "manual"`, so `fetch` never follows a redirect by itself. The sync handles GitHub's answer for such a PR this way:
+
+- **200.** The sync saves the PR's state.
+- **404.** The PR is `gone`.
+- **A redirect to the same PR on `api.github.com`.** The status is 3xx, and the `Location` is `https://api.github.com/repos/HX-Infratstructure/<name>/pulls/<n>` or `https://api.github.com/repositories/<id>/pulls/<n>`, where `<n>` is the PR's own number. GitHub sends the numeric form for a renamed repository. The sync sends one GET to that URL. If GitHub answers 200 and the PR's base repository belongs to the organization, the sync saves the PR's state under the repository's new name. If GitHub answers 404 or another redirect, or the base repository belongs to another organization, the PR is `gone`.
+- **Any other redirect.** The PR is `gone`. Examples are a `Location` on another host, a `Location` in another organization, and a malformed `Location`.
+
+For a `gone` PR, the sync sets its state to `gone` and prints `github-sync gone repo=<repo> number=<n> id=<id>` before its `github-sync ok` line. Any other error status fails the run, and so does a redirect on any other request. The sync sends the token only to `api.github.com`.
 
 ### Checks V-C
 

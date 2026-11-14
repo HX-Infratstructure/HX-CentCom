@@ -47,6 +47,7 @@ interface GitHubPull {
   state: "open" | "closed";
   draft: boolean;
   head: { sha: string };
+  base: { repo: { name: string; owner: { login: string } } };
   merge_commit_sha: string | null;
   html_url: string;
   merged_at: string | null;
@@ -58,7 +59,7 @@ interface GitHubBranch {
   commit: { sha: string };
 }
 
-/** `null` is GitHub's 404 or redirect for a PR that the database still holds. */
+/** `null` is GitHub's 404, or a redirect out of the org, for a PR that the database still holds. */
 function prState(pull: GitHubPull | null): GithubPrState {
   if (pull === null) return "gone";
   return pull.merged_at ? "merged" : pull.state;
@@ -101,6 +102,23 @@ function failureKind(error: unknown): string {
 
 function nextUrl(link: string | null): string | undefined {
   return link?.match(/<([^>]*)>;\s*rel="next"/)?.[1];
+}
+
+/**
+ * The URL to fetch once when `location` names this same PR on api.github.com, by a repository name in the org or by a
+ * repository id. GitHub sends the id form for a renamed repository. The URL is rebuilt, so only api.github.com gets it.
+ */
+function redirectTarget(location: string | null, number: number): string | undefined {
+  if (location === null || !URL.canParse(location)) return undefined;
+  const url = new URL(location);
+  if (url.origin !== API || url.username || url.password || url.search || url.hash)
+    return undefined;
+  const named = url.pathname.match(/^\/repos\/([^/]+)\/([\w.-]+)\/pulls\/(\d+)$/);
+  if (named?.[1] === ORG && named[3] === String(number))
+    return `${API}/repos/${ORG}/${named[2]}/pulls/${number}`;
+  const byId = url.pathname.match(/^\/repositories\/(\d+)\/pulls\/(\d+)$/);
+  if (byId?.[2] === String(number)) return `${API}/repositories/${byId[1]}/pulls/${number}`;
+  return undefined;
 }
 
 function gitHubApi(fetch: Fetch, token: string) {
@@ -169,11 +187,26 @@ function gitHubApi(fetch: Fetch, token: string) {
           return last !== undefined && Date.parse(last.updated_at) >= cutoff;
         },
       ),
-    pull: async (repo: string, number: number): Promise<GitHubPull | null> => {
-      // GitHub redirects a repository that was transferred out of the org, so its PRs are no longer HX's.
+    /**
+     * GitHub redirects a repository that was renamed inside the org, and one that left it. Only a Location that names
+     * this PR on api.github.com is fetched, once, and its answer counts only if the org still owns the repository.
+     */
+    pull: async (
+      repo: string,
+      number: number,
+    ): Promise<{ repo: string; pull: GitHubPull } | null> => {
+      const absent = (status: number) => status === 404 || (status >= 300 && status < 400);
       const url = `${API}/repos/${ORG}/${repo}/pulls/${number}`;
-      const res = await get(url, (status) => status === 404 || (status >= 300 && status < 400));
-      return res.ok ? json<GitHubPull>(res, url) : null;
+      const res = await get(url, absent);
+      if (res.ok) return { repo, pull: await json<GitHubPull>(res, url) };
+      const moved =
+        res.status === 404 ? undefined : redirectTarget(res.headers.get("location"), number);
+      if (moved === undefined) return null;
+      const next = await get(moved, absent);
+      if (!next.ok) return null;
+      const found = await json<GitHubPull>(next, moved);
+      const { name, owner } = found.base.repo;
+      return owner.login === ORG ? { repo: name, pull: found } : null;
     },
     head: async (repo: string, branch: string): Promise<string | undefined> => {
       const url = `${API}/repos/${ORG}/${repo}/branches/${encodeURIComponent(branch)}`;
@@ -217,9 +250,9 @@ async function runSync({
   const gone: OpenPr[] = [];
   for (const stored of await store.openPrs()) {
     if (prs.has(stored.id)) continue;
-    const pull = await gh.pull(stored.repo, stored.number);
-    if (pull === null) gone.push(stored);
-    else prs.set(pull.id, toPrRow(stored.repo, pull));
+    const found = await gh.pull(stored.repo, stored.number);
+    if (found === null) gone.push(stored);
+    else prs.set(found.pull.id, toPrRow(found.repo, found.pull));
   }
 
   const rows = [...prs.values()];

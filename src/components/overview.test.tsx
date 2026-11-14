@@ -473,6 +473,35 @@ describe("the overview's needs-attention filter", () => {
       expect(taskChips()).toEqual(expected);
     },
   );
+
+  it("follows the reason's tasks when a workspace refresh changes them", async () => {
+    const calm = task({ id: "IRP-73", title: "Wire the eval dashboard" });
+    const router = await renderOverview(
+      workspace({ tasks: [calm] }),
+      NO_PRS,
+      "/?attention=blocked",
+    );
+    expect(feedRequests()).toEqual([]);
+
+    const blockedUpdate = feedUpdate(5, "IRP-73");
+    server.listUpdates.mockResolvedValue({
+      items: [blockedUpdate],
+      nextCursor: null,
+      counts: { total: 1, byAgent: { atlas: 1 }, byTask: { "IRP-73": 1 }, bySource: { api: 1 } },
+    });
+    act(() => {
+      router.options.context.queryClient.setQueryData(
+        ["task-workspace"],
+        workspace({ tasks: [{ ...calm, blocked_on: "dependency" }] }),
+      );
+    });
+
+    const feed = screen.getByRole("region", { name: /^Latest updates/ });
+    expect(await within(feed).findByText(blockedUpdate.note)).toBeInTheDocument();
+    expect(section("Latest updates").empty).toBeNull();
+    expect(section("Open tasks").rowTitles).toEqual(["Wire the eval dashboard"]);
+    expect(feedRequests()).toEqual([{ data: { taskIds: ["IRP-73"] } }]);
+  });
 });
 
 describe("the overview's open pull requests", () => {

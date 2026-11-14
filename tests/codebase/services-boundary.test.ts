@@ -37,7 +37,7 @@ function resolved(file: string, specifier: string): string | null {
 function crossesBoundary(file: string, specifier: string): boolean {
   const target = resolved(file, specifier)?.replace(/\.tsx?$/, "");
   if (target === undefined) return false;
-  if (inside(SERVICES, target)) return true;
+  if (inside(SERVICES, target)) return target !== path.join(SERVICES, "index");
   if (target !== DB && !inside(DB, target)) return false;
   return !inside(DB, file) && OPENS_DB.get(file) !== target;
 }
@@ -67,6 +67,7 @@ describe("services boundary (SPEC §8.1)", () => {
     expect(sample("start.ts", "@/server/db/schema")).toBe(true);
     expect(sample("lib/x.ts", "@/server/db/client")).toBe(true);
     expect(sample("lib/x.ts", "@/server/services")).toBe(false);
+    expect(sample("lib/x.ts", "@/server/services/index")).toBe(false);
     expect(sample("server/db/seed.ts", "./schema")).toBe(false);
     expect(sample("start.ts", "@/server/db/client")).toBe(false);
     expect(sample("components/x.tsx", "@tanstack/react-query")).toBe(false);

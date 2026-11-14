@@ -92,14 +92,17 @@ function refused(port: number): Promise<void> {
   });
 }
 
-function exitWithin(app: ChildProcess, ms: number): Promise<object | string> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(`still running ${ms} ms after SIGTERM`), ms);
-    app.once("exit", (code, signal) => {
-      clearTimeout(timer);
-      resolve({ code, signal });
-    });
+/** Call it at spawn: an `exit` listener added later never hears an exit that already happened. */
+function exited(child: ChildProcess): Promise<object> {
+  return new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+}
+
+function exitWithin(exit: Promise<object>, ms: number): Promise<object | string> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(`still running ${ms} ms after SIGTERM`), ms);
   });
+  return Promise.race([exit, late]).finally(() => clearTimeout(timer));
 }
 
 describe("SIGTERM to the built server", () => {
@@ -139,7 +142,12 @@ describe("SIGTERM to the built server", () => {
   });
 
   /** Starts the built server and answers its first request, which opens the pool. */
-  async function launch(): Promise<{ app: ChildProcess; appPort: number; response: Response }> {
+  async function launch(): Promise<{
+    app: ChildProcess;
+    appPort: number;
+    response: Response;
+    exit: Promise<object>;
+  }> {
     const { port } = wire.address() as AddressInfo;
     const appPort = await freePort();
     const child = spawn(process.execPath, [path.join(".output", "server", "index.mjs")], {
@@ -152,15 +160,16 @@ describe("SIGTERM to the built server", () => {
       stdio: "ignore",
     });
     app = child;
+    const exit = exited(child);
     const response = await vi.waitFor(() => fetch(`http://127.0.0.1:${appPort}/api/v1/workspace`), {
       timeout: 10_000,
       interval: 100,
     });
-    return { app: child, appPort, response };
+    return { app: child, appPort, response, exit };
   }
 
   it("ends every pool connection, and the process then exits by itself", async () => {
-    const { app, response } = await launch();
+    const { app, response, exit } = await launch();
     expect(response.status).toBe(200);
     expect(((await response.json()) as { tasks: unknown[] }).tasks.length).toBeGreaterThan(0);
     const opened = connections.length;
@@ -171,14 +180,14 @@ describe("SIGTERM to the built server", () => {
     ).toEqual([]);
 
     app.kill("SIGTERM");
-    expect(await exitWithin(app, 10_000)).toEqual({ code: 0, signal: null });
+    expect(await exitWithin(exit, 10_000)).toEqual({ code: 0, signal: null });
     const ended = Array.from({ length: opened }, () => ({ terminated: true, closed: true }));
     await vi.waitFor(() => expect(connections).toEqual(ended));
   });
 
   it("lets a write admitted before SIGTERM finish before the pool ends", async () => {
     connections.length = 0;
-    const { app, appPort, response } = await launch();
+    const { app, appPort, response, exit } = await launch();
     expect(response.status).toBe(200);
     const key = await db.keyFor("CC1");
     let release = (): void => {};
@@ -200,7 +209,7 @@ describe("SIGTERM to the built server", () => {
     const written = await write;
     expect(written.status, await written.clone().text()).toBe(201);
     expect(await written.json()).toMatchObject({ task_id: "CC-01", note: "in flight at SIGTERM" });
-    expect(await exitWithin(app, 10_000)).toEqual({ code: 0, signal: null });
+    expect(await exitWithin(exit, 10_000)).toEqual({ code: 0, signal: null });
     await vi.waitFor(() => expect(connections.every((c) => c.terminated && c.closed)).toBe(true));
   });
 });
