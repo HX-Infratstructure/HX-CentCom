@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as DecisionsRouteImport } from './routes/decisions'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as ApiPublicJobsGithubSyncRouteImport } from './routes/api/public/jobs/github-sync'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DecisionsRoute = DecisionsRouteImport.update({
+  id: '/decisions',
+  path: '/decisions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -34,39 +41,71 @@ const TasksRoute = TasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicJobsGithubSyncRoute = ApiPublicJobsGithubSyncRouteImport.update({
+  id: '/api/public/jobs/github-sync',
+  path: '/api/public/jobs/github-sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/decisions': typeof DecisionsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/tasks': typeof TasksRoute
+  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/decisions': typeof DecisionsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/tasks': typeof TasksRoute
+  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/decisions': typeof DecisionsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/tasks': typeof TasksRoute
+  '/api/public/jobs/github-sync': typeof ApiPublicJobsGithubSyncRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/reset-password' | '/tasks'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/decisions'
+    | '/reset-password'
+    | '/tasks'
+    | '/api/public/jobs/github-sync'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/reset-password' | '/tasks'
-  id: '__root__' | '/' | '/auth' | '/reset-password' | '/tasks'
+  to:
+    | '/'
+    | '/auth'
+    | '/decisions'
+    | '/reset-password'
+    | '/tasks'
+    | '/api/public/jobs/github-sync'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth'
+    | '/decisions'
+    | '/reset-password'
+    | '/tasks'
+    | '/api/public/jobs/github-sync'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
+  DecisionsRoute: typeof DecisionsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TasksRoute: typeof TasksRoute
+  ApiPublicJobsGithubSyncRoute: typeof ApiPublicJobsGithubSyncRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,6 +124,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/decisions': {
+      id: '/decisions'
+      path: '/decisions'
+      fullPath: '/decisions'
+      preLoaderRoute: typeof DecisionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reset-password': {
       id: '/reset-password'
       path: '/reset-password'
@@ -99,14 +145,23 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/jobs/github-sync': {
+      id: '/api/public/jobs/github-sync'
+      path: '/api/public/jobs/github-sync'
+      fullPath: '/api/public/jobs/github-sync'
+      preLoaderRoute: typeof ApiPublicJobsGithubSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
+  DecisionsRoute: DecisionsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TasksRoute: TasksRoute,
+  ApiPublicJobsGithubSyncRoute: ApiPublicJobsGithubSyncRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

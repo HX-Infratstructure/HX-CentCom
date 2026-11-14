@@ -34,3 +34,5 @@ use the editor.
 - Task reads use public read-only server functions and Query loaders; progress writes require verified authentication plus explicit task_editors membership so account creation never grants project write access.
 - Task progress history is recorded by a database trigger with each update so chart progress and update logs cannot diverge.
 - Draft planning dates are labeled explicitly and unreported active-task progress is never presented as a measured percentage.
+- Owner decisions, requirement coverage, and GitHub PR/repo heads are read through the single public task-workspace server function; overview numbers are computed from it in src/lib/task-data.ts so displayed counts cannot drift from data.
+- GitHub sync runs as a cron-authenticated server route writing github_prs/github_repos with the admin client; task progress writes are limited by RLS to the editor's mapped agent.
