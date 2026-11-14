@@ -3,6 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import {
   infiniteQueryOptions,
+  queryOptions,
+  skipToken,
+  useQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
@@ -16,7 +19,8 @@ import { useOpenRecord } from "@/components/open-record";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { tasksQuery } from "@/lib/task-data";
-import type { LessonQueryInput, LessonsPage } from "@/server/services";
+import { getLesson } from "@/lib/tasks.functions";
+import type { Lesson, LessonQueryInput, LessonsPage } from "@/server/services";
 
 /** The service parses the query; the validator only gives the server function its input type. */
 const listLessonsPage = createServerFn({ method: "GET" })
@@ -38,6 +42,14 @@ function lessonPages(query: LessonQueryInput) {
     queryFn: ({ pageParam }) => listLessonsPage({ data: { ...query, cursor: pageParam } }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** The open sheet's lesson when the loaded pages do not hold it: a deep link past them or outside the filters. */
+function lessonById(id: string | undefined) {
+  return queryOptions({
+    queryKey: ["lessons", "one", id],
+    queryFn: id === undefined ? skipToken : () => getLesson({ data: { id } }),
   });
 }
 
@@ -83,6 +95,12 @@ function LessonsLog(): ReactNode {
   );
   const pages = useSuspenseInfiniteQuery({ ...lessonPages(lessonQuery(filters)), select });
   const record = useOpenRecord();
+  const selectLesson = useCallback(
+    (lesson: Lesson | null) =>
+      lesson === null ? null : (adaptLessons([lesson], ws.agents)[0] ?? null),
+    [ws.agents],
+  );
+  const byId = useQuery({ ...lessonById(record.id), select: selectLesson });
   const { items, counts } = pages.data;
 
   return (
@@ -116,7 +134,7 @@ function LessonsLog(): ReactNode {
         error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
         onShowMore={() => void pages.fetchNextPage()}
       />
-      <LessonDetail detail={detailFrom(record.id, items)} onClose={record.close} />
+      <LessonDetail detail={detailFrom(record.id, items, byId)} onClose={record.close} />
     </Workspace>
   );
 }

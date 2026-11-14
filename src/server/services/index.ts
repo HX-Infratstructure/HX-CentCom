@@ -16,13 +16,20 @@ import {
 } from "./reads";
 import {
   createLessonPlan,
+  getLesson,
   listLessons,
   updateLessonPlan,
   withLessonsAsk,
   type LessonServices,
 } from "./lessons";
 import { listGithubPrs } from "./github";
-import { createRaidItemPlan, listRaid, updateRaidItemPlan, type RaidServices } from "./raid";
+import {
+  createRaidItemPlan,
+  getRaidItem,
+  listRaid,
+  updateRaidItemPlan,
+  type RaidServices,
+} from "./raid";
 import { revertPlan } from "./revert";
 import type { IssuedKey, ServiceDeps, Services as CoreServices } from "./types";
 import { withDecidedWebhook } from "./webhook";
@@ -71,11 +78,13 @@ export function createServices(db: Db, deps: Partial<ServiceDeps> = {}): Service
     revertActivity: async (actor, activityId, opts = {}) =>
       write.update(actor, { activityId }, opts, await revertPlan(db, actor, activityId)),
     listRaid: (query) => listRaid(db, query),
+    getRaidItem: (id) => getRaidItem(db, id),
     createRaidItem: (actor, input, opts = {}) =>
       write.create(actor, input, opts, createRaidItemPlan),
     updateRaidItem: (actor, id, input, opts = {}) =>
       write.update(actor, input, opts, updateRaidItemPlan(id)),
     listLessons: (query) => listLessons(db, query),
+    getLesson: (id) => getLesson(db, id),
     createLesson: (actor, input, opts = {}) => write.create(actor, input, opts, createLessonPlan),
     updateLesson: (actor, id, input, opts = {}) =>
       write.update(actor, input, opts, updateLessonPlan(id)),

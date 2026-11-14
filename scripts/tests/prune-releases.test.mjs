@@ -35,7 +35,7 @@ function release(releases, name, day) {
 function prune(home) {
   const result = spawnSync(
     "bash",
-    ["-c", "set -euo pipefail; . deploy/hx15/common.sh; prune_releases"],
+    ["-c", "set -euo pipefail; . deploy/hx15/common.sh; . deploy/hx15/mutate.sh; prune_releases"],
     {
       cwd: repoRoot,
       env: { PATH: process.env.PATH, HOME: home },
@@ -105,4 +105,37 @@ test("prune_releases keeps current, previous and the newest other release, and l
     "a second run deletes nothing",
   );
   assert.deepEqual(readdirSync(releases).sort(), survivors);
+});
+
+test("common.sh, which verify.sh sources, defines none of the functions in mutate.sh", () => {
+  const functions = (file) => {
+    const result = spawnSync(
+      "bash",
+      ["-c", `set -euo pipefail; . deploy/hx15/${file}; declare -F`],
+      {
+        cwd: repoRoot,
+        env: { PATH: process.env.PATH, HOME: tmpdir() },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.replace("declare -f ", ""));
+  };
+  const mutating = functions("mutate.sh");
+  assert.deepEqual(mutating.sort(), [
+    "activate_release",
+    "install_units",
+    "prune_releases",
+    "restart_app",
+    "switch_current",
+  ]);
+  const common = functions("common.sh");
+  assert.deepEqual(
+    common.filter((name) => mutating.includes(name)),
+    [],
+    "common.sh alone defines no function of mutate.sh",
+  );
 });

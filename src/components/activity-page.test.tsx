@@ -36,6 +36,7 @@ const WORKSPACE: Workspace = {
 };
 
 let serial = 0;
+/** A row as listActivity returns it. `revertible` is the server's verdict, so a row the server marks revertible says so. */
 function entry(
   fields: Pick<ActivityEntry, "action" | "entity" | "entity_id"> & Partial<ActivityEntry>,
 ): ActivityEntry {
@@ -48,6 +49,7 @@ function entry(
     run_id: null,
     commit_sha: null,
     created_at: "2026-11-14T08:10:00.123456+00:00",
+    revertible: false,
     ...fields,
   };
 }
@@ -58,6 +60,7 @@ const PROGRESS = entry({
   entity_id: "IRP-04",
   before: { status: "In progress", group: "in_progress", version: 3 },
   after: { status: "Ready for owner", group: "ready_for_owner", version: 4 },
+  revertible: true,
 });
 
 /** One row for every logged action, newest first. */
@@ -69,6 +72,7 @@ const EVERY_ACTION: readonly ActivityEntry[] = [
     entity_id: "0b8e0a52-5b1f-4c35-9a53-1d2e3f405162",
     before: { task_id: "IRP-04", state: "NOT_RUN" },
     after: { task_id: "IRP-04", state: "PASS" },
+    revertible: true,
   }),
   entry({ action: "decision.request", entity: "decision", entity_id: "D-14" }),
   entry({ action: "decision.decide", entity: "decision", entity_id: "D-13", actor: "beacon" }),
@@ -81,6 +85,7 @@ const EVERY_ACTION: readonly ActivityEntry[] = [
     entity: "raid_item",
     entity_id: "R-06",
     before: { status: "open" },
+    revertible: true,
   }),
   entry({ action: "lesson.create", entity: "lesson", entity_id: "L-03" }),
   entry({
@@ -88,9 +93,58 @@ const EVERY_ACTION: readonly ActivityEntry[] = [
     entity: "lesson",
     entity_id: "L-02",
     before: { status: "proposed" },
+    revertible: true,
   }),
-  entry({ action: "activity.revert", entity: "task", entity_id: "IRP-02" }),
+  /* A revert logs the reverted fields as before and after, as revert.ts does, so it can be reverted in turn. */
+  entry({
+    action: "activity.revert",
+    entity: "task",
+    entity_id: "IRP-02",
+    actor: "Agent Zero",
+    before: { status: "Blocked", group: "in_progress", version: 6 },
+    after: {
+      status: "In progress",
+      group: "in_progress",
+      version: 7,
+      update_id: "5d2a8c31-6e4f-4b07-a9d3-1c8e7f2b6a40",
+      reverts: "7f3c2a10-0000-4000-8000-000000000099",
+    },
+    revertible: true,
+  }),
 ];
+
+/* What a write's automations did, which restoring the row cannot undo (writes.ts, raid.ts). */
+const OPENED_DECISION = entry({
+  action: "task.progress",
+  entity: "task",
+  entity_id: "IRP-05",
+  before: { status: "In progress", group: "in_progress", version: 2 },
+  after: {
+    status: "Ready for owner",
+    group: "ready_for_owner",
+    version: 3,
+    update_id: "e1b7c4a2-3f90-4d6e-8a15-2c9f0b7d3e61",
+    effects: { decisionId: "D-15" },
+  },
+});
+
+const DEPENDENCY = { id: "RAID-10", type: "dependency", severity: "low", task_ids: ["CC-01"] };
+
+const CLOSED_DEPENDENCY = entry({
+  action: "raid.update",
+  entity: "raid_item",
+  entity_id: DEPENDENCY.id,
+  before: { ...DEPENDENCY, status: "open", version: 1 },
+  after: {
+    ...DEPENDENCY,
+    status: "closed",
+    version: 2,
+    effects: {
+      systemUpdateIds: ["9a4e2f60-7b1c-4d38-b5e9-0f6a3c8d2b17"],
+      unblockedTask: { id: "CC-01", version: 3 },
+    },
+  },
+});
 
 /* Shapes as the server logs them (H3 screenshot run, evidence/d5/api/a1-activity.json). */
 const STATUS_BLOCKED = entry({
@@ -104,6 +158,7 @@ const STATUS_BLOCKED = entry({
     version: 2,
     update_id: "75ff7fbb-0da1-456d-92b4-a2a323d8b9e2",
   },
+  revertible: true,
 });
 
 const NOTE_ONLY = entry({
@@ -117,6 +172,7 @@ const NOTE_ONLY = entry({
     version: 2,
     update_id: "0522eed4-db35-48ad-90e6-429e5d70bf13",
   },
+  revertible: true,
 });
 
 /* A progress post with commitSha repins the task, and the row's snapshots then carry commit_sha (writes.ts). */
@@ -136,6 +192,7 @@ const REPINNED = entry({
     commit_sha: SHA_AFTER,
   },
   commit_sha: SHA_AFTER,
+  revertible: true,
 });
 
 const FIRST_PIN = entry({
@@ -151,6 +208,7 @@ const FIRST_PIN = entry({
     commit_sha: SHA_AFTER,
   },
   commit_sha: SHA_AFTER,
+  revertible: true,
 });
 
 const REQUIREMENT_ROW = {
@@ -169,6 +227,7 @@ const STATE_BLOCKED = entry({
   entity_id: REQUIREMENT_ROW.id,
   before: { ...REQUIREMENT_ROW, state: "NOT_RUN", version: 1 },
   after: { ...REQUIREMENT_ROW, state: "BLOCKED", version: 2 },
+  revertible: true,
 });
 
 /* requirement.set inserts a requirement its task did not have yet, and logs the new row with no before (writes.ts). */
@@ -210,6 +269,7 @@ const SUMMARY_EDITED = entry({
     updated_at: "2026-11-14T16:24:57.214Z",
     effects: {},
   },
+  revertible: true,
 });
 
 const PENDING_DECISION = {
@@ -481,7 +541,7 @@ describe("Revert on the activity page", () => {
     expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
   });
 
-  it("is offered in owner mode only on progress, requirement, RAID and lesson updates", async () => {
+  it("is offered in owner mode only on progress, requirement, RAID and lesson updates, and on reverts", async () => {
     server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page(EVERY_ACTION));
     await renderActivity("/activity", true);
@@ -490,7 +550,29 @@ describe("Revert on the activity page", () => {
       rows()
         .filter((r) => r.revert)
         .map((r) => r.title),
-    ).toEqual(["Progress posted", "Requirement set", "RAID item updated", "Lesson updated"]);
+    ).toEqual([
+      "Progress posted",
+      "Requirement set",
+      "RAID item updated",
+      "Lesson updated",
+      "Change reverted",
+    ]);
+  });
+
+  it("is not offered on an update whose after records effects, which restoring the row cannot undo", async () => {
+    server.listWorkspace.mockResolvedValue(WORKSPACE);
+    server.listActivity.mockResolvedValue(
+      page([OPENED_DECISION, CLOSED_DEPENDENCY, SUMMARY_EDITED]),
+    );
+    await renderActivity("/activity", true);
+
+    const offered = (record: string) =>
+      within(rowOf(record)).queryByRole("button", { name: "Revert" }) !== null;
+    expect({
+      openedDecision: offered("Task IRP-05"),
+      closedDependency: offered("RAID item RAID-10"),
+      noEffects: offered("RAID item RAID-09"),
+    }).toEqual({ openedDecision: false, closedDependency: false, noEffects: true });
   });
 
   it("is not offered on a requirement.set that created the requirement, which has no before", async () => {

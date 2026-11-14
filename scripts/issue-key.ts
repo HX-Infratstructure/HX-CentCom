@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { connectDb, requireEnv, type Db } from "../src/server/db/client.ts";
 import {
@@ -226,6 +228,7 @@ export async function main(
   }
 }
 
-if (import.meta.main) {
+// import.meta.main needs Node 22.18. process.argv[1] keeps a symlinked path, and import.meta.url is the real path.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exit(await main(process.argv.slice(2), process.env));
 }

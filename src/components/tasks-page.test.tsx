@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, isInaccessible, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { routeTree } from "@/routeTree.gen";
 import type { Agent, StatusLabel, Task, UpdatesPage, Workspace } from "./server-types";
@@ -153,6 +153,16 @@ describe("the task board's agent filter", () => {
     expectChips("Agent", ["Atlas 2", "Beacon 2"]);
     expectChips("Repository", ["HX-CentCom 3", "HX-LiteLLM 2"]);
   });
+
+  it("counts a repository named after an object property, such as constructor, as an ordinary value", async () => {
+    await renderTasks("/tasks", [
+      task({ id: "IRP-46", title: "Draft the shadow hook config", repository: "constructor" }),
+      task({ id: "IRP-47", title: "Wire the eval dashboard", repository: "toString" }),
+      task({ id: "IRP-48", title: "Pin the router build" }),
+    ]);
+
+    expectChips("Repository", ["constructor 1", "HX-CentCom 1", "toString 1"]);
+  });
 });
 
 describe("the task board's columns", () => {
@@ -223,6 +233,13 @@ describe("the task timeline", () => {
     return label?.parentElement?.style.gridColumn ?? null;
   }
 
+  /** The planned-dates line of the row whose title is `title`. */
+  function datesOf(title: string): string | null {
+    const row = screen.getByRole("link", { name: title }).closest("li");
+    if (row === null) throw new Error(`No timeline row for ${title}`);
+    return within(row).getByText(/planned dates|^Due |^Starts | to /).textContent;
+  }
+
   it("spans whole weeks from the Monday before the earliest date to the Sunday after the latest", async () => {
     await renderTasks("/tasks?view=timeline", [
       task({
@@ -257,15 +274,19 @@ describe("the task timeline", () => {
         due_date: "2026-11-17",
       }),
       task({ id: "IRP-63", title: "Write the release notes", due_date: "2026-11-24" }),
+      task({ id: "IRP-68", title: "Pin the router build", start_date: "2026-11-12" }),
+      task({ id: "IRP-69", title: "Draft the shadow hook config" }),
     ]);
 
     // Monday 9 Nov opens the window; the due-only Tuesday 24 Nov closes it on Sunday 29 Nov.
     const days = daysUnder("9 Nov 2026 to 29 Nov 2026");
     expect(days).toHaveLength(21);
     expect([days[0], days.at(-1)]).toEqual(["9", "29"]);
-    const row = screen.getByRole("link", { name: "Write the release notes" }).closest("li");
-    expect(row).toHaveTextContent("No planned dates");
+    expect(datesOf("Write the release notes")).toBe("Due 24 Nov 2026");
+    expect(datesOf("Pin the router build")).toBe("Starts 12 Nov 2026");
+    expect(datesOf("Draft the shadow hook config")).toBe("No planned dates");
     expect(barOf("Write the release notes")).toBeNull();
+    expect(barOf("Pin the router build")).toBeNull();
     expect(barOf("Run the shadow benchmark")).toBe("1 / 10");
   });
 
@@ -289,6 +310,22 @@ describe("the task timeline", () => {
     expect(days).toHaveLength(14);
     expect(barOf("Run the shadow benchmark")).toBe("1 / 4");
     expect(barOf("Write the release notes")).toBe("11 / 15");
+  });
+
+  it("exposes each bar's progress to assistive technology", async () => {
+    await renderTasks("/tasks?view=timeline", [
+      task({
+        id: "IRP-61",
+        title: "Wire the eval dashboard",
+        start_date: "2026-11-04",
+        due_date: "2026-11-06",
+        progress: { proven: 1, total: 2, percent: 50 },
+      }),
+    ]);
+
+    const row = screen.getByRole("link", { name: "Wire the eval dashboard" }).closest("li");
+    if (row === null) throw new Error("No timeline row for Wire the eval dashboard");
+    expect(isInaccessible(within(row).getByText("1 of 2 proven"))).toBe(false);
   });
 
   it("says no task has planned dates when none has any", async () => {

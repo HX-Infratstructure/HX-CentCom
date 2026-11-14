@@ -47,3 +47,27 @@ export const getDecision = createServerFn({ method: "GET" })
       throw error;
     }
   });
+
+/** As getDecision: a miss is null, so the sheet shows "missing". */
+export const getRaidItem = createServerFn({ method: "GET" })
+  .validator(typesOnly<{ readonly id: string }>())
+  .handler(async ({ context, data }) => {
+    try {
+      return await context.services.getRaidItem(data.id);
+    } catch (error) {
+      if (isServiceError(error) && error.code === "not_found") return null;
+      throw error;
+    }
+  });
+
+/** As getDecision: a miss is null, so the sheet shows "missing". */
+export const getLesson = createServerFn({ method: "GET" })
+  .validator(typesOnly<{ readonly id: string }>())
+  .handler(async ({ context, data }) => {
+    try {
+      return await context.services.getLesson(data.id);
+    } catch (error) {
+      if (isServiceError(error) && error.code === "not_found") return null;
+      throw error;
+    }
+  });

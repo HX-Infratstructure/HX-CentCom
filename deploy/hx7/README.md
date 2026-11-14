@@ -109,5 +109,6 @@ R2 is a host change, so it needs the owner's GO, with the same scope as GO-3.
    sudo systemctl reload hx-nginx.service
    ```
 
-2. Run `scripts/verify.sh` from HX-Nginx `main`, which lists one `conf.d` file. Expect `RESULT PASS`, with ports 80 and 8410 unchanged.
-3. Close or revert the HX-Nginx pull request.
+2. Undo the HX-Nginx pull request before you run its verifier. If the pull request is merged, `main` lists both `conf.d` files, so open a pull request that reverts it. If it is not merged, close it.
+3. Run `scripts/verify.sh` from the revert's branch, or from HX-Nginx `main` if the pull request was closed unmerged. Both list one `conf.d` file. Expect `RESULT PASS`, with ports 80 and 8410 unchanged.
+4. Merge the revert once step 3 passes.

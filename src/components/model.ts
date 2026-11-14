@@ -60,14 +60,14 @@ export const UPDATE_KIND_LABELS = {
 
 /**
  * The PR query's closed `state` filter. The `github_prs.state` column is still open text, so a stored row can hold a
- * value outside it; `PullRequestView.state` keeps that raw text. `gone` means GitHub answered 404 for a PR stored as
- * open.
+ * value outside it; `PullRequestView.state` keeps that raw text. `gone` means GitHub answered 404 or a redirect for a
+ * PR stored as open.
  */
 export const PR_STATE_LABELS = {
   open: "Open",
   closed: "Closed",
   merged: "Merged",
-  gone: "Gone (404 on GitHub)",
+  gone: "Gone (404 or redirect on GitHub)",
 } as const satisfies Record<S.GithubPrState, string>;
 export type PrState = keyof typeof PR_STATE_LABELS;
 
@@ -101,34 +101,6 @@ export const ACTIVITY_ACTION_LABELS = {
   "lesson.update": "Lesson updated",
   "activity.revert": "Change reverted",
 } as const satisfies Record<S.ActivityAction, string>;
-
-/**
- * The logged actions that offer Revert in owner mode: the four updates. The server's own rule stays the
- * authority, and a row it refuses answers 409 not_revertible with the reason. A new action does not compile until it
- * says whether the UI offers Revert.
- */
-const OFFERS_REVERT = {
-  "task.progress": true,
-  "requirement.set": true,
-  "decision.request": false,
-  "decision.decide": false,
-  "key.issue": false,
-  "key.revoke": false,
-  "key.bootstrap": false,
-  "raid.create": false,
-  "raid.update": true,
-  "lesson.create": false,
-  "lesson.update": true,
-  "activity.revert": false,
-} as const satisfies Record<S.ActivityAction, boolean>;
-
-/**
- * A row offers Revert when its action does and the row is an update. A create logs no before, so it has nothing to
- * restore.
- */
-export function offersRevert(entry: Pick<S.ActivityEntry, "action" | "before">): boolean {
-  return OFFERS_REVERT[entry.action] && entry.before !== null;
-}
 
 export const RAID_TYPE_LABELS = {
   risk: "Risk",
@@ -424,8 +396,6 @@ export type ActivityView = Omit<S.ActivityEntry, "actor" | "before" | "after" | 
    * requirement's task; null for an agent key, or a requirement whose snapshots name no task.
    */
   readonly opens: { readonly kind: RecordKind; readonly id: string } | null;
-  /** Whether the row offers Revert in owner mode (`offersRevert`). */
-  readonly revertible: boolean;
   readonly createdAt: Instant;
 };
 

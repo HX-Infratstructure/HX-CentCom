@@ -45,6 +45,7 @@ import {
   updateQueryInput,
   type Parsed,
 } from "./inputs";
+import { revertRefusal } from "./revert";
 import type {
   ActivityCounts,
   ActivityPage,
@@ -406,7 +407,11 @@ export async function listActivity(db: Db, raw: unknown): Promise<ActivityPage> 
       byActor: Object.fromEntries(byActor.map((r) => [r.key, r.n])),
       byEntity: Object.fromEntries(byEntity.map((r) => [r.key, r.n])),
     };
-    return { ...entries, counts };
+    const items = entries.items.map((entry) => ({
+      ...entry,
+      revertible: revertRefusal(entry) === null,
+    }));
+    return { items, nextCursor: entries.nextCursor, counts };
   }, SNAPSHOT);
 }
 

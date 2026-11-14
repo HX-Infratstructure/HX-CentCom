@@ -1,6 +1,8 @@
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inspect } from "node:util";
@@ -312,7 +314,7 @@ describe("the token is never printed", () => {
       },
       options: {},
       code: 1,
-      line: /^github-sync failed: GitHub GET \/orgs\/HX-Infratstructure\/repos\?type=all&per_page=100 -> 401: Bad credentials\n$/,
+      line: /^github-sync failed: GitHub GET \/orgs\/HX-Infratstructure\/repos\?type=all&per_page=100 -> 401\n$/,
     },
     {
       name: "fetch rejects with the header value in its message, as Node 22 does for an invalid header",
@@ -368,6 +370,89 @@ describe("the token is never printed", () => {
         captured.chunks.some((chunk) => scenario.line.test(chunk)),
         `no result line in ${inspect(captured.chunks)}`,
       );
+    });
+  }
+
+  const bareToken = (auth: string) => auth.slice("Bearer ".length);
+  const echoes: Array<{
+    name: string;
+    routes: Routes;
+    open?: OpenPr[];
+    echo: { url: string; status: number; body: (auth: string) => string };
+    line: string;
+  }> = [
+    {
+      name: "a 401 whose message holds the Authorization header logs only the status and path",
+      routes: {},
+      echo: {
+        url: reposUrl,
+        status: 401,
+        body: (auth) => JSON.stringify({ message: `Bad credentials for ${auth}` }),
+      },
+      line: `github-sync failed: GitHub GET ${reposUrl.slice(API.length)} -> 401\n`,
+    },
+    {
+      name: "a 200 repo list that is the token, not JSON, logs only invalid JSON and the path",
+      routes: {},
+      echo: { url: reposUrl, status: 200, body: bareToken },
+      line: `github-sync failed: GitHub GET ${reposUrl.slice(API.length)} -> invalid JSON\n`,
+    },
+    {
+      name: "a 200 branch head that is the token, not JSON, logs only invalid JSON and the path",
+      routes: {
+        [reposUrl]: { body: [repo("alpha")] },
+        [openUrl("alpha")]: { body: [] },
+        [closedUrl("alpha")]: { body: [] },
+      },
+      echo: { url: branchUrl("alpha", "main"), status: 200, body: bareToken },
+      line: `github-sync failed: GitHub GET ${branchUrl("alpha", "main").slice(API.length)} -> invalid JSON\n`,
+    },
+    {
+      name: "a 200 stored PR that is the token, not JSON, logs only invalid JSON and the path",
+      routes: { [reposUrl]: { body: [] } },
+      open: [{ id: 107, repo: "alpha", number: 7 }],
+      echo: { url: pullUrl("alpha", 7), status: 200, body: bareToken },
+      line: `github-sync failed: GitHub GET ${pullUrl("alpha", 7).slice(API.length)} -> invalid JSON\n`,
+    },
+  ];
+
+  for (const { name, routes, open, echo, line } of echoes) {
+    test(`a loopback server: ${name}`, async () => {
+      const echoed: string[] = [];
+      const server = createServer((req, res) => {
+        const url = `${API}${req.url}`;
+        res.setHeader("content-type", "application/json");
+        if (url === echo.url) {
+          const auth = req.headers.authorization ?? "";
+          echoed.push(auth);
+          res.writeHead(echo.status).end(echo.body(auth));
+          return;
+        }
+        const route = routes[url];
+        res
+          .writeHead(route === undefined ? 500 : (route.status ?? 200))
+          .end(JSON.stringify(route === undefined ? { message: "no route" } : route.body));
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as AddressInfo;
+      const loopback: Fetch = (url, init) =>
+        globalThis.fetch(`http://127.0.0.1:${port}${url.slice(API.length)}`, init);
+      const captured = captureProcessOutput();
+      let code: number;
+      try {
+        code = await main(
+          { GITHUB_TOKEN_FILE: tokenFile(0o600) },
+          { fetch: loopback, store: memoryStore(open).store, now: () => NOW },
+        );
+      } finally {
+        captured.restore();
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+      assert.equal(code, 1);
+      assert.deepEqual(echoed, [`Bearer ${TOKEN}`], "the echoed body held the token");
+      assert.deepEqual(printedParts(captured.chunks, TOKEN), [], "no part of the token is printed");
+      assert.ok(captured.chunks.includes(line), `no result line in ${inspect(captured.chunks)}`);
     });
   }
 
@@ -538,7 +623,7 @@ describe("PR state", () => {
     assert.equal(result.stdout, "");
     assert.equal(
       result.stderr,
-      "github-sync failed: GitHub GET /repos/HX-Infratstructure/alpha/pulls/7 -> 500: Server Error\n",
+      "github-sync failed: GitHub GET /repos/HX-Infratstructure/alpha/pulls/7 -> 500\n",
     );
   });
 
@@ -601,7 +686,7 @@ describe("PR state", () => {
     assert.equal(result.stdout, "");
     assert.equal(
       result.stderr,
-      "github-sync failed: GitHub GET /orgs/HX-Infratstructure/repos?type=all&per_page=100 -> 301: Moved Permanently\n",
+      "github-sync failed: GitHub GET /orgs/HX-Infratstructure/repos?type=all&per_page=100 -> 301\n",
     );
   });
 });
@@ -692,7 +777,7 @@ describe("exit status", () => {
     assert.equal(result.db.calls.save, 0);
     assert.equal(
       result.stderr,
-      "github-sync failed: GitHub GET /repos/HX-Infratstructure/beta/branches/release%2Fv1 -> 502: Server Error\n",
+      "github-sync failed: GitHub GET /repos/HX-Infratstructure/beta/branches/release%2Fv1 -> 502\n",
     );
   });
 });

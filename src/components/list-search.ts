@@ -151,7 +151,8 @@ function specCore(facets: Facets): SpecCore {
     for (const test of tests) {
       const reader = test.read;
       if (test.f.kind === "days" || reader === undefined) continue;
-      const tally: Record<string, number> = {};
+      // Open facet values come from the data, so a value such as "constructor" must not read Object.prototype.
+      const tally: Record<string, number> = Object.create(null);
       for (const item of items) {
         if (!tests.every((other) => other === test || passes(item, other))) continue;
         for (const value of valuesOf(reader(item))) tally[value] = (tally[value] ?? 0) + 1;

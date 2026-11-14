@@ -26,6 +26,13 @@ function dayIndex(date: string, start: number): number {
   return Math.round((Date.parse(`${date}T00:00:00Z`) - start) / DAY);
 }
 
+function plannedDates({ start_date: start, due_date: due }: TaskView): string {
+  if (start !== null && due !== null) return `${formatUtcDay(start)} to ${formatUtcDay(due)}`;
+  if (due !== null) return `Due ${formatUtcDay(due)}`;
+  if (start !== null) return `Starts ${formatUtcDay(start)}`;
+  return "No planned dates";
+}
+
 /** The planned dates of the given tasks as bars, in the order given. Bars take the assignee's tone. */
 export function TaskTimeline({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
   const plan = planWindow(tasks);
@@ -62,14 +69,10 @@ export function TaskTimeline({ tasks }: { tasks: readonly TaskView[] }): ReactNo
                   <code className="record-id">{t.id}</code>
                   {t.assignee !== null && <AgentBadge agent={t.assignee} variant="chip" />}
                 </span>
-                <span className="gantt-dates">
-                  {t.start_date !== null && t.due_date !== null
-                    ? `${formatUtcDay(t.start_date)} to ${formatUtcDay(t.due_date)}`
-                    : "No planned dates"}
-                </span>
+                <span className="gantt-dates">{plannedDates(t)}</span>
               </div>
-              <div className="gantt-track" aria-hidden="true">
-                <span className="gantt-cells">
+              <div className="gantt-track">
+                <span className="gantt-cells" aria-hidden="true">
                   {dates.map((d) => (
                     <span key={d.getTime()} data-weekend={d.getUTCDay() % 6 === 0 || undefined} />
                   ))}

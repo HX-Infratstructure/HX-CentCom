@@ -1,6 +1,6 @@
 // P2-1: a RAID dependency writes its blocked task (blocked_on, version, a system update), so only the owner and that
-// task's agent may pin a dependency on the task or close one on it. Moving a dependency away from another agent's task
-// changes nothing on that task and stays allowed. The 400 shape checks run first, and a refusal draws no RAID id.
+// task's agent may change a dependency on the task: pin one on it, move one onto or away from it, close or reopen one.
+// A move needs both tasks. The 400 shape checks run first, and a refusal draws no RAID id.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Actor, CreateRaidItemInput } from "@/server/services";
 import {
@@ -81,7 +81,7 @@ describe("P2-1: only the owner and the blocked task's agent pin or close a depen
     expect(own.value.item.id, "the refusals drew no id").toBe("RAID-09");
   });
 
-  it("refuses CC1 retargeting onto IRP-04, and lets it move a dependency away from IRP-04 to its own task", async () => {
+  it("refuses CC1 retargeting onto IRP-04 or moving a dependency away from IRP-04, with or without a close", async () => {
     const mine = (await h.svc.createRaidItem(h.as.CC1, dependency("CC-01"))).value.item.id;
     await expectServiceError(
       h.svc.updateRaidItem(h.as.CC1, mine, { blockedTaskId: "IRP-04" }),
@@ -93,11 +93,53 @@ describe("P2-1: only the owner and the blocked task's agent pin or close a depen
     const assigned = (
       await h.svc.createRaidItem(h.as.OWNER, dependency("IRP-04", { ownerAgent: "CC1" }))
     ).value.item.id;
-    const moved = await h.svc.updateRaidItem(h.as.CC1, assigned, { blockedTaskId: "CC-01" });
-    expect(moved.value.item).toMatchObject({ blocked_task_id: "CC-01", owner_agent: "CC1" });
+    const irp04 = await task("IRP-04");
+    for (const patch of [
+      { blockedTaskId: "CC-01" },
+      { blockedTaskId: "CC-01", status: "closed" as const },
+    ]) {
+      const refused = await expectServiceError(
+        h.svc.updateRaidItem(h.as.CC1, assigned, patch),
+        "forbidden",
+        403,
+      );
+      expect(refused.message).toBe("CC1 may write only its own tasks; IRP-04 is not one.");
+    }
+    expect(await item(assigned)).toMatchObject({
+      status: "open",
+      blocked_task_id: "IRP-04",
+      version: 1,
+    });
+    expect(await task("IRP-04")).toEqual(irp04);
+    expect(await systemNotes("IRP-04")).toEqual([]);
+  });
 
+  it("lets the task's agent move a dependency between its own tasks, and the owner move one away from any task", async () => {
+    const mine = (await h.svc.createRaidItem(h.as.CC1, dependency("IRP-05"))).value.item.id;
+    const moved = await h.svc.updateRaidItem(h.as.CC1, mine, { blockedTaskId: "CC-01" });
+    expect(moved.value.item.blocked_task_id).toBe("CC-01");
+
+    const onIrp04 = (await h.svc.createRaidItem(h.as.OWNER, dependency("IRP-04"))).value.item.id;
+    const away = await h.svc.updateRaidItem(h.as.OWNER, onIrp04, { blockedTaskId: "CC-01" });
+    expect(away.value.item.blocked_task_id, "the owner is exempt").toBe("CC-01");
     const pinned = await h.svc.updateRaidItem(h.as.OWNER, mine, { blockedTaskId: "IRP-04" });
     expect(pinned.value.item.blocked_task_id, "the owner is exempt").toBe("IRP-04");
+  });
+
+  it("refuses CC1 reopening a closed dependency it owns on IRP-04, and lets CC2, the task's agent, reopen it", async () => {
+    const id = (await h.svc.createRaidItem(h.as.OWNER, dependency("IRP-04", { ownerAgent: "CC1" })))
+      .value.item.id;
+    await h.svc.updateRaidItem(h.as.OWNER, id, { status: "closed" });
+    const refused = await expectServiceError(
+      h.svc.updateRaidItem(h.as.CC1, id, { status: "open" }),
+      "forbidden",
+      403,
+    );
+    expect(refused.message).toBe("CC1 may write only its own tasks; IRP-04 is not one.");
+    expect(await item(id)).toMatchObject({ status: "closed", version: 2 });
+
+    const reopened = await h.svc.updateRaidItem(h.as.CC2, id, { status: "open" });
+    expect(reopened.value.item.status).toBe("open");
   });
 
   it("refuses CC1 closing a dependency it owns on HX12-01: the block, the version and the item stay", async () => {

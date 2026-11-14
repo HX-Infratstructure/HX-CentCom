@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Checks a running HX-CentCom through URL: the app unit on this host, the dashboard page, the workspace API, and the
-# MCP tool list that a caller without a key sees. It sends no key and changes nothing.
+# Checks a running HX-CentCom through URL: the app unit and the user's linger setting on this host, the dashboard page,
+# the workspace API, and the MCP tool list that a caller without a key sees. It sends no key and changes nothing.
 # Prints PASS or FAIL per check. Exits 0 when every check passes, 1 when any check fails, 2 on a usage error.
 # Usage: deploy/hx15/verify.sh [URL]   (URL defaults to http://192.168.50.215:5420)
 set -uo pipefail
@@ -92,6 +92,14 @@ PY
 
 state=$(systemctl --user is-active "$APP_UNIT")
 if [[ $state == active ]]; then pass "$APP_UNIT is active"; else fail "$APP_UNIT is ${state:-unknown}, expected active"; fi
+
+user=$(id -un)
+linger=$(loginctl show-user "$user" -p Linger --value 2>&1)
+if [[ $linger == yes ]]; then
+	pass "$user has Linger=yes, so its units start at boot and keep running after logout"
+else
+	fail "loginctl show-user $user -p Linger is ${linger:-empty}, expected yes. GO-2 runs sudo loginctl enable-linger $user"
+fi
 
 code=$(curl -s -o /dev/null --max-time 10 -w '%{http_code}' "$url/")
 if [[ $code == 200 ]]; then pass "GET $url/ answered 200"; else fail "GET $url/ answered ${code:-nothing}, expected 200"; fi

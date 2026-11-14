@@ -1,7 +1,16 @@
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROLE = "centcom_app";
 const DATABASE = "centcom";
@@ -75,7 +84,9 @@ function main() {
     console.log(`${path} ${(statSync(path).mode & 0o777).toString(8)}`);
 }
 
-if (import.meta.main) {
+// import.meta.main needs Node 22.18. process.argv[1] keeps a symlinked path,
+// and import.meta.url is the real path.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     main();
   } catch (error) {

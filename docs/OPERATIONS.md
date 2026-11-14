@@ -68,18 +68,22 @@ drizzle-kit does not read `src/server/db/schema-raid.ts`. To change `raid_items`
 
 Every step below writes to a host, so each one needs the owner's GO for that exact step. A GO for the app names `S`, the full 40-character merge SHA on `origin/main`. Run the steps in order. Each step's README gives the commands, the expected output, and the checks.
 
-| Step | Host           | What it does                                                                                                                    | Entry point                                                          | Commands and checks                                                                         |
-| ---- | -------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| GO-1 | HX-15 and HX-9 | Generates the database password on HX-15 into `app.env`, then creates the database `centcom` and the role `centcom_app` on HX-9 | `deploy/hx9/make-db-secret.mjs`, then `create-role.sql` on HX-9      | [deploy/hx9/README.md](../deploy/hx9/README.md)                                             |
-| GO-2 | HX-15          | Builds the release for `S`, migrates, starts the app unit, loads the seed, and issues the keys                                  | `deploy/hx15/install.sh <S>`, `npm run db:seed`, `scripts/issue-key` | [Install the app](../deploy/hx15/README.md#install-the-app-go-2) and checks V-A             |
-| GO-3 | HX-7           | Installs the NGINX route on port 8420 through an HX-Nginx pull request                                                          | `config/nginx/conf.d/hx-centcom.conf` in HX-Nginx                    | [deploy/hx7/README.md](../deploy/hx7/README.md) and checks V-B                              |
-| GO-4 | HX-15          | Installs and starts the GitHub sync timer                                                                                       | `deploy/hx15/install.sh --sync <S>`                                  | [Start the GitHub sync](../deploy/hx15/README.md#start-the-github-sync-go-4) and checks V-C |
+| Step | Host           | What it does                                                                                                                                                               | Entry point                                                          | Commands and checks                                                                         |
+| ---- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| GO-1 | HX-15 and HX-9 | Generates the database password on HX-15 into `app.env`, then creates the database `centcom` and the role `centcom_app` on HX-9                                            | `deploy/hx9/make-db-secret.mjs`, then `create-role.sql` on HX-9      | [deploy/hx9/README.md](../deploy/hx9/README.md)                                             |
+| GO-2 | HX-15          | Enables [linger](../deploy/hx15/README.md#install-the-app-go-2) for `hxsa`, builds the release for `S`, migrates, starts the app unit, loads the seed, and issues the keys | `deploy/hx15/install.sh <S>`, `npm run db:seed`, `scripts/issue-key` | [Install the app](../deploy/hx15/README.md#install-the-app-go-2) and checks V-A             |
+| GO-3 | HX-7           | Installs the NGINX route on port 8420 through an HX-Nginx pull request                                                                                                     | `config/nginx/conf.d/hx-centcom.conf` in HX-Nginx                    | [deploy/hx7/README.md](../deploy/hx7/README.md) and checks V-B                              |
+| GO-4 | HX-15          | Installs and starts the GitHub sync timer                                                                                                                                  | `deploy/hx15/install.sh --sync <S>`                                  | [Start the GitHub sync](../deploy/hx15/README.md#start-the-github-sync-go-4) and checks V-C |
 
 Before GO-1 and before each install, fetch `S` into the clone and confirm that it is on `origin/main` ([Fetch the commit](../deploy/hx15/README.md#fetch-the-commit)). `install.sh` builds the release from `git archive <S>` and never moves the clone's `HEAD`. It refuses a clone with uncommitted or untracked files.
 
 ### Issue and rotate keys
 
 `scripts/issue-key` runs from the `current` release with `app.env` loaded. The first run issues the owner key for `Agent Zero` and needs no other key. Later runs read the owner key from the file that `CENTCOM_OWNER_KEY_FILE` names and issue one key per agent. Each run prints `issued <key id> <file>` and never prints a key. `--rotate` issues a new key, saves it and its id over the old files, and only then revokes the old key, so a failure part way leaves the agent with a working key. It prints `issued <key id> <file>`, then `revoked <old key id>`. Step 3 of [Install the app](../deploy/hx15/README.md#install-the-app-go-2) has the commands. Each agent then sets up posting as [AGENT-POSTING.md](AGENT-POSTING.md) says.
+
+Start one `scripts/issue-key` run per agent at a time, with or without `--rotate`. Nothing locks the key files. Two `--rotate` runs for one agent read the same old key id, and each one issues a new key. Their writes can interleave, so the key file can hold one new key while its `.id` file names the other. The next `--rotate` then revokes the key that the `.id` file names, and the key that was in the key file stays active with no file that holds it.
+
+Agents and the owner send their Bearer keys over plain HTTP on the HX LAN, which is trusted for key traffic in DEV/TEST, and the owner ruled TLS out of scope on 2026-11-12 ([REQUIREMENTS.md](REQUIREMENTS.md#requirements)).
 
 ### Verify a running app
 
@@ -125,8 +129,21 @@ Each removal step needs the owner's GO. Run them in this order:
 - **`systemd-analyze rejected a unit`.** The script copied no unit, and `current` did not move. Fix the unit in a new commit.
 - **`... has no commit <S>` or `... is not reachable from origin/main`.** Run `git -C <clone> fetch origin`, and confirm that the owner's GO names a merged commit.
 - **`issue-key failed: ... exists; pass --rotate to replace it`.** The agent already has a key file. Add `--rotate` to replace the key, or leave it.
-- **`issue-key failed: forbidden: An owner key already exists; issue keys with it.`** The run had no `CENTCOM_OWNER_KEY_FILE`, so it tried to issue the first owner key. Set `CENTCOM_OWNER_KEY_FILE` to the owner's key file.
+- **`issue-key failed: forbidden: An owner key already exists; issue keys with it.`** The run had no `CENTCOM_OWNER_KEY_FILE`, so it tried to issue the first owner key. Set `CENTCOM_OWNER_KEY_FILE` to the owner's key file. If no file holds the owner key, because the first run printed `was issued but not saved`, revoke that key first, as the next entry says.
+- **`issue-key failed: key <key id> was issued but not saved to <file>; revoke it (<reason>)`.** The database holds the new key as active, but no file holds the key. First fix the cause that `<reason>` names, such as a folder at `<file>.tmp`. Then revoke the key and rerun the same command:
+  - For an agent key, revoke it as the owner with `DELETE /api/v1/keys/<key id>` ([API.md](API.md#delete-apiv1keysid)).
+  - For the first owner key, which a run without `CENTCOM_OWNER_KEY_FILE` issues, no saved key can revoke it, and `scripts/issue-key` refuses a second owner key while this one is active. The only recovery is SQL on HX-9. It is a host step, so it needs the owner's GO for that exact step. Run this statement as `postgres` in the database `centcom`, with the `psql` and the connection method that [deploy/hx9/README.md](../deploy/hx9/README.md) gives:
+
+    ```sql
+    UPDATE agent_keys SET revoked_at = now()
+    WHERE id = '<key id>' AND revoked_at IS NULL
+    	AND agent_id IN (SELECT id FROM agents WHERE role = 'owner')
+    RETURNING id, agent_id, revoked_at;
+    ```
+
+    `psql` prints the revoked row and `UPDATE 1`. `UPDATE 0` means that `<key id>` names no active owner key. The statement skips the services, so `activity_log` gets no `key.revoke` row. Record the statement and its output with the GO's evidence.
 - **`github-sync failed: GITHUB_TOKEN_FILE is not set`, `... has mode 644; it must be 600`, or `... must hold one token of printable ASCII`.** The sync unit sets `GITHUB_TOKEN_FILE`. The file it names must have mode 600 and hold one token with no space or line break inside ([environment names](../deploy/hx15/README.md#know-the-environment-names)). Fix the mode with `chmod 600` on that file. Never print the file.
+- **`github-sync failed: GitHub GET <path> -> <status>` or `... -> invalid JSON`.** GitHub answered that HTTP status, or a body that is not JSON, for that request path. The line holds no text from GitHub's response, because a response can echo the `Authorization` header.
 - **`github-sync gone repo=<repo> number=<n> id=<id>`.** This line is not an error. GitHub answered 404 or a redirect for a pull request stored as open, so the sync set its state to `gone`.
 - **The first request fails and names `CENTCOM_WEBHOOK_URLS` or `CENTCOM_WEBHOOK_SECRET_FILE`.** Set both webhook variables in `app.env`, or neither, as [the environment names](../deploy/hx15/README.md#know-the-environment-names) say, then restart the app.
 - **A `webhook <event id> <origin and path> -> <status or error>` warning in the app's journal.** A receiver did not answer 2xx before the timeout in [API.md](API.md#decision-webhook). The decide still succeeded, and the server does not retry.

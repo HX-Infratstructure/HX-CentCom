@@ -7,7 +7,8 @@ This folder runs HX-CentCom on HX-15 as systemd user units of `hxsa`. HX-7 NGINX
 | `hx-centcom.service`             | Runs `node .output/server/index.mjs` from the `current` release on `192.168.50.215:5420`                              |
 | `hx-centcom-github-sync.service` | Runs `node --import tsx scripts/github-sync.ts` once from the `current` release. It sends only GET requests to GitHub |
 | `hx-centcom-github-sync.timer`   | Starts the sync service every 5 minutes                                                                               |
-| `common.sh`                      | The names, the paths and the shared steps of the three scripts below                                                  |
+| `common.sh`                      | The names, the paths and the read-only helpers of the three scripts below                                             |
+| `mutate.sh`                      | The steps that change the host. Only `install.sh` and `rollback.sh` source it                                         |
 | `install.sh`                     | Builds one exact commit into a release folder, migrates, makes it current, restarts the app and deletes old releases  |
 | `rollback.sh`                    | Makes an earlier release current and restarts the app, with no npm and no database access                             |
 | `verify.sh`                      | Read-only checks of a running app through a URL                                                                       |
@@ -69,13 +70,22 @@ The second command must print `S is on origin/main`. `git fetch` updates only th
 
 Finish GO-1 first, so that `app.env` exists and the database answers.
 
+The app unit is a systemd user unit of `hxsa`, so it runs only while the `hxsa` user manager runs. Without linger, that manager stops when the last `hxsa` session ends, and it does not start at boot. Before the install, enable linger once:
+
+```sh
+sudo loginctl enable-linger hxsa
+loginctl show-user hxsa -p Linger
+```
+
+The second command must print `Linger=yes`. `verify.sh` checks it again (V-A9).
+
 1. Run the install from the clone:
 
    ```sh
    ~/HX-CentCom/deploy/hx15/install.sh <S>
    ```
 
-   `install.sh` and `common.sh` run from the clone's working tree. That tree must already hold `deploy/hx15` at a commit on `origin/main`. `install.sh` never moves `HEAD` and never checks out a commit. The release that it builds, with its units and its migrations, comes from `S`. The script prints a `== <step>: <what>` line with the UTC time before each step, and stops at the first failure. It does these steps:
+   `install.sh`, `common.sh` and `mutate.sh` run from the clone's working tree. That tree must already hold `deploy/hx15` at a commit on `origin/main`. `install.sh` never moves `HEAD` and never checks out a commit. The release that it builds, with its units and its migrations, comes from `S`. The script prints a `== <step>: <what>` line with the UTC time before each step, and stops at the first failure. It does these steps:
 
    - It refuses root, a SHA that is not 40 lowercase hex characters, and a clone with uncommitted or untracked files.
    - It refuses a SHA that the clone does not have, and a SHA that is not reachable from `origin/main`. Both messages say to run `git -C <clone> fetch origin` first.
@@ -153,6 +163,7 @@ Finish GO-1 first, so that `app.env` exists and the database answers.
 | V-A6 | The two `curl` commands below this table                                                                         | `401` both times (SPEC T1)                                                         |
 | V-A7 | MCP `tools/list` with no key. `verify.sh` runs it                                                                | No write tool (SPEC T9)                                                            |
 | V-A8 | `~/.local/share/hx-centcom/current/deploy/hx15/verify.sh http://192.168.50.215:5420`                             | Exit 0                                                                             |
+| V-A9 | `loginctl show-user hxsa -p Linger`                                                                              | `Linger=yes`. `verify.sh` also checks it                                           |
 
 V-A6 posts to a seeded task, once with no key and once with an unknown key:
 
@@ -176,6 +187,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/j
 It prints one `PASS` or `FAIL` line per check:
 
 - `systemctl --user is-active hx-centcom.service` is `active`. This check reads the unit on the host that runs the script, so run the script on HX-15.
+- `loginctl show-user <user> -p Linger` is `yes` for the user who runs the script, so the units start at boot and keep running after logout.
 - `GET /` answers 200.
 - `GET /api/v1/workspace` answers 200 with a JSON content type and a JSON object. The script prints its top-level keys.
 - MCP over streamable HTTP at `/mcp` sends `initialize`, `notifications/initialized` and `tools/list`, with no `Authorization` header. The tool list must hold `list_tasks`, `get_task`, `list_decisions` and `my_work`, and none of `post_progress`, `set_requirement`, `request_decision`, `add_raid_item`, `update_raid_item` and `add_lesson`. The script prints the tool names.

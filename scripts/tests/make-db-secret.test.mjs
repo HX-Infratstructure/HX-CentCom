@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const script = fileURLToPath(new URL("../../deploy/hx9/make-db-secret.mjs", import.meta.url));
 const VERIFIER = /^SCRAM-SHA-256\$4096:([A-Za-z0-9+/=]+)\$([A-Za-z0-9+/=]+):([A-Za-z0-9+/=]+)$/;
@@ -134,4 +143,31 @@ test("the CLI writes app.env and create-role.sql privately, never shows the pass
   assert.equal(second.env, first.env, "a rerun leaves app.env as it was");
   assert.notEqual(second.verifier, first.verifier, "a rerun writes a new SQL file with a new salt");
   assert.ok(login(second.verifier, first.password), "the new verifier is for the same password");
+});
+
+test("the CLI runs when started through a symlink, and an import of the module writes nothing", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "make-db-secret-guard-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, "home");
+  mkdirSync(home);
+  const node = (file) =>
+    spawnSync(process.execPath, [file], {
+      cwd: root,
+      env: { ...process.env, HOME: home },
+      encoding: "utf8",
+    });
+
+  const importer = join(root, "importer.mjs");
+  writeFileSync(importer, `await import(${JSON.stringify(pathToFileURL(script).href)});\n`);
+  const imported = node(importer);
+  assert.equal(imported.status, 0, imported.stderr);
+  assert.equal(`${imported.stdout}${imported.stderr}`, "");
+  assert.deepEqual(readdirSync(home), [], "an import writes nothing");
+
+  const link = join(root, "make-db-secret.mjs");
+  symlinkSync(script, link);
+  const linked = node(link);
+  assert.equal(linked.status, 0, linked.stderr);
+  const envPath = join(home, ".config", "hx-centcom", "app.env");
+  assert.match(readFileSync(envPath, "utf8"), ENV_LINE, "a run through a symlink writes app.env");
 });

@@ -67,18 +67,18 @@ Every response with a status outside 2xx has this body:
 }
 ```
 
-| Code                   | Status | Cause                                                                                                                                                                      |
-| ---------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid`              | 400    | The body, a query parameter, a header, or a cursor is invalid                                                                                                              |
-| `unauthorized`         | 401    | A write with no key, or with a key that is unknown or revoked                                                                                                              |
-| `forbidden`            | 403    | An agent writing another agent's task, changing a RAID item or lesson it may not edit, pinning or closing a dependency on another agent's task, or calling an owner action |
-| `not_found`            | 404    | The task, decision, requirement, agent, key, RAID item, lesson, activity row, or `/api/v1` path does not exist                                                             |
-| `method_not_allowed`   | 405    | The route does not accept the method. The `Allow` header lists the methods that it accepts                                                                                 |
-| `version_conflict`     | 409    | The `If-Match` version is not the current version, or a revert's entity changed after the action it reverts                                                                |
-| `not_revertible`       | 409    | The activity row records a create, a decide, a key action, or a write with automation effects, which a revert does not undo                                                |
-| `payload_too_large`    | 413    | The body is larger than 1 MiB                                                                                                                                              |
-| `idempotency_mismatch` | 422    | The `Idempotency-Key` was used before with a different request                                                                                                             |
-| `internal`             | 500    | An unexpected error. The server logs it                                                                                                                                    |
+| Code                   | Status | Cause                                                                                                                                                                                         |
+| ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid`              | 400    | The body, a query parameter, a header, or a cursor is invalid                                                                                                                                 |
+| `unauthorized`         | 401    | A write with no key, or with a key that is unknown or revoked                                                                                                                                 |
+| `forbidden`            | 403    | An agent writing another agent's task, changing a RAID item or lesson it may not edit, adding, moving, closing, or reopening a dependency on another agent's task, or calling an owner action |
+| `not_found`            | 404    | The task, decision, requirement, agent, key, RAID item, lesson, activity row, or `/api/v1` path does not exist                                                                                |
+| `method_not_allowed`   | 405    | The route does not accept the method. The `Allow` header lists the methods that it accepts                                                                                                    |
+| `version_conflict`     | 409    | The `If-Match` version is not the current version, or a revert's entity changed after the action it reverts                                                                                   |
+| `not_revertible`       | 409    | The activity row records a create, a decide, a key action, or a write with automation effects, which a revert does not undo                                                                   |
+| `payload_too_large`    | 413    | The body is larger than 1 MiB                                                                                                                                                                 |
+| `idempotency_mismatch` | 422    | The `Idempotency-Key` was used before with a different request                                                                                                                                |
+| `internal`             | 500    | An unexpected error. The server logs it                                                                                                                                                       |
 
 A write checks its request in this order, and the first failure answers:
 
@@ -191,7 +191,7 @@ When the update moves the task into the `ready_for_owner` group from another gro
 
 - The question is `decision.question`, or else `Accept <task id>: <title>?`. The gate type is `decision.gateType`, or else `merge` when the update has a `prUrl` and `scope` when it has none.
 - The summary is `Ready for owner: <title>`, cut to 140 characters. The description is the update's note and its links.
-- The source is the `prUrl`, or else the first link, or else the task's `source_url`. With none of them, the update fails with 400 at `prUrl`.
+- The source is the `prUrl`, or else the first link, or else the task's `source_url` when it is a valid `sourceUrl` for [POST /api/v1/decisions](#post-apiv1decisions). Every task has a `source_url`, so the update fails with 400 at `prUrl` when it has no `prUrl` and no links, and the task's `source_url` is not a valid `sourceUrl`.
 - If a Pending decision already blocks the task, no decision opens, and a `system` update on the task names the pending one.
 
 The response holds only the update. The opened decision appears in `GET /api/v1/tasks/:id`.
@@ -253,7 +253,7 @@ Returns `{items, nextCursor, counts}`. `items` are updates, newest first. `count
 | `since`           | Only rows at or after this time                                                                                                                                              |
 | `limit`, `cursor` | See [Lists and pagination](#lists-and-pagination)                                                                                                                            |
 
-Returns `{items, nextCursor, counts}`, newest first. `counts` is `{total, byActor, byEntity}`. `entityId` and `since` apply to every count. Each item has `id`, `actor`, `action`, `entity`, `entity_id`, `before`, `after`, `run_id`, `commit_sha`, and `created_at`.
+Returns `{items, nextCursor, counts}`, newest first. `counts` is `{total, byActor, byEntity}`. `entityId` and `since` apply to every count. Each item has `id`, `actor`, `action`, `entity`, `entity_id`, `before`, `after`, `run_id`, `commit_sha`, `created_at`, and `revertible`. `revertible` is true when a [revert](#post-apiv1activityidrevert) would not refuse the row with `not_revertible`. The revert still checks the entity's version, so a revertible row can get `version_conflict` (409).
 
 ### GET /api/v1/decisions
 
@@ -352,11 +352,20 @@ A value other than null in a field that belongs to another type fails with 400 a
 
 ### PUT /api/v1/raid/:id
 
-Changes a RAID item. The owner may change any item. An agent may change an item whose `owner_agent` or `created_by` is itself, or a dependency whose blocked task's `agent` is itself. An agent that is not the owner gets 403 when it moves a dependency onto another agent's task or closes a dependency on another agent's task. Accepts `Idempotency-Key` and `If-Match`, against the item's version.
+Changes a RAID item. The owner may change any item. An agent may change an item whose `owner_agent` or `created_by` is itself, or a dependency whose blocked task's `agent` is itself. Accepts `Idempotency-Key` and `If-Match`, against the item's version.
+
+A dependency change writes every task it affects, so an agent that is not the owner must be the `agent` of each one. Otherwise the change fails with 403, and the message names the task:
+
+- A move to another `blockedTaskId` affects the old task and the new one, whether the dependency is open or closed.
+- A close or a reopen affects the task that the dependency blocks.
+
+A close releases the task that the dependency blocks, and a move of an open dependency releases the task that it leaves. [ARCHITECTURE.md](ARCHITECTURE.md#automations) gives the rule that a release follows. That move posts one `system` update on the task that it leaves, `<RAID id> moved to <new task id>.` followed by the outcome. A reopen does not block the task again.
+
+The activity row's `after.effects` records each task that a release unblocked, as `{id, version}`: `unblockedTask` for the task of a close, and `unblockedPreviousTask` for the task that a move leaves. A move of an open dependency always posts a `system` update, so a [revert](#post-apiv1activityidrevert) refuses its activity row with `not_revertible` (409).
 
 The body takes the fields of `POST /api/v1/raid` except `type`, and needs at least one of them. A field that the body leaves out keeps its value, and null clears a field that may be empty. A `type` field fails with 400, because the type cannot change. The type rules above apply to the item after the change.
 
-Returns 200 with `{item, decision, systemUpdates}`. `decision` is the decision that this write opened for a high or critical issue, or null. `systemUpdates` holds the `system` update that closing a dependency posts on its blocked task, or is empty.
+Returns 200 with `{item, decision, systemUpdates}`. `decision` is the decision that this write opened for a high or critical issue, or null. `systemUpdates` holds the `system` updates that a close or a move of a dependency posts, or is empty.
 
 ### GET /api/v1/lessons
 

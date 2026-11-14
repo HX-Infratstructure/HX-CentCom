@@ -3,6 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import {
   infiniteQueryOptions,
+  queryOptions,
+  skipToken,
+  useQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
@@ -16,7 +19,8 @@ import { RaidDetail, RaidRow } from "@/components/raid";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { tasksQuery } from "@/lib/task-data";
-import type { RaidPage, RaidQueryInput } from "@/server/services";
+import { getRaidItem } from "@/lib/tasks.functions";
+import type { RaidItem, RaidPage, RaidQueryInput } from "@/server/services";
 
 /** The service parses the query; the validator only gives the server function its input type. */
 const listRaidPage = createServerFn({ method: "GET" })
@@ -44,6 +48,14 @@ function raidPages(query: RaidQueryInput) {
     queryFn: ({ pageParam }) => listRaidPage({ data: { ...query, cursor: pageParam } }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** The open sheet's item when the loaded pages do not hold it: a deep link past them or outside the filters. */
+function raidItemById(id: string | undefined) {
+  return queryOptions({
+    queryKey: ["raid", "one", id],
+    queryFn: id === undefined ? skipToken : () => getRaidItem({ data: { id } }),
   });
 }
 
@@ -89,6 +101,11 @@ function RaidRegister(): ReactNode {
   );
   const pages = useSuspenseInfiniteQuery({ ...raidPages(raidQuery(filters)), select });
   const record = useOpenRecord();
+  const selectItem = useCallback(
+    (item: RaidItem | null) => (item === null ? null : (adaptRaid([item], ws.agents)[0] ?? null)),
+    [ws.agents],
+  );
+  const byId = useQuery({ ...raidItemById(record.id), select: selectItem });
   const { items, counts } = pages.data;
 
   return (
@@ -129,7 +146,7 @@ function RaidRegister(): ReactNode {
         error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
         onShowMore={() => void pages.fetchNextPage()}
       />
-      <RaidDetail detail={detailFrom(record.id, items)} onClose={record.close} />
+      <RaidDetail detail={detailFrom(record.id, items, byId)} onClose={record.close} />
     </Workspace>
   );
 }

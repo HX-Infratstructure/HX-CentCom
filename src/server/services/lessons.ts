@@ -2,7 +2,7 @@
  * The lessons log (SPEC §6.1), and automation 3: the lessons ask when a task becomes done. Writes run through the
  * shared writer (pipeline.ts).
  */
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, countDistinct, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, Tx } from "@/server/db/client";
 import { statusLabels } from "@/server/db/schema";
@@ -288,11 +288,14 @@ export async function listLessons(db: Db, raw: unknown): Promise<LessonsPage> {
       .where(and(...lessonFilters(query, "status")))
       .groupBy(lessons.status);
     const tags = tx
-      .select({ tag: sql<string>`unnest(${lessons.tags})`.as("tag") })
+      .select({ id: lessons.id, tag: sql<string>`unnest(${lessons.tags})`.as("tag") })
       .from(lessons)
       .where(and(...lessonFilters(query, "tag")))
       .as("tags");
-    const byTag = await tx.select({ key: tags.tag, n: count }).from(tags).groupBy(tags.tag);
+    const byTag = await tx
+      .select({ key: tags.tag, n: countDistinct(tags.id) })
+      .from(tags)
+      .groupBy(tags.tag);
     return {
       ...items,
       counts: { total: total?.n ?? 0, byStatus: tally(byStatus), byTag: tally(byTag) },
@@ -300,8 +303,17 @@ export async function listLessons(db: Db, raw: unknown): Promise<LessonsPage> {
   }, SNAPSHOT);
 }
 
+export async function getLesson(db: Db, id: string): Promise<Lesson> {
+  return db.transaction(async (tx) => {
+    const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, id));
+    if (!lesson) throw ServiceError.notFound("Lesson", id);
+    return lesson;
+  }, SNAPSHOT);
+}
+
 export interface LessonServices {
   listLessons(query?: LessonQueryInput): Promise<LessonsPage>;
+  getLesson(id: string): Promise<Lesson>;
   createLesson(
     actor: Actor | null,
     input: CreateLessonInput,

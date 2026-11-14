@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { Db } from "@/server/db/client";
 import type {
   GithubPrInput,
@@ -97,19 +99,6 @@ function failureKind(error: unknown): string {
   return typeof kind === "string" && /^\w+$/.test(kind) ? kind : "unknown";
 }
 
-async function messageOf(res: Response): Promise<string> {
-  const body: unknown = await res.json().catch(() => undefined);
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "message" in body &&
-    typeof body.message === "string"
-  ) {
-    return `: ${body.message.slice(0, 200)}`;
-  }
-  return "";
-}
-
 function nextUrl(link: string | null): string | undefined {
   return link?.match(/<([^>]*)>;\s*rel="next"/)?.[1];
 }
@@ -142,7 +131,17 @@ function gitHubApi(fetch: Fetch, token: string) {
       throw new Error(`GitHub GET ${path} -> request failed (${failureKind(error)})`);
     }
     if (res.ok || absent(res.status)) return res;
-    throw new Error(`GitHub GET ${path} -> ${res.status}${await messageOf(res)}`);
+    // A server can echo the Authorization header in its body, so no response text is kept.
+    throw new Error(`GitHub GET ${path} -> ${res.status}`);
+  }
+
+  /** V8's JSON parse error quotes the start of the body, so its message is never kept. */
+  async function json<T>(res: Response, url: string): Promise<T> {
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw new Error(`GitHub GET ${url.slice(API.length)} -> invalid JSON`);
+    }
   }
 
   async function list<T>(path: string, more: (page: T[]) => boolean = () => true): Promise<T[]> {
@@ -150,7 +149,7 @@ function gitHubApi(fetch: Fetch, token: string) {
     let url: string | undefined = `${API}${path}`;
     while (url !== undefined) {
       const res = await get(url);
-      const page = (await res.json()) as T[];
+      const page: T[] = await json(res, url);
       items.push(...page);
       url = more(page) ? nextUrl(res.headers.get("link")) : undefined;
     }
@@ -172,18 +171,14 @@ function gitHubApi(fetch: Fetch, token: string) {
       ),
     pull: async (repo: string, number: number): Promise<GitHubPull | null> => {
       // GitHub redirects a repository that was transferred out of the org, so its PRs are no longer HX's.
-      const res = await get(
-        `${API}/repos/${ORG}/${repo}/pulls/${number}`,
-        (status) => status === 404 || (status >= 300 && status < 400),
-      );
-      return res.ok ? ((await res.json()) as GitHubPull) : null;
+      const url = `${API}/repos/${ORG}/${repo}/pulls/${number}`;
+      const res = await get(url, (status) => status === 404 || (status >= 300 && status < 400));
+      return res.ok ? json<GitHubPull>(res, url) : null;
     },
     head: async (repo: string, branch: string): Promise<string | undefined> => {
-      const res = await get(
-        `${API}/repos/${ORG}/${repo}/branches/${encodeURIComponent(branch)}`,
-        (status) => status === 404 || status === 409,
-      );
-      return res.ok ? ((await res.json()) as GitHubBranch).commit.sha : undefined;
+      const url = `${API}/repos/${ORG}/${repo}/branches/${encodeURIComponent(branch)}`;
+      const res = await get(url, (status) => status === 404 || status === 409);
+      return res.ok ? (await json<GitHubBranch>(res, url)).commit.sha : undefined;
     },
   };
 }
@@ -314,6 +309,7 @@ export async function main(
   }
 }
 
-if (import.meta.main) {
+// import.meta.main needs Node 22.18. process.argv[1] keeps a symlinked path, and import.meta.url is the real path.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exit(await main(process.env));
 }

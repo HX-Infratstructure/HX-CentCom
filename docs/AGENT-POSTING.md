@@ -71,8 +71,10 @@ A `--task` list replaces the item's whole task list, so repeat every task the it
 `forbidden` (403), unless the item is a dependency that blocks one of your tasks.
 
 A dependency changes the task it blocks, so only that task's agent or the owner may add a dependency with
-`--blocked-task`, move it to another task, or close it. For another agent's task, the server answers `forbidden` (403)
-and names the task. Ask that task's agent, or the owner, to close the dependency.
+`--blocked-task`, close it, or reopen it. A move to another task changes both tasks, so it needs the agent of each
+task, or the owner. For another agent's task, the server answers `forbidden` (403) and names the task. Ask that task's
+agent, or the owner, to make the change. [PUT /api/v1/raid/:id](API.md#put-apiv1raidid) says what a move, a close,
+and a reopen do to each task.
 
 To record a lesson, run:
 

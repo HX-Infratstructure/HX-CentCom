@@ -10,6 +10,8 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=common.sh
 . "$here/common.sh"
+# shellcheck source-path=SCRIPTDIR source=mutate.sh
+. "$here/mutate.sh"
 
 usage() { echo "usage: deploy/hx15/install.sh [--sync] <40-hex SHA>"; }
 

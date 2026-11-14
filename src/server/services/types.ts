@@ -48,7 +48,8 @@ export type Requirement = typeof taskRequirements.$inferSelect;
 export type Decision = typeof ownerDecisions.$inferSelect;
 export type PullRequest = typeof githubPrs.$inferSelect;
 export type RepoHead = typeof githubRepos.$inferSelect;
-export type ActivityEntry = typeof activityLog.$inferSelect;
+/** `revertible`: the row's own content allows a revert (`revertRefusal`). The version check still runs at revert time. */
+export type ActivityEntry = typeof activityLog.$inferSelect & { readonly revertible: boolean };
 
 /** PASS requirements over all requirements. `percent` is null without requirements: 0/0 is not 0 %. */
 export type Progress = {
@@ -98,7 +99,9 @@ export type DecisionsPage = Page<Decision> & { readonly counts: DecisionCounts }
 /**
  * One snapshot. `updates`, `updatesCursor` and `counts.updates` equal `listUpdates({})` at that snapshot, and
  * `counts.decisions` equals `listDecisions({}).counts`. Tasks, requirements, agents, status labels and repository heads
- * are whole: no API creates them, so they stay bounded. `decisions` holds every Pending decision and every decision
+ * are whole. Only the seed creates tasks, agents and status labels, and the GitHub sync writes the repository heads.
+ * `setRequirement` creates requirements, so they grow through the API; they stay whole because the task sheet reads
+ * them from this snapshot and has no read of its own. `decisions` holds every Pending decision and every decision
  * whose `blocks` holds a task that is not done; `listDecisions` pages the rest, and `listGithubPrs` the pull requests.
  */
 export type Workspace = {

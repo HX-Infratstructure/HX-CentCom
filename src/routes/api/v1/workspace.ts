@@ -8,10 +8,9 @@ export const Route = createFileRoute("/api/v1/workspace")({
       ANY: (ctx) =>
         endpoint(ctx, {
           GET: async (req) => {
-            const [workspace, actor] = await Promise.all([
-              req.services.listWorkspace(),
-              req.actor(),
-            ]);
+            // In sequence: on a single-session server a parallel query lands inside the snapshot transaction.
+            const actor = await req.actor();
+            const workspace = await req.services.listWorkspace();
             return Response.json({ ...workspace, actor: callerView(actor) });
           },
         }),

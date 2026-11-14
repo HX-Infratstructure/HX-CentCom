@@ -2,7 +2,18 @@
  * The RAID register (SPEC §6.1). Every write is one plan object in the shape of writes.ts, run by the shared writer
  * (pipeline.ts). Automations 1 and 2 run inside the plan whose write triggers them, in that write's transaction.
  */
-import { and, desc, eq, inArray, isNotNull, ne, notExists, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  countDistinct,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  ne,
+  notExists,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Db, Tx } from "@/server/db/client";
@@ -154,7 +165,7 @@ const raidFields = {
   blockedTaskId: id
     .nullable()
     .describe(
-      "Dependency only, required: the task it blocks, one assigned to you unless you are the owner. Closing the dependency unblocks a task blocked on dependency once no other open dependency blocks it.",
+      "Dependency only, required: the task it blocks. Unless you are the owner, it must be assigned to you, and so must the task a move or a reopen affects. Closing the dependency unblocks its task, and moving an open one away unblocks the task it leaves, when that task is blocked on dependency and no other open dependency blocks it.",
     ),
   blockingRef: z
     .string()
@@ -399,6 +410,7 @@ type Effects = {
   decisionId?: string;
   systemUpdateIds?: string[];
   unblockedTask?: { id: string; version: number };
+  unblockedPreviousTask?: { id: string; version: number };
 };
 
 /** The activity row's `after`: the stored row, plus what the write's automations did. */
@@ -462,60 +474,87 @@ function closesDependency(before: DependencyState | null, after: DependencyState
   );
 }
 
+/** The task an open dependency leaves when the write moves it to another task, else null. */
+function leftTask(before: DependencyState, after: DependencyState): string | null {
+  return before.type === "dependency" &&
+    before.status !== "closed" &&
+    before.blocked_task_id !== after.blocked_task_id
+    ? before.blocked_task_id
+    : null;
+}
+
+/** The tasks a dependency write affects: a create's task, both tasks of a move, and the task of a close or reopen. */
+function affectedTasks(before: DependencyState | null, after: DependencyState): string[] {
+  if (after.type !== "dependency") return [];
+  const tasks =
+    before === null
+      ? [after.blocked_task_id]
+      : before.blocked_task_id !== after.blocked_task_id
+        ? [before.blocked_task_id, after.blocked_task_id]
+        : (before.status === "closed") !== (after.status === "closed")
+          ? [after.blocked_task_id]
+          : [];
+  return tasks.filter((t): t is string => t !== null);
+}
+
 /**
- * P2-1. Pinning a dependency on a task (a create, or a retarget onto it) or closing one on it writes that task, so it
- * needs the owner or the task's agent. Moving a dependency away changes nothing on the task it leaves. It runs after
- * the 400 checks, and on create before nextRaidId, so a refusal draws no id.
+ * P2-1. A dependency write that affects a task writes that task, so it needs the owner or the task's agent: pinning
+ * one on a task, moving one onto or away from a task (both tasks), and closing or reopening one. It runs after the
+ * 400 checks, and on create before nextRaidId, so a refusal draws no id.
  */
-async function authorizeDependencyTarget(
+async function authorizeDependencyChange(
   tx: Tx,
   actor: Actor,
   before: DependencyState | null,
   after: DependencyState,
 ): Promise<void> {
-  const taskId = after.blocked_task_id;
-  if (actor.role === "owner" || after.type !== "dependency" || taskId === null) return;
-  const pins = before === null || before.blocked_task_id !== taskId;
-  if (!pins && !closesDependency(before, after)) return;
-  const [task] = await tx
+  if (actor.role === "owner") return;
+  const taskIds = affectedTasks(before, after);
+  if (taskIds.length === 0) return;
+  const tasks = await tx
     .select({ id: engineeringTasks.id, agent: engineeringTasks.agent })
     .from(engineeringTasks)
-    .where(eq(engineeringTasks.id, taskId));
-  if (!task) throw new Error(`blocked task ${taskId} vanished after its reference check`);
-  authorizeTaskWrite(actor, task);
+    .where(inArray(engineeringTasks.id, taskIds));
+  for (const taskId of taskIds) {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`blocked task ${taskId} vanished after its reference check`);
+    authorizeTaskWrite(actor, task);
+  }
 }
 
-type Closed = {
+type TaskVersion = { readonly id: string; readonly version: number };
+type Released = {
   readonly systemUpdates: readonly TaskUpdate[];
-  readonly unblockedTask: { readonly id: string; readonly version: number } | null;
+  /** The task the dependency is on after the write, unblocked by its close. */
+  readonly unblockedTask: TaskVersion | null;
+  /** The task an open dependency left, unblocked because no open dependency is left on it. */
+  readonly unblockedPreviousTask: TaskVersion | null;
 };
-const NOTHING_CLOSED: Closed = { systemUpdates: [], unblockedTask: null };
 
 /**
- * Automation 2 (SPEC §6.1). On a dependency's move into closed, under the blocked task's lock (so two last closes
- * serialise): clear the task's block only when it is `dependency` and no other open dependency blocks it, bumping the
- * task's version because a task column changed. `owner_decision` and `assignment` blocks belong to other processes
- * (IRP-04 stays blocked on D-05). Every close posts one system update that states the outcome.
+ * Under the task's lock (so two last releases serialise): clear the task's block only when it is `dependency` and no
+ * other open dependency blocks it, bumping the task's version because a task column changed. `owner_decision` and
+ * `assignment` blocks belong to other processes (IRP-04 stays blocked on D-05). Posts one system update, `event`
+ * followed by the outcome.
  */
-async function closeDependency(
+async function releaseTask(
   tx: Tx,
   ctx: WriteContext<unknown>,
-  before: RaidItem,
-  after: RaidItem,
-): Promise<Closed> {
-  const taskId = after.blocked_task_id;
-  if (taskId === null || !closesDependency(before, after)) return NOTHING_CLOSED;
+  item: RaidItem,
+  taskId: string,
+  event: string,
+): Promise<{ readonly systemUpdates: TaskUpdate[]; readonly unblocked: TaskVersion | null }> {
   const [task] = await tx
     .select({ blocked_on: engineeringTasks.blocked_on })
     .from(engineeringTasks)
     .where(eq(engineeringTasks.id, taskId))
     .for("update");
-  if (!task) throw new Error(`blocked task ${taskId} of ${after.id} vanished`);
+  if (!task) throw new Error(`blocked task ${taskId} of ${item.id} vanished`);
   const stillOpen = and(
     eq(raidItems.type, "dependency"),
     ne(raidItems.status, "closed"),
     eq(raidItems.blocked_task_id, taskId),
-    ne(raidItems.id, after.id),
+    ne(raidItems.id, item.id),
   );
   const [unblocked] = await tx
     .update(engineeringTasks)
@@ -545,12 +584,45 @@ async function closeDependency(
       task_id: taskId,
       kind: "system",
       status: null,
-      note: `${after.id} is closed. ${outcome}.`,
+      note: `${event} ${outcome}.`,
       links: [],
       source: null,
     },
   ]);
-  return { systemUpdates, unblockedTask: unblocked ?? null };
+  return { systemUpdates, unblocked: unblocked ?? null };
+}
+
+/**
+ * Automation 2 (SPEC §6.1). A dependency's move into closed releases the task it is on, and an open dependency's move
+ * to another task releases the task it left. Every release posts one system update that states the outcome. Tasks
+ * lock in id order, so two crossing moves cannot deadlock.
+ */
+async function releaseDependencyTasks(
+  tx: Tx,
+  ctx: WriteContext<unknown>,
+  before: RaidItem,
+  after: RaidItem,
+): Promise<Released> {
+  const closedOn = closesDependency(before, after) ? after.blocked_task_id : null;
+  const left = leftTask(before, after);
+  const releases = [
+    ...(left === null
+      ? []
+      : [{ taskId: left, event: `${after.id} moved to ${after.blocked_task_id}.` }]),
+    ...(closedOn === null ? [] : [{ taskId: closedOn, event: `${after.id} is closed.` }]),
+  ].sort((a, b) => (a.taskId < b.taskId ? -1 : 1));
+  const systemUpdates: TaskUpdate[] = [];
+  const unblocked = new Map<string, TaskVersion>();
+  for (const { taskId, event } of releases) {
+    const released = await releaseTask(tx, ctx, after, taskId, event);
+    systemUpdates.push(...released.systemUpdates);
+    if (released.unblocked) unblocked.set(taskId, released.unblocked);
+  }
+  return {
+    systemUpdates,
+    unblockedTask: closedOn === null ? null : (unblocked.get(closedOn) ?? null),
+    unblockedPreviousTask: left === null ? null : (unblocked.get(left) ?? null),
+  };
 }
 
 export const createRaidItemPlan: CreatePlan<typeof createRaidItemInput, RaidWrite> = {
@@ -559,7 +631,7 @@ export const createRaidItemPlan: CreatePlan<typeof createRaidItemInput, RaidWrit
   async apply(tx, ctx) {
     const { actor, input, at } = ctx;
     throwIfAny(await referenceIssues(tx, input));
-    await authorizeDependencyTarget(tx, actor, null, {
+    await authorizeDependencyChange(tx, actor, null, {
       type: input.type,
       status: input.status,
       blocked_task_id: input.blockedTaskId ?? null,
@@ -612,7 +684,7 @@ export function updateRaidItemPlan(
       const columns = raidColumns(input);
       const merged = { ...before, ...columns };
       throwIfAny([...raidShapeIssues(before.type, merged), ...(await referenceIssues(tx, input))]);
-      await authorizeDependencyTarget(tx, actor, before, merged);
+      await authorizeDependencyChange(tx, actor, before, merged);
       const [updated] = await tx
         .update(raidItems)
         .set({
@@ -627,17 +699,20 @@ export function updateRaidItemPlan(
       if (!updated) throw new Error("raid item update returned no row");
       const opened = await openIssueDecision(tx, ctx, updated);
       const item = opened?.item ?? updated;
-      const closed = await closeDependency(tx, ctx, before, item);
+      const released = await releaseDependencyTasks(tx, ctx, before, item);
       const effects: Effects = {
         ...(opened ? { decisionId: opened.decision.id } : {}),
-        ...(closed.systemUpdates.length > 0
-          ? { systemUpdateIds: closed.systemUpdates.map((u) => u.id) }
+        ...(released.systemUpdates.length > 0
+          ? { systemUpdateIds: released.systemUpdates.map((u) => u.id) }
           : {}),
-        ...(closed.unblockedTask ? { unblockedTask: { ...closed.unblockedTask } } : {}),
+        ...(released.unblockedTask ? { unblockedTask: { ...released.unblockedTask } } : {}),
+        ...(released.unblockedPreviousTask
+          ? { unblockedPreviousTask: { ...released.unblockedPreviousTask } }
+          : {}),
       };
       return {
         status: 200,
-        value: { item, decision: opened?.decision ?? null, systemUpdates: closed.systemUpdates },
+        value: { item, decision: opened?.decision ?? null, systemUpdates: released.systemUpdates },
         activity: {
           entity: "raid_item",
           entityId: before.id,
@@ -729,11 +804,14 @@ export async function listRaid(db: Db, raw: unknown): Promise<RaidPage> {
       .where(and(...raidFilters(query, "owner"), isNotNull(raidItems.owner_agent)))
       .groupBy(raidItems.owner_agent);
     const tasks = tx
-      .select({ task: sql<string>`unnest(${raidItems.task_ids})`.as("task") })
+      .select({ id: raidItems.id, task: sql<string>`unnest(${raidItems.task_ids})`.as("task") })
       .from(raidItems)
       .where(and(...raidFilters(query, "task")))
       .as("tasks");
-    const byTask = await tx.select({ key: tasks.task, n: count }).from(tasks).groupBy(tasks.task);
+    const byTask = await tx
+      .select({ key: tasks.task, n: countDistinct(tasks.id) })
+      .from(tasks)
+      .groupBy(tasks.task);
     return {
       ...items,
       counts: {
@@ -748,10 +826,19 @@ export async function listRaid(db: Db, raw: unknown): Promise<RaidPage> {
   }, SNAPSHOT);
 }
 
+export async function getRaidItem(db: Db, id: string): Promise<RaidItem> {
+  return db.transaction(async (tx) => {
+    const [item] = await tx.select().from(raidItems).where(eq(raidItems.id, id));
+    if (!item) throw ServiceError.notFound("RAID item", id);
+    return item;
+  }, SNAPSHOT);
+}
+
 // §5 Service surface, merged into `Services` by index.ts.
 
 export interface RaidServices {
   listRaid(query?: RaidQueryInput): Promise<RaidPage>;
+  getRaidItem(id: string): Promise<RaidItem>;
   createRaidItem(
     actor: Actor | null,
     input: CreateRaidItemInput,

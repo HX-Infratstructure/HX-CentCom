@@ -260,6 +260,7 @@ function activity(n: number, fields: Partial<ActivityEntry> = {}): ActivityEntry
     run_id: null,
     commit_sha: null,
     created_at: AT,
+    revertible: false,
     ...fields,
   };
 }

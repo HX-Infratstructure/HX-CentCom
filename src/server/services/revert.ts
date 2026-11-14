@@ -76,8 +76,14 @@ function isRevertible(entity: ActivityEntity): entity is RevertibleEntity {
   return Object.hasOwn(TABLES, entity);
 }
 
-/** A restored row cannot undo what the write's automations did: a decision opened, updates posted, a task unblocked. */
-function refusal(target: ActivityEntry): string | null {
+/**
+ * Why the row's own content refuses a revert, or null when it allows one. `listActivity` derives `revertible` from it,
+ * so the UI offers Revert by the rule this module applies. A restored row cannot undo what the write's automations did:
+ * a decision opened, updates posted, a task unblocked. The version check is not here; it runs at revert time.
+ */
+export function revertRefusal(
+  target: Pick<ActivityEntry, "action" | "before" | "after">,
+): string | null {
   const rule = REVERTIBLE[target.action];
   if (rule !== true) return rule;
   if (target.before === null) return "a create has nothing to restore";
@@ -151,7 +157,7 @@ export async function revertPlan(
   const { activityId: id } = parse(revertInput, { activityId });
   const [target] = await db.select().from(activityLog).where(eq(activityLog.id, id));
   if (!target) throw ServiceError.notFound("Activity", id);
-  const reason = refusal(target);
+  const reason = revertRefusal(target);
   if (reason !== null) throw ServiceError.notRevertible(id, reason);
   const { entity, entity_id: entityId } = target;
   if (!isRevertible(entity)) throw ServiceError.notRevertible(id, `a ${entity} is not reverted`);

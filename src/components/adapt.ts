@@ -11,7 +11,6 @@ import {
   TASK_GROUP_LABELS,
   VALIDATION_STATE_LABELS,
   assertNever,
-  offersRevert,
   toInstant,
   type ActivityChange,
   type ActivityView,
@@ -300,7 +299,6 @@ function activityView(entry: S.ActivityEntry, dir: Directory): ActivityView {
     by: agentRef(actor, dir.agents),
     opens: recordOf(entry),
     changes: changesOf(entry, dir),
-    revertible: offersRevert(entry),
     createdAt: toInstant(created_at),
   };
 }
