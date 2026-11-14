@@ -28,3 +28,9 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Workspace architecture
+- Shared workspace chrome lives in src/components/workspace.tsx; content stays in TanStack file routes so dashboard and timeline use one navigation system.
+- Task reads use public read-only server functions and Query loaders; progress writes require verified authentication plus explicit task_editors membership so account creation never grants project write access.
+- Task progress history is recorded by a database trigger with each update so chart progress and update logs cannot diverge.
+- Draft planning dates are labeled explicitly and unreported active-task progress is never presented as a measured percentage.
