@@ -53,6 +53,8 @@ function lessonById(id: string | undefined) {
   });
 }
 
+const DESCRIPTION = "Lessons with their sources; adopted lessons show what enforces them.";
+
 export const Route = createFileRoute("/lessons")({
   validateSearch: (raw) => lists.lessons.validate(raw),
   loaderDeps: ({ search }) => lists.lessons.filters(search),
@@ -67,12 +69,12 @@ export const Route = createFileRoute("/lessons")({
       { title: "Lessons | HX-CentCom" },
       {
         name: "description",
-        content: "Lessons with their sources; adopted lessons show what enforces them.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Lessons | HX-CentCom" },
       {
         property: "og:description",
-        content: "Lessons with their sources; adopted lessons show what enforces them.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -104,7 +106,7 @@ function LessonsLog(): ReactNode {
   const { items, counts } = pages.data;
 
   return (
-    <Workspace page="Lessons">
+    <Workspace page="Lessons" description={DESCRIPTION}>
       <FilterBar
         search={lists.lessons}
         counts={{ status: counts?.byStatus ?? {}, tag: counts?.byTag ?? {} }}

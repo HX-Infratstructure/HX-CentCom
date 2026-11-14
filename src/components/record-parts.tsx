@@ -4,17 +4,45 @@ import { formatUtc, formatUtcDay, relativeAge } from "./format";
 import { assertNever, type AgentRef, type Coverage, type Instant, type SourceRef } from "./model";
 
 /**
- * An agent's identity. `full` shows the role mark and the name; `chip` is the compact tinted name for rows and facts.
- * The name is always text, so color never carries identity alone.
+ * "Claude Code 01" reads "CC1" and "Agent Zero" "AZ": each word's first letter, a number word whole. A one-word name
+ * keeps its capitals and digits ("OpenCode" reads "OC"), or else its first two letters ("Codex" reads "CO").
+ */
+function initials(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return words
+      .map((w) => (/^\d+$/.test(w) ? String(Number(w)) : w.charAt(0)))
+      .join("")
+      .toUpperCase()
+      .slice(0, 3);
+  }
+  const marks = name.match(/[A-Z0-9]/g) ?? [];
+  return marks.length >= 2 ? marks.slice(0, 3).join("") : name.slice(0, 2).toUpperCase();
+}
+
+/**
+ * An agent's identity. `full` shows the role mark and the name; `chip` is the compact tinted name for rows and facts;
+ * `person` is a round avatar with initials and the name, for board cells and cards. The name is always text, so color
+ * never carries identity alone.
  */
 export function AgentBadge({
   agent,
   variant = "full",
 }: {
   agent: AgentRef;
-  variant?: "full" | "chip" | undefined;
+  variant?: "full" | "chip" | "person" | undefined;
 }): ReactNode {
   const title = agent.role === null ? "Not in the agents table" : undefined;
+  if (variant === "person") {
+    return (
+      <span className="agent-person" data-tone={agent.tone ?? undefined} title={title}>
+        <span className="avatar" aria-hidden="true">
+          {initials(agent.name)}
+        </span>
+        <span className="agent-person-name">{agent.name}</span>
+      </span>
+    );
+  }
   if (variant === "chip") {
     return (
       <span className="agent-chip" data-tone={agent.tone ?? undefined} title={title}>

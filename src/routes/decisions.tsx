@@ -62,6 +62,8 @@ function decisionPages(query: DecisionQuery) {
   });
 }
 
+const DESCRIPTION = "Pending owner decisions, ordered by what they block, and the decided history.";
+
 export const Route = createFileRoute("/decisions")({
   validateSearch: (raw) => lists.decisions.validate(raw),
   loaderDeps: ({ search }) => lists.decisions.filters(search),
@@ -79,12 +81,12 @@ export const Route = createFileRoute("/decisions")({
       { title: "Decisions | HX-CentCom" },
       {
         name: "description",
-        content: "Pending owner decisions, ordered by what they block, and the decided history.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Decisions | HX-CentCom" },
       {
         property: "og:description",
-        content: "Pending owner decisions, ordered by what they block, and the decided history.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -108,7 +110,7 @@ function DecisionsPage(): ReactNode {
   const filtered = lists.decisions.active(filters);
 
   return (
-    <Workspace page="Decisions">
+    <Workspace page="Decisions" description={DESCRIPTION}>
       <FilterBar
         search={lists.decisions}
         counts={{ type: counts.byGateType, status: counts.byStatus }}

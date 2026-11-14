@@ -71,7 +71,11 @@ describe("design tokens in src/styles.css", () => {
     ["stone", "secondary"],
     ["violet", "violet-soft"],
     ["sky", "sky-soft"],
-    ["primary", "green-soft"],
+    ["green", "green-soft"],
+    ["primary", "card"],
+    ["foreground", "primary-soft"],
+    ["rail-text", "rail-active"],
+    ["rail-muted", "rail"],
     ["primary-foreground", "primary"],
     ["destructive", "card"],
     ["foreground", "background"],
@@ -83,6 +87,7 @@ describe("design tokens in src/styles.css", () => {
     ["input-border", "card"],
     ["input-border", "background"],
     ["rail-text", "rail"],
+    ["primary", "background"],
   ])("control edge or focus ring --%s on --%s meets 3:1", (fg, bg) => {
     expect(contrast(token(fg), token(bg))).toBeGreaterThanOrEqual(3);
   });
@@ -96,6 +101,22 @@ describe("design tokens in src/styles.css", () => {
       expect(fg, `${tone} sets --tone-fg`).toBeDefined();
       expect(bg, `${tone} sets --tone-bg`).toBeDefined();
       expect(contrast(token(fg ?? ""), token(bg ?? "")), `${tone}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("gives every [data-hue] rule an ink that white text reads on, and that reads on white, at 4.5:1", () => {
+    const rules = [...css.matchAll(/\[data-hue="([a-z]+)"\]\s*\{([^}]*)\}/g)];
+    expect(rules.map((r) => r[1])).toEqual(["green", "orange", "red", "purple", "blue", "grey"]);
+    for (const [, hue, body = ""] of rules) {
+      const ink = /--hue-ink:\s*var\(--([\w-]+)\)/.exec(body)?.[1];
+      expect(ink, `${hue} sets --hue-ink`).toBeDefined();
+      expect(
+        contrast(token("primary-foreground"), token(ink ?? "")),
+        `${hue}`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(token(ink ?? ""), token("card")), `${hue} on card`).toBeGreaterThanOrEqual(
+        4.5,
+      );
     }
   });
 });

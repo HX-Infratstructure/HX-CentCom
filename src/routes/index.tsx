@@ -62,6 +62,9 @@ function feedQuery(
   return attentionIds?.includes(taskId) === true ? { agentId, taskId } : null;
 }
 
+const DESCRIPTION =
+  "The latest agent updates, the decisions waiting on the owner, and the open work.";
+
 export const Route = createFileRoute("/")({
   validateSearch: (raw) => ({
     ...lists.overviewFeed.validate(raw),
@@ -100,12 +103,12 @@ export const Route = createFileRoute("/")({
       { title: "Overview | HX-CentCom" },
       {
         name: "description",
-        content: "The latest agent updates, the decisions waiting on the owner, and the open work.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Overview | HX-CentCom" },
       {
         property: "og:description",
-        content: "The latest agent updates, the decisions waiting on the owner, and the open work.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -123,7 +126,7 @@ function Overview(): ReactNode {
   const tasksId = useId();
 
   return (
-    <Workspace page="Overview">
+    <Workspace page="Overview" description={DESCRIPTION}>
       <div className="overview">
         <section aria-labelledby={decisionsId} className="overview-decisions">
           <h2 id={decisionsId} className="section-title">

@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { formatUtcDay } from "./format";
-import type { TaskView } from "./model";
+import { GROUP_HUES, type TaskView } from "./model";
 import { AgentBadge } from "./record-parts";
 import { RecordLink } from "./url-state";
 
@@ -33,7 +33,7 @@ function plannedDates({ start_date: start, due_date: due }: TaskView): string {
   return "No planned dates";
 }
 
-/** The planned dates of the given tasks as bars, in the order given. Bars take the assignee's tone. */
+/** The planned dates of the given tasks as bars, in the order given. Bars take their group's color. */
 export function TaskTimeline({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
   const plan = planWindow(tasks);
   if (plan === null) {
@@ -67,7 +67,7 @@ export function TaskTimeline({ tasks }: { tasks: readonly TaskView[] }): ReactNo
                 </RecordLink>
                 <span className="gantt-meta">
                   <code className="record-id">{t.id}</code>
-                  {t.assignee !== null && <AgentBadge agent={t.assignee} variant="chip" />}
+                  {t.assignee !== null && <AgentBadge agent={t.assignee} variant="person" />}
                 </span>
                 <span className="gantt-dates">{plannedDates(t)}</span>
               </div>
@@ -80,7 +80,7 @@ export function TaskTimeline({ tasks }: { tasks: readonly TaskView[] }): ReactNo
                 {t.start_date !== null && t.due_date !== null && (
                   <span
                     className="gantt-bar"
-                    data-tone={t.assignee?.tone ?? undefined}
+                    data-hue={GROUP_HUES[t.group]}
                     style={{
                       gridColumn: `${dayIndex(t.start_date, plan.start) + 1} / ${dayIndex(t.due_date, plan.start) + 2}`,
                     }}

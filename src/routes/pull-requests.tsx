@@ -15,6 +15,8 @@ function prQuery(filters: PrFilters): PrQuery {
   return { repo: filters.repo, state: filters.state };
 }
 
+const DESCRIPTION = "Pull requests as the last GitHub sync stored them, newest first.";
+
 export const Route = createFileRoute("/pull-requests")({
   validateSearch: (raw) => lists.prs.validate(raw),
   loaderDeps: ({ search }) => lists.prs.filters(search),
@@ -26,12 +28,12 @@ export const Route = createFileRoute("/pull-requests")({
       { title: "Pull requests | HX-CentCom" },
       {
         name: "description",
-        content: "Pull requests as the last GitHub sync stored them, newest first.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Pull requests | HX-CentCom" },
       {
         property: "og:description",
-        content: "Pull requests as the last GitHub sync stored them, newest first.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -45,7 +47,7 @@ function PullRequestsPage(): ReactNode {
   const { items, counts } = pages.data;
 
   return (
-    <Workspace page="Pull requests">
+    <Workspace page="Pull requests" description={DESCRIPTION}>
       <FilterBar
         search={lists.prs}
         counts={{ repo: counts?.byRepo ?? {}, state: counts?.byState ?? {} }}

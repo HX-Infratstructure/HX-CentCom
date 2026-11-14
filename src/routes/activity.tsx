@@ -35,6 +35,8 @@ function activityPages(query: ActivityQueryInput) {
   });
 }
 
+const DESCRIPTION = "Every logged change, newest first: who changed which record, and when.";
+
 export const Route = createFileRoute("/activity")({
   validateSearch: (raw) => lists.activity.validate(raw),
   loaderDeps: ({ search }) => lists.activity.filters(search),
@@ -49,12 +51,12 @@ export const Route = createFileRoute("/activity")({
       { title: "Activity | HX-CentCom" },
       {
         name: "description",
-        content: "Every logged change, newest first: who changed which record, and when.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Activity | HX-CentCom" },
       {
         property: "og:description",
-        content: "Every logged change, newest first: who changed which record, and when.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -74,7 +76,7 @@ function ActivityPage(): ReactNode {
   const { items: entries, counts } = pages.data;
 
   return (
-    <Workspace page="Activity">
+    <Workspace page="Activity" description={DESCRIPTION}>
       <FilterBar
         search={lists.activity}
         counts={{ actor: counts?.byActor ?? {}, entity: counts?.byEntity ?? {} }}

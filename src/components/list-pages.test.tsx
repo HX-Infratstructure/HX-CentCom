@@ -471,7 +471,7 @@ const LIST_PAGES: Readonly<Record<string, ListPage>> = {
     url: "/tasks",
     seed: [[["updates", {}], firstPage(updates([], 0))]],
     list: main,
-    rows: () => within(main()).queryAllByRole("heading", { level: 4 }),
+    rows: () => within(main()).queryAllByRole("rowheader"),
     paged: false,
     filtered: {
       url: "/tasks?agent=atlas",

@@ -23,8 +23,21 @@ const NAV = [
   { to: "/activity", label: "Activity", icon: History, exact: false },
 ] as const;
 
-/** The app chrome. `page` is the page's h1; the active nav item comes from the router. */
-export function Workspace({ page, children }: { page: string; children: ReactNode }): ReactNode {
+/**
+ * The app chrome: the page nav, then the page on a white board surface under a board header. `page` is the page's h1,
+ * `description` its one-line purpose, and `views` the page's view tabs. The active nav item comes from the router.
+ */
+export function Workspace({
+  page,
+  description,
+  views,
+  children,
+}: {
+  page: string;
+  description?: string | undefined;
+  views?: ReactNode;
+  children: ReactNode;
+}): ReactNode {
   return (
     <div className="app-shell">
       <aside className="workspace-rail">
@@ -54,12 +67,18 @@ export function Workspace({ page, children }: { page: string; children: ReactNod
         <p className="env-label">Dev/test environment</p>
       </aside>
       <div className="work-area">
-        <header className="topbar">
-          {/* Focusable so a sheet whose opener is gone can return focus to the page. */}
-          <h1 tabIndex={-1}>{page}</h1>
-          <OwnerKeyControl />
-        </header>
-        <main className="page">{children}</main>
+        <div className="board-surface">
+          <header className="board-header">
+            <div className="board-heading">
+              {/* Focusable so a sheet whose opener is gone can return focus to the page. */}
+              <h1 tabIndex={-1}>{page}</h1>
+              {description !== undefined && <p className="board-description">{description}</p>}
+            </div>
+            <OwnerKeyControl />
+            {views}
+          </header>
+          <main className="page">{children}</main>
+        </div>
       </div>
     </div>
   );

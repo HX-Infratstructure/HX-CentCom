@@ -1,4 +1,5 @@
 import { useCallback, useId, type ReactNode } from "react";
+import { ChartGantt, SquareKanban, Table2 } from "lucide-react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   useSuspenseInfiniteQuery,
@@ -12,7 +13,7 @@ import { lists } from "@/components/lists";
 import type { Directory } from "@/components/model";
 import { useOpenRecord } from "@/components/open-record";
 import type { UpdatesPage } from "@/components/server-types";
-import { KanbanBoard, TaskDetail, UPDATE_LOG_ID } from "@/components/task";
+import { KanbanBoard, TaskDetail, TaskTable, UPDATE_LOG_ID } from "@/components/task";
 import { TaskTimeline } from "@/components/timeline";
 import { UpdateList } from "@/components/update-item";
 import { FilterBar } from "@/components/url-state";
@@ -22,15 +23,24 @@ import { tasksQuery, updatePages, type UpdateQuery } from "@/lib/task-data";
 const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
 
 type TasksSearch = ReturnType<typeof lists.board.validate> &
-  ReturnType<typeof lists.updateLog.validate> & { view?: "timeline" | undefined };
+  ReturnType<typeof lists.updateLog.validate> & { view?: "kanban" | "timeline" | undefined };
+
+const DESCRIPTION = "Engineering tasks by group and plan, with every update agents posted.";
+
+/** The main table is the default, so it has no `view` value. */
+const VIEWS = [
+  { view: undefined, label: "Main table", icon: Table2 },
+  { view: "kanban", label: "Kanban", icon: SquareKanban },
+  { view: "timeline", label: "Timeline", icon: ChartGantt },
+] as const;
 
 export const Route = createFileRoute("/tasks")({
   validateSearch: (raw): TasksSearch => ({
     ...lists.board.validate(raw),
     ...lists.updateLog.validate(raw),
-    ...(raw["view"] === "timeline" ? { view: "timeline" } : {}),
+    ...(raw["view"] === "kanban" || raw["view"] === "timeline" ? { view: raw["view"] } : {}),
   }),
-  // The board and the timeline filter the workspace in the browser, so only the update log's query is a dependency.
+  // The three views filter the workspace in the browser, so only the update log's query is a dependency.
   loaderDeps: ({ search }): UpdateQuery => {
     const log = lists.updateLog.filters(search);
     return {
@@ -52,12 +62,12 @@ export const Route = createFileRoute("/tasks")({
       { title: "Tasks | HX-CentCom" },
       {
         name: "description",
-        content: "Engineering tasks by group and plan, with every update agents posted.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Tasks | HX-CentCom" },
       {
         property: "og:description",
-        content: "Engineering tasks by group and plan, with every update agents posted.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -74,54 +84,54 @@ function TasksPage(): ReactNode {
     agent: (t) => t.assignee?.id ?? null,
     repo: (t) => t.repository,
   });
-  const view = search.view ?? "board";
+  const view = search.view;
 
   return (
-    <Workspace page="Tasks">
-      <FilterBar
-        search={lists.board}
-        counts={board.counts}
-        label="Filter tasks"
-        agents={ws.agents}
-      />
-      <nav aria-label="Task view" className="facet-tabs view-tabs">
-        <ul>
-          <li>
-            <Link
-              from={Route.fullPath}
-              to="."
-              search={(prev) => ({ ...prev, view: undefined })}
-              resetScroll={false}
-              activeOptions={{ exact: true }}
-              className="facet-tab"
-            >
-              Board
-            </Link>
-          </li>
-          <li>
-            <Link
-              from={Route.fullPath}
-              to="."
-              search={(prev) => ({ ...prev, view: "timeline" as const })}
-              resetScroll={false}
-              activeOptions={{ exact: true }}
-              className="facet-tab"
-            >
-              Timeline
-            </Link>
-          </li>
-        </ul>
-      </nav>
+    <Workspace page="Tasks" description={DESCRIPTION} views={<ViewTabs />}>
+      <div className="board-toolbar">
+        <FilterBar
+          search={lists.board}
+          counts={board.counts}
+          label="Filter tasks"
+          agents={ws.agents}
+        />
+      </div>
       {board.items.length === 0 ? (
         <EmptyState>No tasks match these filters.</EmptyState>
-      ) : view === "board" ? (
+      ) : view === "kanban" ? (
         <KanbanBoard tasks={board.items} />
-      ) : (
+      ) : view === "timeline" ? (
         <TaskTimeline tasks={board.items} />
+      ) : (
+        <TaskTable tasks={board.items} />
       )}
       <UpdateLog dir={ws} />
       <TaskDetail detail={detailFrom(record.id, ws.tasks)} onClose={record.close} />
     </Workspace>
+  );
+}
+
+function ViewTabs(): ReactNode {
+  return (
+    <nav aria-label="Task view" className="view-tabs">
+      <ul>
+        {VIEWS.map(({ view, label, icon: Icon }) => (
+          <li key={label}>
+            <Link
+              from={Route.fullPath}
+              to="."
+              search={(prev) => ({ ...prev, view })}
+              resetScroll={false}
+              activeOptions={{ exact: true }}
+              className="view-tab"
+            >
+              <Icon aria-hidden="true" />
+              {label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
 

@@ -29,6 +29,33 @@ export const TASK_GROUP_LABELS = {
   done: "Done",
 } as const satisfies Record<S.TaskGroup, string>;
 
+/**
+ * The six board colors of monday.com's status palette. `[data-hue]` in styles.css maps each to a bright edge for
+ * group rows and bars, and to a darker ink that white text reads on at 4.5:1.
+ */
+export type BoardHue = "green" | "orange" | "red" | "purple" | "blue" | "grey";
+
+export const GROUP_HUES = {
+  backlog: "grey",
+  in_progress: "blue",
+  ready_for_owner: "purple",
+  done: "green",
+} as const satisfies Record<S.TaskGroup, BoardHue>;
+
+/** Status labels are rows with no color (seed.ts), so the board colors the seeded labels by id. */
+const STATUS_HUES: ReadonlyMap<string, BoardHue> = new Map([
+  ["Complete", "green"],
+  ["In progress", "orange"],
+  ["Blocked", "red"],
+  ["Waiting", "grey"],
+  ["Ready for owner", "purple"],
+]);
+
+/** Any other label is green when it counts as done, otherwise blue. */
+export function statusHue(status: StatusRef): BoardHue {
+  return STATUS_HUES.get(status.id) ?? (status.isDone ? "green" : "blue");
+}
+
 export const BLOCKED_ON_LABELS = {
   owner_decision: "Waiting on an owner decision",
   assignment: "Needs an owner to assign it",
