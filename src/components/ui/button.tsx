@@ -19,6 +19,7 @@ const buttonVariants = cva(
         rail: "rail-button justify-start bg-transparent text-[var(--rail-text)] hover:bg-[var(--rail-active)] data-[active=true]:bg-[var(--rail-active)] data-[active=true]:text-primary-foreground",
         agent: "agent-card whitespace-normal",
         quiet: "text-muted-foreground hover:text-foreground hover:bg-secondary shadow-none",
+        record: "text-muted-foreground hover:text-foreground hover:bg-secondary shadow-none",
         tab: "tab bg-transparent hover:bg-transparent shadow-none",
 
       },
@@ -27,6 +28,7 @@ const buttonVariants = cva(
         sm: "h-8 rounded-md px-3 text-xs",
         lg: "h-10 rounded-md px-8",
         icon: "h-9 w-9",
+        record: "h-8 w-4",
       },
     },
     defaultVariants: {
