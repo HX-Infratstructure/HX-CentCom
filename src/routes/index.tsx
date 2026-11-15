@@ -204,7 +204,7 @@ function SummaryWidgets({
         <li data-hue="blue">
           <FilterLink
             search={lists.openTasks}
-            set={{}}
+            set={{ attention: undefined }}
             hash={OPEN_TASKS_ID}
             className="number-widget"
           >

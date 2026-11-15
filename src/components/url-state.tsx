@@ -134,9 +134,22 @@ const FACET_ICONS = {
   days: CalendarDays,
 } as const satisfies Record<Facet["kind"], LucideIcon>;
 
+const VIEWPORT_MARGIN = 16;
+
+/** Slides an open panel left until it ends inside the viewport, but never past the viewport's left margin. */
+function keepInViewport(menu: HTMLDetailsElement | null, panel: HTMLDivElement | null): void {
+  if (menu?.open !== true || panel === null) return;
+  panel.style.translate = "";
+  const { left, right } = panel.getBoundingClientRect();
+  const width = document.documentElement.clientWidth;
+  const shift = Math.max(VIEWPORT_MARGIN - left, Math.min(0, width - VIEWPORT_MARGIN - right));
+  if (shift !== 0) panel.style.translate = `${shift}px`;
+}
+
 /**
  * A toolbar button that opens its options below it. A native disclosure, so the button states its expanded state and
- * works without script; script only closes it on Escape, on a click outside, and after an option is chosen.
+ * works without script; script only closes it on Escape, on a click outside, and after an option is chosen, and slides
+ * the open panel back inside a narrow viewport.
  */
 function ToolbarMenu({
   kind,
@@ -154,6 +167,7 @@ function ToolbarMenu({
   children: ReactNode;
 }): ReactNode {
   const ref = useRef<HTMLDetailsElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const Icon = FACET_ICONS[kind];
   useEffect(() => {
     const close = (event: Event) => {
@@ -179,6 +193,7 @@ function ToolbarMenu({
       ref={ref}
       className="toolbar-menu"
       data-active={active === undefined ? undefined : "true"}
+      onToggle={() => keepInViewport(ref.current, panelRef.current)}
     >
       <summary className="toolbar-button">
         <Icon aria-hidden="true" className="toolbar-icon" />
@@ -187,6 +202,7 @@ function ToolbarMenu({
         <ChevronDown aria-hidden="true" className="toolbar-caret" />
       </summary>
       <div
+        ref={panelRef}
         className="toolbar-panel"
         onClick={(event) => {
           if (event.target instanceof Element && event.target.closest("a") !== null) {

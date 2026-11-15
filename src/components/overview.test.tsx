@@ -654,6 +654,16 @@ describe("the overview's number widgets", () => {
       "/pull-requests?state=open",
     );
   });
+
+  it("opens every open task from the Open tasks widget, dropping the attention filter but keeping the feed's", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/?attention=blocked&agent=CC1");
+
+    const summary = within(screen.getByRole("region", { name: "Summary" }));
+    expect(summary.getByRole("link", { name: "Open tasks 5" })).toHaveAttribute(
+      "href",
+      "/?agent=CC1#open-tasks",
+    );
+  });
 });
 
 describe("the overview's open pull requests", () => {
