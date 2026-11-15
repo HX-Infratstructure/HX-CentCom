@@ -2114,6 +2114,17 @@
     background: var(--hue-ink);
     color: var(--primary-foreground);
   }
+  /* A bar the window cuts runs flush to the track's edge with a square end, so it does not look as if it stops there. */
+  .gantt-bar[data-cut-before] {
+    margin-inline-start: 0;
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+  }
+  .gantt-bar[data-cut-after] {
+    margin-inline-end: 0;
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+  }
   /* Proven share as a darker band, so the white label keeps its contrast across the whole bar. */
   .bar-fill {
     position: absolute;
