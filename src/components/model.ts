@@ -196,6 +196,7 @@ export const ACTIVITY_ENTITY_LABELS = {
 } as const satisfies Record<S.ActivityEntity, string>;
 
 export const ACTIVITY_ACTION_LABELS = {
+  "task.create": "Task created",
   "task.progress": "Progress posted",
   "requirement.set": "Requirement set",
   "decision.request": "Decision requested",
@@ -212,6 +213,7 @@ export const ACTIVITY_ACTION_LABELS = {
 
 /** The action pill's color: what was recorded, by its kind of change, so a log reads at a glance. */
 export const ACTIVITY_ACTION_HUES = {
+  "task.create": "blue",
   "task.progress": "blue",
   "requirement.set": "blue",
   "decision.request": "purple",

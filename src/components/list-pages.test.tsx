@@ -77,8 +77,8 @@ function task(
 }
 
 /**
- * The seed's seven tasks, their ids and titles, with invented agents. No API creates tasks (docs/ARCHITECTURE.md), so
- * the board shows this whole set.
+ * The seed's seven tasks, their ids and titles, with invented agents. The board shows the whole task set
+ * (docs/ARCHITECTURE.md).
  */
 const TASKS: readonly Task[] = [
   task({

@@ -23,6 +23,7 @@ import { Route as ApiV1DecisionsRouteImport } from './routes/api/v1/decisions'
 import { Route as ApiV1KeysRouteImport } from './routes/api/v1/keys'
 import { Route as ApiV1LessonsRouteImport } from './routes/api/v1/lessons'
 import { Route as ApiV1RaidRouteImport } from './routes/api/v1/raid'
+import { Route as ApiV1TasksRouteImport } from './routes/api/v1/tasks'
 import { Route as ApiV1UpdatesRouteImport } from './routes/api/v1/updates'
 import { Route as ApiV1WorkspaceRouteImport } from './routes/api/v1/workspace'
 import { Route as ApiV1GithubPrsRouteImport } from './routes/api/v1/github/prs'
@@ -105,6 +106,11 @@ const ApiV1RaidRoute = ApiV1RaidRouteImport.update({
   path: '/api/v1/raid',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1TasksRoute = ApiV1TasksRouteImport.update({
+  id: '/api/v1/tasks',
+  path: '/api/v1/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiV1UpdatesRoute = ApiV1UpdatesRouteImport.update({
   id: '/api/v1/updates',
   path: '/api/v1/updates',
@@ -136,9 +142,9 @@ const ApiV1RaidIdRoute = ApiV1RaidIdRouteImport.update({
   getParentRoute: () => ApiV1RaidRoute,
 } as any)
 const ApiV1TasksIdRoute = ApiV1TasksIdRouteImport.update({
-  id: '/api/v1/tasks/$id',
-  path: '/api/v1/tasks/$id',
-  getParentRoute: () => rootRouteImport,
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiV1TasksRoute,
 } as any)
 const ApiV1ActivityIdRevertRoute = ApiV1ActivityIdRevertRouteImport.update({
   id: '/$id/revert',
@@ -177,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
   '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
   '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
+  '/api/v1/tasks': typeof ApiV1TasksRouteWithChildren
   '/api/v1/updates': typeof ApiV1UpdatesRoute
   '/api/v1/workspace': typeof ApiV1WorkspaceRoute
   '/api/v1/github/prs': typeof ApiV1GithubPrsRoute
@@ -204,6 +211,7 @@ export interface FileRoutesByTo {
   '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
   '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
   '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
+  '/api/v1/tasks': typeof ApiV1TasksRouteWithChildren
   '/api/v1/updates': typeof ApiV1UpdatesRoute
   '/api/v1/workspace': typeof ApiV1WorkspaceRoute
   '/api/v1/github/prs': typeof ApiV1GithubPrsRoute
@@ -232,6 +240,7 @@ export interface FileRoutesById {
   '/api/v1/keys': typeof ApiV1KeysRouteWithChildren
   '/api/v1/lessons': typeof ApiV1LessonsRouteWithChildren
   '/api/v1/raid': typeof ApiV1RaidRouteWithChildren
+  '/api/v1/tasks': typeof ApiV1TasksRouteWithChildren
   '/api/v1/updates': typeof ApiV1UpdatesRoute
   '/api/v1/workspace': typeof ApiV1WorkspaceRoute
   '/api/v1/github/prs': typeof ApiV1GithubPrsRoute
@@ -261,6 +270,7 @@ export interface FileRouteTypes {
     | '/api/v1/keys'
     | '/api/v1/lessons'
     | '/api/v1/raid'
+    | '/api/v1/tasks'
     | '/api/v1/updates'
     | '/api/v1/workspace'
     | '/api/v1/github/prs'
@@ -288,6 +298,7 @@ export interface FileRouteTypes {
     | '/api/v1/keys'
     | '/api/v1/lessons'
     | '/api/v1/raid'
+    | '/api/v1/tasks'
     | '/api/v1/updates'
     | '/api/v1/workspace'
     | '/api/v1/github/prs'
@@ -315,6 +326,7 @@ export interface FileRouteTypes {
     | '/api/v1/keys'
     | '/api/v1/lessons'
     | '/api/v1/raid'
+    | '/api/v1/tasks'
     | '/api/v1/updates'
     | '/api/v1/workspace'
     | '/api/v1/github/prs'
@@ -343,10 +355,10 @@ export interface RootRouteChildren {
   ApiV1KeysRoute: typeof ApiV1KeysRouteWithChildren
   ApiV1LessonsRoute: typeof ApiV1LessonsRouteWithChildren
   ApiV1RaidRoute: typeof ApiV1RaidRouteWithChildren
+  ApiV1TasksRoute: typeof ApiV1TasksRouteWithChildren
   ApiV1UpdatesRoute: typeof ApiV1UpdatesRoute
   ApiV1WorkspaceRoute: typeof ApiV1WorkspaceRoute
   ApiV1GithubPrsRoute: typeof ApiV1GithubPrsRoute
-  ApiV1TasksIdRoute: typeof ApiV1TasksIdRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -449,6 +461,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1RaidRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/tasks': {
+      id: '/api/v1/tasks'
+      path: '/api/v1/tasks'
+      fullPath: '/api/v1/tasks'
+      preLoaderRoute: typeof ApiV1TasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/updates': {
       id: '/api/v1/updates'
       path: '/api/v1/updates'
@@ -493,10 +512,10 @@ declare module '@tanstack/react-router' {
     }
     '/api/v1/tasks/$id': {
       id: '/api/v1/tasks/$id'
-      path: '/api/v1/tasks/$id'
+      path: '/$id'
       fullPath: '/api/v1/tasks/$id'
       preLoaderRoute: typeof ApiV1TasksIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiV1TasksRoute
     }
     '/api/v1/activity/$id/revert': {
       id: '/api/v1/activity/$id/revert'
@@ -603,6 +622,18 @@ const ApiV1TasksIdRouteWithChildren = ApiV1TasksIdRoute._addFileChildren(
   ApiV1TasksIdRouteChildren,
 )
 
+interface ApiV1TasksRouteChildren {
+  ApiV1TasksIdRoute: typeof ApiV1TasksIdRouteWithChildren
+}
+
+const ApiV1TasksRouteChildren: ApiV1TasksRouteChildren = {
+  ApiV1TasksIdRoute: ApiV1TasksIdRouteWithChildren,
+}
+
+const ApiV1TasksRouteWithChildren = ApiV1TasksRoute._addFileChildren(
+  ApiV1TasksRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
@@ -618,10 +649,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1KeysRoute: ApiV1KeysRouteWithChildren,
   ApiV1LessonsRoute: ApiV1LessonsRouteWithChildren,
   ApiV1RaidRoute: ApiV1RaidRouteWithChildren,
+  ApiV1TasksRoute: ApiV1TasksRouteWithChildren,
   ApiV1UpdatesRoute: ApiV1UpdatesRoute,
   ApiV1WorkspaceRoute: ApiV1WorkspaceRoute,
   ApiV1GithubPrsRoute: ApiV1GithubPrsRoute,
-  ApiV1TasksIdRoute: ApiV1TasksIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

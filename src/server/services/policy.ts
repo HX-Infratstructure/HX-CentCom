@@ -3,10 +3,14 @@ import type { Actor } from "./actor";
 import { ServiceError } from "./errors";
 import type { LockedRoot } from "./pipeline";
 
-/** "own-row" admits the owner and any agent that the locked row names as one of its editors (`rowScope`). */
-type Rule = "owner" | "own-row" | "any";
+/**
+ * "own-row" admits the owner and any agent that the locked row names as one of its editors (`rowScope`). "self" admits
+ * the owner and an agent that creates the row for itself (`taskAssignee`).
+ */
+type Rule = "owner" | "own-row" | "self" | "any";
 
 export const POLICY: Readonly<Record<ActivityAction, Rule>> = {
+  "task.create": "self",
   "task.progress": "own-row",
   "requirement.set": "own-row",
   "decision.request": "any",
@@ -75,4 +79,18 @@ export function authorizeTaskWrite(
 ): void {
   if (actor.role === "owner" || task.agent === actor.agentId) return;
   throw ServiceError.forbidden(taskRefusal(actor.agentId, task.id));
+}
+
+/**
+ * The "self" rule of task.create: an agent registers only its own work, so the task's agent is the caller. The owner
+ * names any agent, or none for an unassigned task; createTaskPlan checks that the agent is active.
+ */
+export function taskAssignee(actor: Actor, agentId: string | undefined): string | null {
+  if (actor.role === "owner") return agentId ?? null;
+  if (agentId !== undefined && agentId !== actor.agentId) {
+    throw ServiceError.forbidden(
+      `${actor.agentId} may create tasks only for itself; ${agentId} is another agent.`,
+    );
+  }
+  return actor.agentId;
 }

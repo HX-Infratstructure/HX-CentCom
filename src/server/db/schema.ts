@@ -53,6 +53,7 @@ export const ACTIVITY_ENTITIES = [
   "lesson",
 ] as const;
 export const ACTIVITY_ACTIONS = [
+  "task.create",
   "task.progress",
   "requirement.set",
   "decision.request",

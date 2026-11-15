@@ -5,6 +5,7 @@ export const ERROR_STATUS = {
   not_found: 404,
   version_conflict: 409,
   not_revertible: 409,
+  conflict: 409,
   idempotency_mismatch: 422,
 } as const;
 
@@ -86,6 +87,11 @@ export class ServiceError extends Error {
       status: ERROR_STATUS.not_revertible,
       message: `Activity ${activityId} cannot be reverted: ${reason}.`,
     });
+  }
+
+  /** A create whose id is taken. */
+  static conflict(message: string): ServiceError {
+    return new ServiceError({ code: "conflict", status: ERROR_STATUS.conflict, message });
   }
 
   static idempotencyMismatch(): ServiceError {

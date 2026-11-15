@@ -183,6 +183,42 @@ export const decideInput = z.object({
   sourceUrl: sourceRef,
 });
 
+/** A calendar date that the `date` column stores: 2026-02-31 is refused here instead of by the cast. */
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "must be a YYYY-MM-DD date")
+  .refine((d) => {
+    const parsed = new Date(`${d}T00:00:00Z`);
+    return (
+      d >= "0001-01-01" && !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(d)
+    );
+  }, "must be a real calendar date in years 0001-9999");
+
+/** F-TASKS. The task's agent is not a field an agent sets: `agentId` is the owner's assignment (`taskAssignee`). */
+export const createTaskInput = z
+  .object({
+    id: z
+      .string()
+      .min(3)
+      .max(24)
+      .regex(/^[A-Z0-9]+-[A-Z0-9]+$/, "must be uppercase letters or digits, a dash, then more"),
+    title: z.string().trim().min(1).max(200),
+    repository: z.string().trim().min(1).max(100).optional(),
+    host: z.string().trim().min(1).max(32).optional(),
+    startDate: isoDate.optional(),
+    dueDate: isoDate.optional(),
+    status: id.default("Waiting"),
+    note: z.string().trim().min(1).max(4000).optional(),
+    sourceUrl: sourceRef,
+    agentId: id.optional(),
+    progress: noTypedProgress,
+  })
+  .superRefine((v, ctx) => {
+    if (v.startDate !== undefined && v.dueDate !== undefined && v.dueDate < v.startDate) {
+      ctx.addIssue({ code: "custom", path: ["dueDate"], message: "must not be before startDate" });
+    }
+  });
+
 export const issueKeyInput = z.object({ agentId: id, label: z.string().trim().min(1).max(100) });
 export const revokeKeyInput = z.object({ keyId: z.string().uuid() });
 
@@ -230,6 +266,7 @@ export type PostProgressInput = z.input<typeof postProgressInput>;
 export type SetRequirementInput = z.input<typeof setRequirementInput>;
 export type RequestDecisionInput = z.input<typeof requestDecisionInput>;
 export type DecideInput = z.input<typeof decideInput>;
+export type CreateTaskInput = z.input<typeof createTaskInput>;
 export type UpdateQueryInput = z.input<typeof updateQueryInput>;
 export type ActivityQueryInput = z.input<typeof activityQueryInput>;
 export type DecisionQueryInput = z.input<typeof decisionQueryInput>;
