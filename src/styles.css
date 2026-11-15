@@ -801,6 +801,13 @@
     min-width: 300px;
     padding: 0 8px 6px;
   }
+  /* Below 364px the 300px floor plus the panel's 16px padding exceeds the panel's 100vw - 48px cap. */
+  @media (max-width: 363px) {
+    .facet-days {
+      grid-template-columns: minmax(0, 1fr);
+      min-width: 0;
+    }
+  }
   .facet-days legend {
     float: left;
     grid-column: 1 / -1;
