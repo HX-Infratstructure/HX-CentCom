@@ -3,7 +3,8 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
-import type { ActivityCounts, ActivityEntry, ActivityPage, Agent, Workspace } from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { ActivityCounts, ActivityEntry, ActivityPage, Agent } from "./server-types";
 
 const server = vi.hoisted(() => ({ listWorkspace: vi.fn(), listActivity: vi.fn() }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
@@ -20,20 +21,7 @@ const AGENTS: readonly Agent[] = [
   { id: "beacon", display_name: "Beacon", role: "agent", color: "sky", active: true },
 ];
 
-const WORKSPACE: Workspace = {
-  tasks: [],
-  updates: [],
-  updatesCursor: null,
-  requirements: [],
-  decisions: [],
-  agents: AGENTS,
-  statusLabels: [],
-  repos: [],
-  counts: {
-    updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
-    decisions: { total: 0, byGateType: {}, byStatus: {} },
-  },
-};
+const WORKSPACE = workspaceWith({ agents: AGENTS });
 
 let serial = 0;
 /** A row as listActivity returns it. `revertible` is the server's verdict, so a row the server marks revertible says so. */

@@ -3,6 +3,7 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { routeTree } from "@/routeTree.gen";
+import { workspaceWith } from "@/test/ui-fixtures";
 import type {
   ActivityEntry,
   ActivityPage,
@@ -19,7 +20,6 @@ import type {
   Task,
   TaskUpdate,
   UpdatesPage,
-  Workspace,
 } from "./server-types";
 
 /**
@@ -142,20 +142,7 @@ const TASKS: readonly Task[] = [
   }),
 ];
 
-const WORKSPACE: Workspace = {
-  tasks: TASKS,
-  updates: [],
-  updatesCursor: null,
-  requirements: [],
-  decisions: [],
-  agents: AGENTS,
-  statusLabels: STATUSES,
-  repos: [],
-  counts: {
-    updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
-    decisions: { total: 0, byGateType: {}, byStatus: {} },
-  },
-};
+const WORKSPACE = workspaceWith({ tasks: TASKS, agents: AGENTS, statusLabels: STATUSES });
 
 function update(n: number, fields: Partial<TaskUpdate> = {}): TaskUpdate {
   return {

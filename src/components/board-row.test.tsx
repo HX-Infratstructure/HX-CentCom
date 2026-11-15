@@ -3,15 +3,8 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
-import type {
-  Agent,
-  Decision,
-  DecisionsPage,
-  RaidItem,
-  RaidPage,
-  Task,
-  Workspace,
-} from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { Agent, Decision, DecisionsPage, RaidItem, RaidPage, Task } from "./server-types";
 
 const server = vi.hoisted(() => ({ getDecision: vi.fn(), getRaidItem: vi.fn() }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
@@ -104,20 +97,12 @@ const RAID_ITEM: RaidItem = {
   updated_at: AT,
 };
 
-const WORKSPACE: Workspace = {
+const WORKSPACE = workspaceWith({
   tasks: [TASK],
-  updates: [],
-  updatesCursor: null,
-  requirements: [],
   decisions: [DECISION],
   agents: AGENTS,
   statusLabels: [{ id: "In progress", label: "In progress", is_done: false, color: null }],
-  repos: [],
-  counts: {
-    updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
-    decisions: { total: 1, byGateType: {}, byStatus: {} },
-  },
-};
+});
 
 const DECISIONS: DecisionsPage = {
   items: [DECISION],

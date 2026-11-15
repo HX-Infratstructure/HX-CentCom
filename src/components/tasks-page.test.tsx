@@ -3,7 +3,8 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, fireEvent, isInaccessible, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
-import type { Agent, StatusLabel, Task, UpdatesPage, Workspace } from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { Agent, StatusLabel, Task, UpdatesPage } from "./server-types";
 
 // Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
 const AGENTS: readonly Agent[] = [
@@ -47,22 +48,8 @@ function task(fields: Pick<Task, "id" | "title"> & Partial<Task>): Task {
   };
 }
 
-function workspace(tasks: readonly Task[]): Workspace {
-  return {
-    tasks,
-    updates: [],
-    updatesCursor: null,
-    requirements: [],
-    decisions: [],
-    agents: AGENTS,
-    statusLabels: STATUSES,
-    repos: [],
-    counts: {
-      updates: NO_UPDATES.counts,
-      decisions: { total: 0, byGateType: {}, byStatus: {} },
-    },
-  };
-}
+const workspace = (tasks: readonly Task[]) =>
+  workspaceWith({ tasks, agents: AGENTS, statusLabels: STATUSES });
 
 /**
  * `updateDeps` is the route's `loaderDeps` for `url`: only the agent filter reaches the update log's query key.

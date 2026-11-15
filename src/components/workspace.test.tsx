@@ -3,7 +3,8 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
-import type { GithubPrsPage, UpdatesPage, Workspace } from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { GithubPrsPage, UpdatesPage } from "./server-types";
 
 const server = vi.hoisted(() => ({
   listWorkspace: vi.fn(),
@@ -30,20 +31,9 @@ const NO_PRS: GithubPrsPage = {
 };
 
 // Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
-const WORKSPACE: Workspace = {
-  tasks: [],
-  updates: [],
-  updatesCursor: null,
-  requirements: [],
-  decisions: [],
+const WORKSPACE = workspaceWith({
   agents: [{ id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true }],
-  statusLabels: [],
-  repos: [],
-  counts: {
-    updates: NO_UPDATES.counts,
-    decisions: { total: 0, byGateType: {}, byStatus: {} },
-  },
-};
+});
 
 async function renderPage(url: string, h1: string) {
   server.listWorkspace.mockResolvedValue(WORKSPACE);

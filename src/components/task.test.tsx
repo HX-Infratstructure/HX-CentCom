@@ -3,14 +3,8 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { routeTree } from "@/routeTree.gen";
-import type {
-  Agent,
-  GithubPrsPage,
-  StatusLabel,
-  Task,
-  UpdatesPage,
-  Workspace,
-} from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { Agent, GithubPrsPage, StatusLabel, Task, UpdatesPage } from "./server-types";
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
@@ -64,22 +58,8 @@ const TASKS: readonly Task[] = [
   task({ id: "IRP-83", title: "Write the release notes", stale: null, commit_sha: null }),
 ];
 
-function workspace(tasks: readonly Task[]): Workspace {
-  return {
-    tasks,
-    updates: [],
-    updatesCursor: null,
-    requirements: [],
-    decisions: [],
-    agents: AGENTS,
-    statusLabels: STATUSES,
-    repos: [],
-    counts: {
-      updates: NO_UPDATES.counts,
-      decisions: { total: 0, byGateType: {}, byStatus: {} },
-    },
-  };
-}
+const workspace = (tasks: readonly Task[]) =>
+  workspaceWith({ tasks, agents: AGENTS, statusLabels: STATUSES });
 
 async function renderPage(url: string, page: string, tasks: readonly Task[] = TASKS) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
