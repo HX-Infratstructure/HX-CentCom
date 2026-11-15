@@ -338,12 +338,16 @@ describe("the task timeline", () => {
       .map((day) => day.textContent);
   }
 
-  /** The bar's grid placement, or null when the row draws no bar. */
-  function barOf(title: string): string | null {
+  /** The bar of the row whose title is `title`, or null when the row draws no bar. */
+  function barElementOf(title: string): HTMLElement | null {
     const row = screen.getByRole("link", { name: title }).closest("li");
     if (row === null) throw new Error(`No timeline row for ${title}`);
-    const label = within(row).queryByText(/ proven$|^No requirements$/);
-    return label?.parentElement?.style.gridColumn ?? null;
+    return within(row).queryByText(/ proven$|^No requirements$/)?.parentElement ?? null;
+  }
+
+  /** The bar's grid placement, or null when the row draws no bar. */
+  function barOf(title: string): string | null {
+    return barElementOf(title)?.style.gridColumn ?? null;
   }
 
   /** The planned-dates line of the row whose title is `title`. */
@@ -459,15 +463,13 @@ describe("the task timeline", () => {
     }
 
     /** The sides on which the window cuts the bar of the row whose title is `title`. */
-    function cutSides(title: string): readonly string[] {
-      const row = screen.getByRole("link", { name: title }).closest("li");
-      if (row === null) throw new Error(`No timeline row for ${title}`);
-      const bar = within(row).getByText(/ proven$|^No requirements$/).parentElement;
+    function cutSides(title: string): readonly ("before" | "after")[] {
+      const bar = barElementOf(title);
       if (bar === null) throw new Error(`No bar for ${title}`);
-      return ["before", "after"].filter((side) => bar.hasAttribute(`data-cut-${side}`));
+      return (["before", "after"] as const).filter((side) => bar.hasAttribute(`data-cut-${side}`));
     }
 
-    it("a bar cut at the window edge has a square end on each cut side", async () => {
+    it("a bar marks each side the window cuts", async () => {
       onTheFifteenth();
       await renderTasks("/tasks?view=timeline", [
         task({
