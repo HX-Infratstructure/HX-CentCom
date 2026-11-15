@@ -135,6 +135,19 @@ describe("createTask", () => {
     expect(await count(h, "engineering_tasks", "id = 'CC-90'")).toBe(0);
   });
 
+  it("names the valid statuses in the issue for an unknown status", async () => {
+    const err = await expectServiceError(
+      h.svc.createTask(h.as.CC1, body({ status: "Someday" })),
+      "invalid",
+      400,
+    );
+    expect(err.body.code === "invalid" ? err.body.issues : []).toContainEqual({
+      path: "status",
+      message:
+        "no status Someday; the valid statuses are Blocked, Complete, In progress, Ready for owner, Waiting",
+    });
+  });
+
   it("accepts a span of exactly 730 days", async () => {
     const result = await h.svc.createTask(
       h.as.CC1,

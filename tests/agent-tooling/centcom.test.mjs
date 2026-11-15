@@ -268,6 +268,15 @@ test("help prints usage and exits 0", async (t) => {
   assert.equal(r.code, 0);
 });
 
+test("help lists the seeded status labels for progress and task add", async (t) => {
+  const r = await run(BIN.cli, { args: ["help"], env: { HOME: makeHome(t).home } });
+  assert.match(
+    r.stdout,
+    /Status labels for progress --status and task add --status:\n {2}Blocked, Complete, In progress, Ready for owner, Waiting\n/,
+  );
+  assert.equal(r.code, 0);
+});
+
 test("whoami shows the agent the key resolves to", async (t) => {
   const r = await cli(t, { args: ["whoami"] });
   assert.deepEqual(r.requests.map(wire), [

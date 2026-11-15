@@ -85,6 +85,31 @@ describe("T2 (R5, R2): each update records the agent that made it", () => {
   });
 });
 
+describe("an unknown status in a progress post", () => {
+  it("is refused with 400 whose issue names the valid statuses, and writes nothing", async () => {
+    // Catches: CC2's 400 for --status "Run 2 PASS" that did not say which statuses exist.
+    const err = await expectServiceError(
+      h.svc.postProgress(
+        h.as.CC2,
+        "IRP-04",
+        { note: "unknown status", status: "Run 2 PASS", source: "api" },
+        {},
+      ),
+      "invalid",
+      400,
+    );
+    expect(err.message).toBe("The status is unknown.");
+    expect(err.body.code === "invalid" ? err.body.issues : []).toEqual([
+      {
+        path: "status",
+        message:
+          "no status Run 2 PASS; the valid statuses are Blocked, Complete, In progress, Ready for owner, Waiting",
+      },
+    ]);
+    expect(await updatesFor("IRP-04", "unknown status")).toEqual([]);
+  });
+});
+
 describe("T3 (R2): an agent writes only its own tasks and only requests decisions", () => {
   it("rejects CC1 posting progress to CC2's task with 403 and writes nothing", async () => {
     // Catches: missing scope check, so any agent could post to any task.
