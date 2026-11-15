@@ -3,6 +3,7 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
+import { workspaceWith } from "@/test/ui-fixtures";
 import type {
   Agent,
   Decision,
@@ -109,23 +110,8 @@ function pr(fields: Pick<PullRequest, "number" | "state"> & Partial<PullRequest>
   };
 }
 
-function workspace(rows: Partial<Pick<Workspace, "tasks" | "decisions">>): Workspace {
-  return {
-    tasks: [],
-    updates: [],
-    updatesCursor: null,
-    requirements: [],
-    decisions: [],
-    agents: AGENTS,
-    statusLabels: STATUSES,
-    repos: [],
-    counts: {
-      updates: NO_UPDATES.counts,
-      decisions: { total: rows.decisions?.length ?? 0, byGateType: {}, byStatus: {} },
-    },
-    ...rows,
-  };
-}
+const workspace = (rows: Partial<Pick<Workspace, "tasks" | "decisions">>) =>
+  workspaceWith({ agents: AGENTS, statusLabels: STATUSES, ...rows });
 
 /**
  * The route's own loader and selects run against the stored snapshot and pages. Only the open-PR read is stored, so a

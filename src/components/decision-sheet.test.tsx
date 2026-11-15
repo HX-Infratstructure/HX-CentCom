@@ -3,7 +3,8 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
-import type { Agent, Decision, DecisionsPage, Workspace } from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { Agent, Decision, DecisionsPage } from "./server-types";
 
 const server = vi.hoisted(() => ({
   listWorkspace: vi.fn(),
@@ -56,22 +57,7 @@ function decision(fields: Pick<Decision, "id" | "question"> & Partial<Decision>)
   };
 }
 
-function workspace(decisions: readonly Decision[]): Workspace {
-  return {
-    tasks: [],
-    updates: [],
-    updatesCursor: null,
-    requirements: [],
-    decisions,
-    agents: AGENTS,
-    statusLabels: [],
-    repos: [],
-    counts: {
-      updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
-      decisions: { total: decisions.length, byGateType: {}, byStatus: {} },
-    },
-  };
-}
+const workspace = (decisions: readonly Decision[]) => workspaceWith({ decisions, agents: AGENTS });
 
 async function renderDecisions(url: string, { owner = false } = {}) {
   if (owner) window.sessionStorage.setItem("hx-centcom.owner-key", OWNER_KEY);
