@@ -293,7 +293,17 @@ Records the owner's decision. Only the owner may call it. Accepts `Idempotency-K
 | `decisionText` | Yes      | The owner's words, 1 to 4000 characters                                  |
 | `sourceUrl`    | Yes      | Where the owner decided: an http or https URL, or `hx15:<absolute path>` |
 
-The server sets `decision_text`, `decision_source_url`, and `decided_at`, and posts one `system` update on each existing task in the decision's `blocks` list. Returns 200 with `{decision, systemUpdates}`. The owner can decide the same decision again, and each call replaces those fields. The API never sets `superseded_by`. After the decide commits, the server sends the [decision webhook](#decision-webhook) when it is configured.
+The server sets `decision_text`, `decision_source_url`, and `decided_at`, and posts one `system` update on each existing task in the decision's `blocks` list. Returns 200 with `{decision, systemUpdates}`.
+
+A decide with the status `Decided` or `Superseded` releases a task in `blocks` when the task's `blocked_on` is `owner_decision` and no other `Pending` decision blocks it. The server sets the task's `blocked_on` to `none` and adds 1 to the task's version. A `Deferred` decide keeps the block, and a task blocked on `dependency` or `assignment` stays blocked. The `system` update is `<decision id> <status>: <decision text>`, then a second line with the outcome, one of these:
+
+- `<task> is no longer blocked: <decision id> decided.` (or `superseded`)
+- `<task> stays blocked: <decision ids> still pending.`
+- `<task> stays blocked on owner_decision: <decision id> deferred.`
+- `<task> stays blocked on <blocked_on>.`
+- `<task> is not blocked.`
+
+The decide's activity row records the update ids under `after.effects.systemUpdateIds` and each released task's id and new version under `after.effects.unblockedTasks`. The owner can decide the same decision again, and each call replaces those fields. The API never sets `superseded_by`. After the decide commits, the server sends the [decision webhook](#decision-webhook) when it is configured.
 
 ### POST /api/v1/keys
 
