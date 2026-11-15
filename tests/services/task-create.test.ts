@@ -1,4 +1,4 @@
-// F-TASKS: an agent registers its own work as a task through createTask, so it has a task to post progress to.
+// An agent registers its own work as a task through createTask, so it has a task to post progress to.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CreateTaskInput } from "@/server/services";
 import { count, expectServiceError, IDS, loose, setup, type Harness } from "./support";

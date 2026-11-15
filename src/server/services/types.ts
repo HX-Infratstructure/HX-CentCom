@@ -218,7 +218,7 @@ export interface Services {
   myWork(actor: Actor | null, agentId?: string): Promise<MyWork>;
   listGithubPrs(query?: GithubPrQueryInput): Promise<GithubPrsPage>;
   /**
-   * F-TASKS. 401, 403 for an agent that names another agent, 400, 409 `conflict` for a taken id. An agent's task is
+   * 401, 403 for an agent that names another agent, 400, 409 `conflict` for a taken id. An agent's task is
    * its own; the owner assigns any active agent or none.
    */
   createTask(

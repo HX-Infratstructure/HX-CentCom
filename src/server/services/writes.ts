@@ -221,7 +221,7 @@ export function postProgressPlan(taskId: string, via: "mcp" | undefined): Progre
 }
 
 /**
- * F-TASKS: an agent registers its own work. Columns no input gives keep their defaults: blocked_on none, no commit,
+ * An agent registers its own work. Columns no input gives keep their defaults: blocked_on none, no commit,
  * version 1, no requirements. repository and host are NOT NULL, so an omitted one is stored as "".
  */
 export const createTaskPlan: CreatePlan<typeof createTaskInput, CreatedTask> = {

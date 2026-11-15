@@ -194,7 +194,7 @@ const isoDate = z
     );
   }, "must be a real calendar date in years 0001-9999");
 
-/** F-TASKS. The task's agent is not a field an agent sets: `agentId` is the owner's assignment (`taskAssignee`). */
+/** The task's agent is not a field an agent sets: `agentId` is the owner's assignment (`taskAssignee`). */
 export const createTaskInput = z
   .object({
     id: z

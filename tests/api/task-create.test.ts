@@ -1,4 +1,4 @@
-// F-TASKS: REST POST /api/v1/tasks, the MCP tool create_task and the CLI `centcom task add` create the same row.
+// REST POST /api/v1/tasks, the MCP tool create_task and the CLI `centcom task add` create the same row.
 import { execFile } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";

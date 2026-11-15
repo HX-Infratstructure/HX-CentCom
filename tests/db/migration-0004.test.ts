@@ -1,4 +1,4 @@
-// Migration 0004 widens the activity_log action CHECK by task.create (F-TASKS), additively, and its snapshot is the
+// Migration 0004 widens the activity_log action CHECK by task.create, additively, and its snapshot is the
 // newest one, so drizzle-kit has nothing left to generate (tests/revert/migration-0003.test.ts checks that).
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
