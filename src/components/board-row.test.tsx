@@ -1,0 +1,239 @@
+import { QueryClient, type QueryKey } from "@tanstack/react-query";
+import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { routeTree } from "@/routeTree.gen";
+import type {
+  Agent,
+  Decision,
+  DecisionsPage,
+  RaidItem,
+  RaidPage,
+  Task,
+  Workspace,
+} from "./server-types";
+
+const server = vi.hoisted(() => ({ getDecision: vi.fn(), getRaidItem: vi.fn() }));
+vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
+  getDecision: server.getDecision,
+  getRaidItem: server.getRaidItem,
+}));
+
+const REPO = "HX-Infratstructure/HX-CentCom";
+const AT = "2026-11-14T08:10:00.123456+00:00";
+
+// A name the seed roster does not use (tests/codebase/agent-display-names.test.ts).
+const AGENTS: readonly Agent[] = [
+  { id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true },
+];
+
+const TASK: Task = {
+  id: "IRP-04",
+  title: "Semantic controller · Stage 2 qualification",
+  agent: "atlas",
+  group: "in_progress",
+  status: "In progress",
+  repository: REPO,
+  host: "HX-15",
+  commit_sha: null,
+  blocked_on: "none",
+  start_date: null,
+  due_date: null,
+  note: null,
+  source_url: `https://github.com/${REPO}/issues/12`,
+  version: 1,
+  updated_at: AT,
+  progress: { proven: 0, total: 0, percent: null },
+  open: true,
+  stale: null,
+  attention: [],
+};
+
+const DECISION: Decision = {
+  id: "D-09",
+  subject: null,
+  question: "Merge the router change?",
+  summary: "The owner picks the gate before the next step runs.",
+  description:
+    "The requesting agent stops until the owner records a decision on the router change.",
+  gate_type: "merge",
+  options: [
+    { label: "Approve", recommended: false },
+    { label: "Hold", recommended: false },
+  ],
+  blocks: ["IRP-04"],
+  recommended_by: null,
+  requested_by: "atlas",
+  requested_at: AT,
+  source_url: `https://github.com/${REPO}/issues/10`,
+  status: "Pending",
+  decision_text: null,
+  decision_source_url: null,
+  decided_at: null,
+  superseded_by: null,
+  version: 1,
+};
+
+const RAID_ITEM: RaidItem = {
+  id: "RAID-01",
+  type: "risk",
+  title: "Run 1 could miss the HX-4 window",
+  summary: "The benchmark needs HX-4 for a full day.",
+  description: "HX-4 is shared with the shadow hook tests.",
+  owner_agent: "atlas",
+  status: "open",
+  severity: "medium",
+  severity_rated_by: null,
+  review_at: null,
+  source_url: `https://github.com/${REPO}/issues/10`,
+  created_by: "atlas",
+  task_ids: [],
+  decision_id: null,
+  probability: null,
+  impact: null,
+  mitigation: null,
+  validation_method: null,
+  validation_state: null,
+  resolution: null,
+  escalated: false,
+  blocked_task_id: null,
+  blocking_ref: null,
+  version: 1,
+  created_at: AT,
+  updated_at: AT,
+};
+
+const WORKSPACE: Workspace = {
+  tasks: [TASK],
+  updates: [],
+  updatesCursor: null,
+  requirements: [],
+  decisions: [DECISION],
+  agents: AGENTS,
+  statusLabels: [{ id: "In progress", label: "In progress", is_done: false, color: null }],
+  repos: [],
+  counts: {
+    updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
+    decisions: { total: 1, byGateType: {}, byStatus: {} },
+  },
+};
+
+const DECISIONS: DecisionsPage = {
+  items: [DECISION],
+  nextCursor: null,
+  counts: { total: 1, byGateType: { merge: 1 }, byStatus: { Pending: 1 } },
+};
+
+const RAID: RaidPage = {
+  items: [RAID_ITEM],
+  nextCursor: null,
+  counts: { total: 1, byType: { risk: 1 }, bySeverity: {}, byStatus: {}, byOwner: {}, byTask: {} },
+};
+
+const NO_UPDATES = { items: [], nextCursor: null, counts: WORKSPACE.counts.updates };
+
+function pages(page: unknown) {
+  return { pages: [page], pageParams: [undefined] };
+}
+
+const SEED: readonly (readonly [QueryKey, unknown])[] = [
+  [["task-workspace"], WORKSPACE],
+  [["updates", {}], pages(NO_UPDATES)],
+  [["decisions", "counts", {}], DECISIONS],
+  [["decisions", "list", { status: "Pending" }], pages(DECISIONS)],
+  [["raid", "list", {}], pages(RAID)],
+];
+
+async function renderPage(url: string, page: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+  });
+  for (const [key, data] of SEED) queryClient.setQueryData(key, data);
+  const router = createRouter({
+    routeTree,
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: [url] }),
+  });
+  await act(() => router.load());
+  // As in decision-sheet.test.tsx: the root route renders the whole document, and the open sheet is modal.
+  render(<RouterProvider router={router} />, { container: document as unknown as HTMLElement });
+  await screen.findByRole("heading", { level: 1, name: page, hidden: true });
+  return router;
+}
+
+/** The cell in `column` of the board row headed by `row`. */
+function cell(row: string, column: string): HTMLElement {
+  const header = screen.getByRole("rowheader", { name: new RegExp(row) });
+  const columns = within(header.closest("table") as HTMLElement)
+    .getAllByRole("columnheader")
+    .map((c) => c.textContent);
+  const found = (header.closest("tr") as HTMLElement).children[columns.indexOf(column)];
+  if (!(found instanceof HTMLElement)) throw new Error(`no ${column} cell in row ${row}`);
+  return found;
+}
+
+beforeEach(() => {
+  server.getDecision.mockResolvedValue(null);
+  server.getRaidItem.mockResolvedValue(null);
+});
+
+afterEach(() => {
+  window.getSelection()?.removeAllRanges();
+  server.getDecision.mockReset();
+  server.getRaidItem.mockReset();
+});
+
+describe("a click anywhere on a board row opens its record", () => {
+  it("Decisions: the Summary cell opens the decision sheet with the full description", async () => {
+    await renderPage("/decisions", "Decisions");
+
+    fireEvent.click(cell("D-09", "Summary"));
+
+    const sheet = await screen.findByRole("dialog", { name: "Merge the router change?" });
+    expect(within(sheet).getByRole("region", { name: "Description" })).toHaveTextContent(
+      DECISION.description,
+    );
+  });
+
+  it("RAID: the Severity cell opens the RAID sheet", async () => {
+    await renderPage("/raid", "RAID register");
+
+    fireEvent.click(cell("RAID-01", "Severity"));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Run 1 could miss the HX-4 window" }),
+    ).toBeInTheDocument();
+  });
+
+  it("Tasks: the Repository cell of the main table opens the task sheet", async () => {
+    await renderPage("/tasks", "Tasks");
+
+    fireEvent.click(cell("IRP-04", "Repository"));
+
+    expect(await screen.findByRole("dialog", { name: TASK.title })).toBeInTheDocument();
+  });
+
+  it("an inner link goes to its own target and does not open the row's record", async () => {
+    const router = await renderPage("/decisions", "Decisions");
+
+    fireEvent.click(within(cell("D-09", "Blocks")).getByRole("link", { name: "IRP-04" }));
+
+    expect(await screen.findByRole("dialog", { name: TASK.title })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/tasks");
+    expect(router.state.location.search).toEqual({ item: "IRP-04" });
+  });
+
+  it("the click that ends a text selection opens nothing", async () => {
+    const router = await renderPage("/decisions", "Decisions");
+    const summary = cell("D-09", "Summary");
+
+    window.getSelection()?.selectAllChildren(summary);
+    await act(async () => {
+      fireEvent.click(summary);
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(router.state.location.search).toEqual({});
+  });
+});
