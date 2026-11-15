@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type MouseEvent, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { AgentRef, BoardHue } from "./model";
 import { AgentBadge } from "./record-parts";
@@ -84,10 +84,30 @@ export function BoardTable({
             ))}
           </tr>
         </thead>
-        <tbody>{children}</tbody>
+        <BoardBody>{children}</BoardBody>
       </table>
     </div>
   );
+}
+
+/** Controls that keep their own action inside a row, so a click on one does not also open the row. */
+const OWN_ACTION = "a[href], button, input, select, textarea, label, summary, [role='button']";
+
+/**
+ * A board's rows. A click anywhere on a row follows the link in its header cell, which stays the keyboard's way in,
+ * so the row opens what that link opens. A click on another control, a modified click and the click that ends a text
+ * selection keep the browser's behavior.
+ */
+export function BoardBody({ children }: { children: ReactNode }): ReactNode {
+  return <tbody onClick={followRowLink}>{children}</tbody>;
+}
+
+function followRowLink(event: MouseEvent<HTMLTableSectionElement>): void {
+  const { target } = event;
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  if (!(target instanceof Element) || target.closest(OWN_ACTION) !== null) return;
+  if (window.getSelection()?.isCollapsed === false) return;
+  target.closest("tr")?.querySelector<HTMLAnchorElement>(":scope > th a[href]")?.click();
 }
 
 /** monday's status column: the whole cell in the value's color, the label in white. An absent value stays blank. */

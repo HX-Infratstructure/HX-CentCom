@@ -1239,6 +1239,9 @@
   .board-table tbody tr:hover > * {
     background: var(--muted);
   }
+  .board-table tbody tr:has(> th a[href]) {
+    cursor: pointer;
+  }
   .board-table tbody th {
     font-weight: 400;
   }

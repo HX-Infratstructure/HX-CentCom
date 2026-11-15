@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from "react";
 import { ChevronRight, CircleAlert } from "lucide-react";
+import { BoardBody } from "./board";
 import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
 import { lists } from "./lists";
@@ -144,11 +145,11 @@ function GroupTable({ group, tasks }: { group: TaskGroup; tasks: readonly TaskVi
               ))}
             </tr>
           </thead>
-          <tbody>
+          <BoardBody>
             {tasks.map((task) => (
               <TaskRow key={task.id} task={task} />
             ))}
-          </tbody>
+          </BoardBody>
           <tfoot>
             <tr>
               <td colSpan={2} />
