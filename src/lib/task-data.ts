@@ -1,12 +1,30 @@
-import { infiniteQueryOptions, queryOptions, type InfiniteData } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  queryOptions,
+  type DefaultOptions,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { adaptPullRequestPages } from "@/components/adapt";
 import type { GithubPrQueryInput, GithubPrsPage, UpdateQueryInput } from "@/server/services";
 import { listGithubPrs, listUpdates, listWorkspace } from "./tasks.functions";
 
+/**
+ * The query client's defaults, which the router and the tests share. Every active query re-checks the server every 60
+ * seconds while the tab is visible, and at once when the tab returns with data older than `staleTime`. An infinite list
+ * re-reads every page it has loaded, from the first, so Show more pages stay and their cursors stay consistent.
+ */
+export const QUERY_DEFAULTS = {
+  // With the default staleTime of 0, data hydrated from the server is stale at once and every mounting query refetches
+  // it.
+  staleTime: 30_000,
+  refetchInterval: 60_000,
+  refetchIntervalInBackground: false,
+  refetchOnWindowFocus: true,
+} satisfies DefaultOptions["queries"];
+
 export const tasksQuery = queryOptions({
   queryKey: ["task-workspace"],
   queryFn: () => listWorkspace(),
-  refetchInterval: 30000,
 });
 
 /** The update feed's filters. The cursor never enters the URL. */

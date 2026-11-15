@@ -1,3 +1,4 @@
+import { useIsFetching, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
   Gavel,
@@ -6,11 +7,14 @@ import {
   History,
   LayoutDashboard,
   ListTodo,
+  RefreshCw,
   TriangleAlert,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toAppError } from "./adapt";
+import { formatUtc, relativeAge } from "./format";
 import { ErrorState } from "./list-states";
+import { toInstant } from "./model";
 import { OwnerKeyControl } from "./owner-session";
 
 const NAV = [
@@ -73,6 +77,7 @@ export function Workspace({
               {/* Focusable so a sheet whose opener is gone can return focus to the page. */}
               <h1 tabIndex={-1}>{page}</h1>
               {description !== undefined && <p className="board-description">{description}</p>}
+              <Freshness />
             </div>
             <OwnerKeyControl />
             {views}
@@ -81,6 +86,57 @@ export function Workspace({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The newest `dataUpdatedAt` among the queries the page shows, or 0 before any has data. */
+function newestUpdate(queryClient: QueryClient): number {
+  let newest = 0;
+  for (const query of queryClient.getQueryCache().getAll()) {
+    if (query.isActive()) newest = Math.max(newest, query.state.dataUpdatedAt);
+  }
+  return newest;
+}
+
+/** When the page's data last arrived, and a button that re-checks every query the page shows now. */
+function Freshness(): ReactNode {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
+    [queryClient],
+  );
+  const read = () => newestUpdate(queryClient);
+  const updatedAt = useSyncExternalStore(subscribe, read, read);
+  const fetching = useIsFetching() > 0;
+  // The age reads in whole minutes, so a 15-second tick keeps it within a quarter minute.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(tick);
+  }, []);
+  const at = updatedAt > 0 ? toInstant(new Date(updatedAt).toISOString()) : null;
+
+  return (
+    <p className="board-freshness">
+      {at !== null && (
+        <span>
+          Updated{" "}
+          {/* The server renders its own clock's age, so the first client render may differ by a tick. */}
+          <time dateTime={at} title={formatUtc(at)} suppressHydrationWarning>
+            {relativeAge(at, now)}
+          </time>
+        </span>
+      )}
+      <button
+        type="button"
+        className="board-refresh"
+        aria-busy={fetching}
+        onClick={() => void queryClient.invalidateQueries()}
+      >
+        <RefreshCw aria-hidden="true" />
+        Refresh
+      </button>
+    </p>
   );
 }
 

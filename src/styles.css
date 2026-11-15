@@ -228,6 +228,31 @@
     color: var(--muted-foreground);
     font-size: var(--text-base);
   }
+  .board-freshness {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted-foreground);
+    font-size: var(--text-sm);
+  }
+  .board-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--foreground);
+  }
+  .board-refresh:hover {
+    background: var(--muted);
+  }
+  .board-refresh svg {
+    width: 14px;
+    height: 14px;
+  }
   .view-tabs {
     grid-column: 1 / -1;
   }
