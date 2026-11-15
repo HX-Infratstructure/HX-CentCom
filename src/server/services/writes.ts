@@ -1,4 +1,4 @@
-import { and, arrayContains, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, arrayContains, eq, isNull, sql } from "drizzle-orm";
 import type { ZodString } from "zod";
 import type { Tx } from "@/server/db/client";
 import {
@@ -8,6 +8,7 @@ import {
   ownerDecisions,
   statusLabels,
   taskRequirements,
+  type BlockedOn,
   type TaskGroup,
 } from "@/server/db/schema";
 import { ServiceError, type Issue } from "./errors";
@@ -281,22 +282,34 @@ export function setRequirementPlan(
   };
 }
 
+type BlockedTask = { readonly id: string; readonly blocked_on: BlockedOn };
+type TaskVersion = { readonly id: string; readonly version: number };
+
+/**
+ * Locks every existing task in a decision's blocks, one at a time in ascending id order, FOR NO KEY UPDATE, before the
+ * decision row is inserted or changes. Two decides, or a request and a decide, that block the same task then serialise
+ * on it, so a decide's release check runs after the other write commits and sees its row. The lock is FOR NO KEY
+ * UPDATE, as in raid.ts, so it does not wait on another write's foreign-key FOR KEY SHARE on the task.
+ */
+async function lockBlockedTasks(tx: Tx, taskIds: readonly string[]): Promise<BlockedTask[]> {
+  const locked: BlockedTask[] = [];
+  for (const taskId of [...new Set(taskIds)].sort((a, b) => (a < b ? -1 : 1))) {
+    const [task] = await tx
+      .select({ id: engineeringTasks.id, blocked_on: engineeringTasks.blocked_on })
+      .from(engineeringTasks)
+      .where(eq(engineeringTasks.id, taskId))
+      .for("no key update");
+    if (task) locked.push(task);
+  }
+  return locked;
+}
+
 export const requestDecisionPlan: CreatePlan<typeof requestDecisionInput, RequestedDecision> = {
   action: "decision.request",
   input: requestDecisionInput,
   async apply(tx, { actor, input, at }) {
     const issues: Issue[] = [];
-    const known =
-      input.blocks.length === 0
-        ? new Set<string>()
-        : new Set(
-            (
-              await tx
-                .select({ id: engineeringTasks.id })
-                .from(engineeringTasks)
-                .where(inArray(engineeringTasks.id, input.blocks))
-            ).map((t) => t.id),
-          );
+    const known = new Set((await lockBlockedTasks(tx, input.blocks)).map((t) => t.id));
     input.blocks.forEach((taskId, i) => {
       if (!known.has(taskId)) issues.push({ path: `blocks.${i}`, message: `no task ${taskId}` });
     });
@@ -329,6 +342,49 @@ export const requestDecisionPlan: CreatePlan<typeof requestDecisionInput, Reques
   },
 };
 
+/**
+ * Under the task's lock: a Decided or Superseded decide clears the task's block only when it is `owner_decision` and
+ * no other Pending decision blocks the task, and the task's version goes up by 1 because a task column changed.
+ * Deferred keeps the block. Returns the outcome sentence that ends the task's system update.
+ */
+async function releaseDecisionBlock(
+  tx: Tx,
+  at: string,
+  decision: Decision,
+  task: BlockedTask,
+): Promise<{ readonly outcome: string; readonly unblocked: TaskVersion | null }> {
+  if (task.blocked_on === "none") return { outcome: `${task.id} is not blocked`, unblocked: null };
+  if (task.blocked_on !== "owner_decision") {
+    return { outcome: `${task.id} stays blocked on ${task.blocked_on}`, unblocked: null };
+  }
+  const pending = (
+    await tx
+      .select({ id: ownerDecisions.id })
+      .from(ownerDecisions)
+      .where(
+        and(eq(ownerDecisions.status, "Pending"), arrayContains(ownerDecisions.blocks, [task.id])),
+      )
+      .orderBy(ownerDecisions.id)
+  ).map((d) => d.id);
+  if (pending.length > 0) {
+    return {
+      outcome: `${task.id} stays blocked: ${pending.join(", ")} still pending`,
+      unblocked: null,
+    };
+  }
+  const settled = `${decision.id} ${decision.status.toLowerCase()}`;
+  if (decision.status === "Deferred") {
+    return { outcome: `${task.id} stays blocked on owner_decision: ${settled}`, unblocked: null };
+  }
+  const [unblocked] = await tx
+    .update(engineeringTasks)
+    .set({ blocked_on: "none", version: sql`${engineeringTasks.version} + 1`, updated_at: at })
+    .where(and(eq(engineeringTasks.id, task.id), eq(engineeringTasks.blocked_on, "owner_decision")))
+    .returning({ id: engineeringTasks.id, version: engineeringTasks.version });
+  if (!unblocked) throw new Error(`locked task ${task.id} of ${decision.id} changed its block`);
+  return { outcome: `${task.id} is no longer blocked: ${settled}`, unblocked };
+}
+
 export function decidePlan(
   decisionId: string,
 ): UpdatePlan<typeof decideInput, DecisionRoot, DecidedDecision> {
@@ -337,6 +393,7 @@ export function decidePlan(
     input: decideInput,
     root: { kind: "decision", id: decisionId },
     async apply(tx, { input, at, before, insertUpdates }) {
+      const blocked = await lockBlockedTasks(tx, before.blocks);
       const [decision] = await tx
         .update(ownerDecisions)
         .set({
@@ -348,28 +405,34 @@ export function decidePlan(
         .where(eq(ownerDecisions.id, before.id))
         .returning();
       if (!decision) throw new Error("decision update returned no row");
-      // The blocked tasks' versions stay: a write versions only the resource it addresses.
-      const blocked =
-        decision.blocks.length === 0
-          ? []
-          : await tx
-              .select({ id: engineeringTasks.id })
-              .from(engineeringTasks)
-              .where(inArray(engineeringTasks.id, decision.blocks));
-      const systemUpdates = await insertUpdates(
-        blocked.map((task) => ({
+      const unblockedTasks: TaskVersion[] = [];
+      const rows = [];
+      for (const task of blocked) {
+        const { outcome, unblocked } = await releaseDecisionBlock(tx, at, decision, task);
+        if (unblocked) unblockedTasks.push(unblocked);
+        rows.push({
           task_id: task.id,
           kind: "system" as const,
           status: null,
-          note: `${decision.id} ${decision.status}: ${input.decisionText}`,
+          note: `${decision.id} ${decision.status}: ${input.decisionText}\n${outcome}.`,
           links: [{ label: `${decision.id} decision source`, url: input.sourceUrl }],
           source: null,
-        })),
-      );
+        });
+      }
+      const systemUpdates = await insertUpdates(rows);
+      const effects = {
+        ...(systemUpdates.length > 0 ? { systemUpdateIds: systemUpdates.map((u) => u.id) } : {}),
+        ...(unblockedTasks.length > 0 ? { unblockedTasks } : {}),
+      };
       return {
         status: 200,
         value: { decision, systemUpdates },
-        activity: { entity: "decision", entityId: decision.id, before, after: decision },
+        activity: {
+          entity: "decision",
+          entityId: decision.id,
+          before,
+          after: { ...decision, effects },
+        },
       };
     },
   };
