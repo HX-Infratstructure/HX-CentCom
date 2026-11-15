@@ -1,20 +1,21 @@
-// A whole Workspace for UI tests that mock listWorkspace, so each test passes only the rows it sets.
+// A whole Workspace for UI tests that mock listWorkspace, so each test passes only the fields it sets.
 import type { Workspace } from "@/components/server-types";
 
-export function workspaceWith(rows: Partial<Omit<Workspace, "counts">> = {}): Workspace {
-  const decisions = rows.decisions ?? [];
+export function workspaceWith(fields: Partial<Omit<Workspace, "counts">>): Workspace {
+  const updates = fields.updates ?? [];
+  const decisions = fields.decisions ?? [];
   return {
     tasks: [],
-    updates: [],
     updatesCursor: null,
     requirements: [],
     agents: [],
     statusLabels: [],
     repos: [],
-    ...rows,
+    ...fields,
+    updates,
     decisions,
     counts: {
-      updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
+      updates: { total: updates.length, byAgent: {}, byTask: {}, bySource: {} },
       decisions: { total: decisions.length, byGateType: {}, byStatus: {} },
     },
   };
