@@ -183,16 +183,25 @@ export const decideInput = z.object({
   sourceUrl: sourceRef,
 });
 
-/** A calendar date that the `date` column stores: 2026-02-31 is refused here instead of by the cast. */
-const isoDate = z
+const TASK_DATE_MIN = "2020-01-01";
+const TASK_DATE_MAX = "2099-12-31";
+const TASK_SPAN_MAX_DAYS = 730;
+
+/**
+ * A planned task date: a real calendar date, so 2026-02-31 is refused here instead of by the cast, in a range
+ * that keeps the timeline, which draws one column per day, from freezing on a date such as 9999-12-31.
+ */
+const taskDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "must be a YYYY-MM-DD date")
   .refine((d) => {
     const parsed = new Date(`${d}T00:00:00Z`);
-    return (
-      d >= "0001-01-01" && !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(d)
-    );
-  }, "must be a real calendar date in years 0001-9999");
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(d);
+  }, "must be a real calendar date")
+  .refine(
+    (d) => d >= TASK_DATE_MIN && d <= TASK_DATE_MAX,
+    `must be between ${TASK_DATE_MIN} and ${TASK_DATE_MAX}`,
+  );
 
 /** The task's agent is not a field an agent sets: `agentId` is the owner's assignment (`taskAssignee`). */
 export const createTaskInput = z
@@ -205,8 +214,8 @@ export const createTaskInput = z
     title: z.string().trim().min(1).max(200),
     repository: z.string().trim().min(1).max(100).optional(),
     host: z.string().trim().min(1).max(32).optional(),
-    startDate: isoDate.optional(),
-    dueDate: isoDate.optional(),
+    startDate: taskDate.optional(),
+    dueDate: taskDate.optional(),
     status: id.default("Waiting"),
     note: z.string().trim().min(1).max(4000).optional(),
     sourceUrl: sourceRef,
@@ -214,8 +223,15 @@ export const createTaskInput = z
     progress: noTypedProgress,
   })
   .superRefine((v, ctx) => {
-    if (v.startDate !== undefined && v.dueDate !== undefined && v.dueDate < v.startDate) {
+    if (v.startDate === undefined || v.dueDate === undefined) return;
+    if (v.dueDate < v.startDate) {
       ctx.addIssue({ code: "custom", path: ["dueDate"], message: "must not be before startDate" });
+    } else if (Date.parse(v.dueDate) - Date.parse(v.startDate) > TASK_SPAN_MAX_DAYS * 86_400_000) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["dueDate"],
+        message: `must be at most ${TASK_SPAN_MAX_DAYS} days after startDate`,
+      });
     }
   });
 

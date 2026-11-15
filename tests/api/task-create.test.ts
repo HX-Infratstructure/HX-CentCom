@@ -126,6 +126,47 @@ describe("POST /api/v1/tasks", () => {
     expect(error.message).toContain("CC-01");
   });
 
+  it.each([
+    [
+      "0001-01-01 as the start",
+      "startDate",
+      { startDate: "0001-01-01" },
+      "2020-01-01 and 2099-12-31",
+    ],
+    [
+      "9999-12-31 as the due date",
+      "dueDate",
+      { dueDate: "9999-12-31" },
+      "2020-01-01 and 2099-12-31",
+    ],
+    [
+      "a span of 731 days",
+      "dueDate",
+      { startDate: "2026-01-01", dueDate: "2028-01-02" },
+      "at most 730 days after startDate",
+    ],
+  ] as const)("refuses %s with 400 at %s naming the rule", async (_, path, dates, rule) => {
+    const res = await api.rest(tasksRoute, "POST", "/api/v1/tasks", {
+      authorization: await api.authFor("CC1"),
+      body: { id: "CC-90", ...fields, ...dates },
+    });
+    expect(res.status).toBe(400);
+    const error = await errorOf(res);
+    expect(error.issues).toContainEqual({ path, message: expect.stringContaining(rule) });
+  });
+
+  it("accepts a span of exactly 730 days with 201", async () => {
+    const res = await api.rest(tasksRoute, "POST", "/api/v1/tasks", {
+      authorization: await api.authFor("CC1"),
+      body: { id: "CC-90", ...fields, startDate: "2026-01-01", dueDate: "2028-01-01" },
+    });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { task: Json }).task).toMatchObject({
+      start_date: "2026-01-01",
+      due_date: "2028-01-01",
+    });
+  });
+
   it("replays an Idempotency-Key retry with Idempotency-Replayed", async () => {
     const send = async () =>
       api.rest(tasksRoute, "POST", "/api/v1/tasks", {

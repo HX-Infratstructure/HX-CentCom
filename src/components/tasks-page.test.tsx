@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { act, fireEvent, isInaccessible, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
 import type { Agent, StatusLabel, Task, UpdatesPage, Workspace } from "./server-types";
 
@@ -452,6 +452,95 @@ describe("the task timeline", () => {
     const row = screen.getByRole("link", { name: "Wire the eval dashboard" }).closest("li");
     if (row === null) throw new Error("No timeline row for Wire the eval dashboard");
     expect(isInaccessible(within(row).getByText("1 of 2 proven"))).toBe(false);
+  });
+
+  describe("over a plan longer than a year", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Today is Sunday 15 Nov 2026; only `Date` is faked, so the router and the query client keep real timers. */
+    function onTheFifteenth() {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-15T12:00:00Z"));
+    }
+
+    function continues(title: string, side: "before" | "after"): boolean {
+      const row = screen.getByRole("link", { name: title }).closest("li");
+      if (row === null) throw new Error(`No timeline row for ${title}`);
+      return within(row).queryByText(`Continues ${side} this window`) !== null;
+    }
+
+    it("draws at most a year of days from the week 30 days before today and clips longer bars", async () => {
+      onTheFifteenth();
+      await renderTasks("/tasks?view=timeline", [
+        task({
+          id: "IRP-70",
+          title: "Run the three-year migration",
+          start_date: "2026-01-05",
+          due_date: "2028-12-29",
+        }),
+        task({
+          id: "IRP-71",
+          title: "Wire the eval dashboard",
+          start_date: "2026-11-16",
+          due_date: "2026-11-20",
+        }),
+        task({
+          id: "IRP-72",
+          title: "Pin the router build",
+          start_date: "2026-02-02",
+          due_date: "2026-02-06",
+        }),
+      ]);
+
+      // 30 days before Sunday 15 Nov is Friday 16 Oct, whose week opens on Monday 12 Oct; 52 weeks end on Sunday 10 Oct.
+      const days = daysUnder("12 Oct 2026 to 10 Oct 2027");
+      expect(days.length).toBeLessThanOrEqual(366);
+      expect(days).toHaveLength(364);
+      expect(datesOf("Run the three-year migration")).toBe("5 Jan 2026 to 29 Dec 2028");
+      expect(barOf("Run the three-year migration")).toBe("1 / 365");
+      expect(continues("Run the three-year migration", "before")).toBe(true);
+      expect(continues("Run the three-year migration", "after")).toBe(true);
+      expect(barOf("Wire the eval dashboard")).toBe("36 / 41");
+      expect(continues("Wire the eval dashboard", "before")).toBe(false);
+      expect(datesOf("Pin the router build")).toBe("2 Feb 2026 to 6 Feb 2026");
+      expect(barOf("Pin the router build")).toBeNull();
+    });
+
+    it("ends the window at the latest date when every task ended before today", async () => {
+      onTheFifteenth();
+      await renderTasks("/tasks?view=timeline", [
+        task({
+          id: "IRP-73",
+          title: "Run the two-year migration",
+          start_date: "2024-01-01",
+          due_date: "2025-12-31",
+        }),
+      ]);
+
+      // Wednesday 31 Dec 2025 closes on Sunday 4 Jan 2026, and 52 weeks back opens on Monday 6 Jan 2025.
+      expect(daysUnder("6 Jan 2025 to 4 Jan 2026")).toHaveLength(364);
+      expect(barOf("Run the two-year migration")).toBe("1 / 361");
+      expect(continues("Run the two-year migration", "before")).toBe(true);
+      expect(continues("Run the two-year migration", "after")).toBe(false);
+    });
+
+    it("keeps a stored task from year 0001 to year 9999 to one year of days", async () => {
+      onTheFifteenth();
+      await renderTasks("/tasks?view=timeline", [
+        task({
+          id: "IRP-74",
+          title: "Plan forever",
+          start_date: "0001-01-01",
+          due_date: "9999-12-31",
+        }),
+      ]);
+
+      expect(daysUnder("12 Oct 2026 to 10 Oct 2027")).toHaveLength(364);
+      expect(datesOf("Plan forever")).toBe("1 Jan 1 to 31 Dec 9999");
+      expect(barOf("Plan forever")).toBe("1 / 365");
+    });
   });
 
   it("says no task has planned dates when none has any", async () => {

@@ -110,6 +110,40 @@ describe("createTask", () => {
     expect(await count(h, "engineering_tasks", "id = 'CC-90'")).toBe(0);
   });
 
+  it.each([
+    [
+      "a start date before 2020",
+      "startDate",
+      { startDate: "0001-01-01" },
+      "2020-01-01 and 2099-12-31",
+    ],
+    ["a due date after 2099", "dueDate", { dueDate: "9999-12-31" }, "2020-01-01 and 2099-12-31"],
+    [
+      "a span of 731 days",
+      "dueDate",
+      { startDate: "2026-01-01", dueDate: "2028-01-02" },
+      "at most 730 days after startDate",
+    ],
+  ] as const)("refuses %s with 400 at %s naming the rule", async (_, path, overrides, rule) => {
+    const err = await expectServiceError(
+      h.svc.createTask(h.as.CC1, body(overrides)),
+      "invalid",
+      400,
+    );
+    const issues = err.body.code === "invalid" ? err.body.issues : [];
+    expect(issues).toContainEqual({ path, message: expect.stringContaining(rule) });
+    expect(await count(h, "engineering_tasks", "id = 'CC-90'")).toBe(0);
+  });
+
+  it("accepts a span of exactly 730 days", async () => {
+    const result = await h.svc.createTask(
+      h.as.CC1,
+      body({ startDate: "2026-01-01", dueDate: "2028-01-01" }),
+    );
+    expect(result.status).toBe(201);
+    expect(result.value.task).toMatchObject({ start_date: "2026-01-01", due_date: "2028-01-01" });
+  });
+
   it("refuses a body without an id or a source", async () => {
     const err = await expectServiceError(
       h.svc.createTask(h.as.CC1, loose({ title: "No id" })),

@@ -167,7 +167,7 @@ Registers a task, so that an agent can post progress to its own work. Any valid 
 | `sourceUrl`            | Yes      | Where the work is recorded: an http or https URL, or `hx15:<absolute path>` for a record that exists only on HX-15                  |
 | `repository`           | No       | 1 to 100 characters. Stored as an empty string when left out                                                                        |
 | `host`                 | No       | 1 to 32 characters. Stored as an empty string when left out                                                                         |
-| `startDate`, `dueDate` | No       | A `YYYY-MM-DD` calendar date. `dueDate` may not be before `startDate`                                                               |
+| `startDate`, `dueDate` | No       | A `YYYY-MM-DD` calendar date from 2020-01-01 to 2099-12-31. `dueDate` may not be before `startDate` or more than 730 days after it  |
 | `status`               | No       | A status label, `Waiting` by default. It sets the kanban group as a progress update's `status` does                                 |
 | `note`                 | No       | 1 to 4000 characters                                                                                                                |
 | `agentId`              | No       | Owner only: the id of an active agent, or left out for an unassigned task. An agent may name only itself                            |
