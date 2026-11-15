@@ -369,6 +369,7 @@ function DecideForm({
             type="button"
             variant="outline"
             size="sm"
+            disabled={sending}
             onClick={() => {
               setSeenVersion(decision.version);
               setState({ phase: "editing" });

@@ -260,4 +260,58 @@ describe("recording a decision through the owner actions", () => {
     });
     expect(ifMatch(1)).toBe("4");
   });
+
+  it("keeps the latest version out of reach while a submit is in flight, so its conflict can still be adopted", async () => {
+    const opened = decision({ id: "D-17", question: "Merge the adopt fix?", version: 3 });
+    server.listWorkspace
+      .mockResolvedValueOnce(workspace([opened]))
+      .mockResolvedValue(
+        workspace([{ ...opened, summary: "An agent changed the gate.", version: 4 }]),
+      );
+    let answer: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await renderDecisions("/decisions?item=D-17", { owner: true });
+    fireEvent.click(await screen.findByRole("radio", { name: "Decided" }));
+    fireEvent.change(screen.getByLabelText("Your words"), { target: { value: "Merge it." } });
+    fireEvent.change(screen.getByLabelText("Source link"), {
+      target: { value: `https://github.com/${REPO}/issues/10#issuecomment-6875070703` },
+    });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Record your decision" }));
+    });
+    expect(screen.getByRole("button", { name: "Recording" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh", hidden: true }));
+    const adopt = await screen.findByRole("button", { name: "Use the latest version" });
+    expect(adopt).toBeDisabled();
+    fireEvent.click(adopt);
+    expect(screen.getByRole("button", { name: "Recording" })).toBeDisabled();
+
+    await act(async () => {
+      answer(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "version_conflict",
+              message: "The decision changed since you read it.",
+              currentVersion: 4,
+            },
+          }),
+          { status: 409 },
+        ),
+      );
+    });
+    expect(
+      await screen.findByText("It is now at version 4. Review it above, then record again."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Record decision" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
+    expect(screen.getByRole("button", { name: "Record decision" })).toBeEnabled();
+  });
 });
