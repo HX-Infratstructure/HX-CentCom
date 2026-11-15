@@ -309,8 +309,10 @@ function formText(form: FormData, name: string): string {
 }
 
 /**
- * Keyed by decision id, not version, so the refetch after a conflict keeps every typed field. The version is read at
- * submit time, so the retry sends the new If-Match.
+ * Keyed by decision id, not version, so the refetch after a conflict keeps every typed field. The If-Match is the
+ * version the owner saw: the one the form opened at, until the owner takes the version the sheet shows now. A refetch
+ * that moves the decision on only shows a note, so a submit conflicts instead of overwriting a change the owner never
+ * read, and after a conflict the owner records again only once they have taken the version on screen.
  */
 function DecideForm({
   decision,
@@ -320,6 +322,7 @@ function DecideForm({
   owner: OwnerActions;
 }): ReactNode {
   const [state, setState] = useState<FormState>({ phase: "editing" });
+  const [seenVersion, setSeenVersion] = useState(decision.version);
   const headingId = useId();
   const wordsId = useId();
   const sourceId = useId();
@@ -344,11 +347,12 @@ function DecideForm({
       sourceUrl: formText(form, "sourceUrl"),
     };
     setState({ phase: "sending" });
-    const outcome = await owner.decide({ id: decision.id, version: decision.version }, input);
+    const outcome = await owner.decide({ id: decision.id, version: seenVersion }, input);
     setState(outcome.ok ? { phase: "recorded" } : { phase: "failed", error: outcome.error });
   }
 
   const sending = state.phase === "sending";
+  const conflicted = state.phase === "failed" && state.error.code === "version_conflict";
   return (
     <form
       className="decide-form"
@@ -356,6 +360,25 @@ function DecideForm({
       onSubmit={(event) => void submit(event)}
     >
       <h3 id={headingId}>Record your decision</h3>
+      {decision.version !== seenVersion && (
+        <div className="form-actions">
+          <p className="field-hint">
+            This decision changed after you opened it. Review it before you decide.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={sending}
+            onClick={() => {
+              setSeenVersion(decision.version);
+              setState({ phase: "editing" });
+            }}
+          >
+            Use the latest version
+          </Button>
+        </div>
+      )}
 
       <fieldset className="field" aria-invalid={statusIssue !== undefined || undefined}>
         <legend>Outcome</legend>
@@ -427,7 +450,7 @@ function DecideForm({
       )}
 
       <div className="form-actions">
-        <Button type="submit" disabled={sending}>
+        <Button type="submit" disabled={sending || conflicted}>
           {sending ? "Recording" : "Record decision"}
         </Button>
         <p role="status" className="quiet">

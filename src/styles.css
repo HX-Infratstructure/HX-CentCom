@@ -228,6 +228,14 @@
     color: var(--muted-foreground);
     font-size: var(--text-base);
   }
+  .board-freshness {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted-foreground);
+    font-size: var(--text-sm);
+  }
   .view-tabs {
     grid-column: 1 / -1;
   }

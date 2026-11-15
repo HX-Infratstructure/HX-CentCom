@@ -1,3 +1,4 @@
+import { useIsFetching, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
   Gavel,
@@ -6,11 +7,15 @@ import {
   History,
   LayoutDashboard,
   ListTodo,
+  RefreshCw,
   TriangleAlert,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toAppError } from "./adapt";
+import { formatUtc, relativeAge } from "./format";
+import { Button } from "./ui/button";
 import { ErrorState } from "./list-states";
+import { toInstant } from "./model";
 import { OwnerKeyControl } from "./owner-session";
 
 const NAV = [
@@ -73,6 +78,7 @@ export function Workspace({
               {/* Focusable so a sheet whose opener is gone can return focus to the page. */}
               <h1 tabIndex={-1}>{page}</h1>
               {description !== undefined && <p className="board-description">{description}</p>}
+              <Freshness />
             </div>
             <OwnerKeyControl />
             {views}
@@ -81,6 +87,66 @@ export function Workspace({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * How current the page is: "failed" when a query it shows failed its last read, else the oldest `dataUpdatedAt` among
+ * them, so one list that has not reloaded keeps the page from reading as just updated. Null before any has data.
+ */
+function pageFreshness(queryClient: QueryClient): number | "failed" | null {
+  let oldest: number | null = null;
+  for (const query of queryClient.getQueryCache().getAll()) {
+    if (!query.isActive()) continue;
+    if (query.state.status === "error") return "failed";
+    if (query.state.status === "success") {
+      oldest = Math.min(oldest ?? Infinity, query.state.dataUpdatedAt);
+    }
+  }
+  return oldest;
+}
+
+/** When the page's data last arrived, and a button that re-checks every query the page shows now. */
+function Freshness(): ReactNode {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
+    [queryClient],
+  );
+  const read = () => pageFreshness(queryClient);
+  const freshness = useSyncExternalStore(subscribe, read, read);
+  const fetching = useIsFetching() > 0;
+  // The age reads in whole minutes, so a 15-second tick keeps it within a quarter minute.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(tick);
+  }, []);
+  const at = typeof freshness === "number" ? toInstant(new Date(freshness).toISOString()) : null;
+
+  return (
+    <p className="board-freshness">
+      {freshness === "failed" && <span>Update failed</span>}
+      {at !== null && (
+        <span>
+          Updated{" "}
+          {/* The server renders its own clock's age, so the first client render may differ by a tick. */}
+          <time dateTime={at} title={formatUtc(at)} suppressHydrationWarning>
+            {relativeAge(at, now)}
+          </time>
+        </span>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-busy={fetching}
+        onClick={() => void queryClient.invalidateQueries()}
+      >
+        <RefreshCw aria-hidden="true" />
+        Refresh
+      </Button>
+    </p>
   );
 }
 

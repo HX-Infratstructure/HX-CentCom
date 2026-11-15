@@ -1,12 +1,11 @@
 import { QueryClient, dehydrate, hydrate, type DehydratedState } from "@tanstack/react-query";
 import { createRouter, type Serializable } from "@tanstack/react-router";
+import { QUERY_DEFAULTS } from "./lib/task-data";
 import { routeTree } from "./routeTree.gen";
 
 export const getRouter = () => {
   // One client per request: a module-level QueryClient leaks cached data between SSR requests.
-  // With the default staleTime of 0, data hydrated from the server is stale at once and every mounting query refetches
-  // it. 30 s matches the workspace query's refetchInterval.
-  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000 } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: QUERY_DEFAULTS } });
 
   const router = createRouter({
     routeTree,
