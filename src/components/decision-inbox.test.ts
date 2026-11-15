@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { workspaceWith } from "@/test/ui-fixtures";
 import { adaptWorkspace } from "./adapt";
 import { splitInbox } from "./model";
-import type { Agent, Decision, Workspace } from "./server-types";
+import type { Agent, Decision } from "./server-types";
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
@@ -37,20 +38,7 @@ function decision(fields: Pick<Decision, "id"> & Partial<Decision>): Decision {
 }
 
 function inbox(decisions: readonly Decision[]) {
-  const raw: Workspace = {
-    tasks: [],
-    updates: [],
-    updatesCursor: null,
-    requirements: [],
-    decisions,
-    agents: AGENTS,
-    statusLabels: [],
-    repos: [],
-    counts: {
-      updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
-      decisions: { total: decisions.length, byGateType: {}, byStatus: {} },
-    },
-  };
+  const raw = workspaceWith({ decisions, agents: AGENTS });
   const { pending, history } = splitInbox(adaptWorkspace(raw).decisions);
   return { pending: pending.map((d) => d.id), history: history.map((d) => d.id) };
 }
