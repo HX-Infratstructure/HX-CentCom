@@ -1,9 +1,7 @@
-import { QueryClient } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
+import { RouterProvider } from "@tanstack/react-router";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QUERY_DEFAULTS } from "@/lib/task-data";
-import { routeTree } from "@/routeTree.gen";
+import { getRouter } from "@/router";
 import type { ActivityEntry, ActivityPage, Workspace } from "./server-types";
 
 const server = vi.hoisted(() => ({ listWorkspace: vi.fn(), listActivity: vi.fn() }));
@@ -71,14 +69,13 @@ function setVisibility(state: DocumentVisibilityState) {
   document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
 }
 
+/** The app's own router and query client, so the tests run on the defaults production uses. */
 async function renderActivity() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { ...QUERY_DEFAULTS, retry: false } },
-  });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: ["/activity"] }),
+  window.history.replaceState(null, "", "/activity");
+  const router = getRouter();
+  const { queryClient } = router.options.context;
+  queryClient.setDefaultOptions({
+    queries: { ...queryClient.getDefaultOptions().queries, retry: false },
   });
   await act(() => router.load());
   render(<RouterProvider router={router} />);
@@ -131,9 +128,9 @@ describe("a page keeps itself current", () => {
 
     setVisibility("visible");
     await elapse(0);
-    const onReturn = server.listActivity.mock.calls.length;
+    expect(server.listActivity).toHaveBeenCalledTimes(calls + 1);
     await elapse(60_000);
-    expect(server.listActivity).toHaveBeenCalledTimes(onReturn + 1);
+    expect(server.listActivity).toHaveBeenCalledTimes(calls + 2);
   });
 
   it("re-checks every query at once from the header's Refresh button", async () => {
@@ -166,6 +163,36 @@ describe("a page keeps itself current", () => {
     ).toEqual([undefined, "cursor-1"]);
     expect(screen.queryAllByText(/D-21/)).not.toHaveLength(0);
     expect(screen.queryAllByText(/D-22/)).not.toHaveLength(0);
+  });
+
+  it("dates the header by the page's oldest data, so a list still reloading does not read as just updated", async () => {
+    await renderActivity();
+    let release: (page: ActivityPage) => void = () => {};
+    server.listActivity.mockReturnValue(
+      new Promise<ActivityPage>((resolve) => (release = resolve)),
+    );
+
+    await elapse(60_000);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(server.listWorkspace).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/^Updated/)).toHaveTextContent("Updated 1 min ago");
+
+    await act(async () => release(NO_ACTIVITY));
+    await waitFor(() => expect(screen.getByText(/^Updated/)).toHaveTextContent("Updated just now"));
+  });
+
+  it("says the update failed when a query on the page fails to reload, and recovers from Refresh", async () => {
+    await renderActivity();
+    server.listActivity.mockRejectedValue(new Error("The server sent no readable answer."));
+
+    await elapse(60_000);
+    await waitFor(() => expect(screen.getByText("Update failed")).toBeInTheDocument());
+    expect(screen.queryByText(/^Updated/)).toBeNull();
+
+    server.listActivity.mockResolvedValue(NO_ACTIVITY);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByText(/^Updated/)).toHaveTextContent("Updated just now"));
+    expect(screen.queryByText("Update failed")).toBeNull();
   });
 
   it("shows when the page's data last arrived, and the new time after a re-check", async () => {

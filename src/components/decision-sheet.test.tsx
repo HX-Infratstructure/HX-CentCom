@@ -248,7 +248,13 @@ describe("recording a decision through the owner actions", () => {
     expect(
       await screen.findByText("It is now at version 4. Review it above, then record again."),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Record decision" })).toBeDisabled();
 
+    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
+    expect(
+      screen.queryByText("This decision changed after you opened it. Review it before you decide."),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Record decision" })).toBeEnabled();
     await act(async () => {
       fireEvent.submit(screen.getByRole("form", { name: "Record your decision" }));
     });

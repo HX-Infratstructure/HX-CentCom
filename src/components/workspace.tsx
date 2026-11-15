@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toAppError } from "./adapt";
 import { formatUtc, relativeAge } from "./format";
+import { Button } from "./ui/button";
 import { ErrorState } from "./list-states";
 import { toInstant } from "./model";
 import { OwnerKeyControl } from "./owner-session";
@@ -89,13 +90,20 @@ export function Workspace({
   );
 }
 
-/** The newest `dataUpdatedAt` among the queries the page shows, or 0 before any has data. */
-function newestUpdate(queryClient: QueryClient): number {
-  let newest = 0;
+/**
+ * How current the page is: "failed" when a query it shows failed its last read, else the oldest `dataUpdatedAt` among
+ * them, so one list that has not reloaded keeps the page from reading as just updated. Null before any has data.
+ */
+function pageFreshness(queryClient: QueryClient): number | "failed" | null {
+  let oldest: number | null = null;
   for (const query of queryClient.getQueryCache().getAll()) {
-    if (query.isActive()) newest = Math.max(newest, query.state.dataUpdatedAt);
+    if (!query.isActive()) continue;
+    if (query.state.status === "error") return "failed";
+    if (query.state.status === "success") {
+      oldest = Math.min(oldest ?? Infinity, query.state.dataUpdatedAt);
+    }
   }
-  return newest;
+  return oldest;
 }
 
 /** When the page's data last arrived, and a button that re-checks every query the page shows now. */
@@ -105,8 +113,8 @@ function Freshness(): ReactNode {
     (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
     [queryClient],
   );
-  const read = () => newestUpdate(queryClient);
-  const updatedAt = useSyncExternalStore(subscribe, read, read);
+  const read = () => pageFreshness(queryClient);
+  const freshness = useSyncExternalStore(subscribe, read, read);
   const fetching = useIsFetching() > 0;
   // The age reads in whole minutes, so a 15-second tick keeps it within a quarter minute.
   const [now, setNow] = useState(() => Date.now());
@@ -114,10 +122,11 @@ function Freshness(): ReactNode {
     const tick = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(tick);
   }, []);
-  const at = updatedAt > 0 ? toInstant(new Date(updatedAt).toISOString()) : null;
+  const at = typeof freshness === "number" ? toInstant(new Date(freshness).toISOString()) : null;
 
   return (
     <p className="board-freshness">
+      {freshness === "failed" && <span>Update failed</span>}
       {at !== null && (
         <span>
           Updated{" "}
@@ -127,15 +136,16 @@ function Freshness(): ReactNode {
           </time>
         </span>
       )}
-      <button
+      <Button
         type="button"
-        className="board-refresh"
+        variant="outline"
+        size="sm"
         aria-busy={fetching}
         onClick={() => void queryClient.invalidateQueries()}
       >
         <RefreshCw aria-hidden="true" />
         Refresh
-      </button>
+      </Button>
     </p>
   );
 }
