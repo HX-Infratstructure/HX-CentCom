@@ -15,7 +15,7 @@ import { detailFrom } from "@/components/detail";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
 import { useOpenRecord } from "@/components/open-record";
-import { RaidDetail, RaidRow } from "@/components/raid";
+import { RaidBoard, RaidDetail } from "@/components/raid";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { tasksQuery } from "@/lib/task-data";
@@ -59,6 +59,8 @@ function raidItemById(id: string | undefined) {
   });
 }
 
+const DESCRIPTION = "Risks, assumptions, issues and dependencies, each with its source.";
+
 export const Route = createFileRoute("/raid")({
   validateSearch: (raw) => lists.raid.validate(raw),
   loaderDeps: ({ search }) => lists.raid.filters(search),
@@ -73,12 +75,12 @@ export const Route = createFileRoute("/raid")({
       { title: "RAID register | HX-CentCom" },
       {
         name: "description",
-        content: "Risks, assumptions, issues and dependencies, each with its source.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "RAID register | HX-CentCom" },
       {
         property: "og:description",
-        content: "Risks, assumptions, issues and dependencies, each with its source.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -109,7 +111,7 @@ function RaidRegister(): ReactNode {
   const { items, counts } = pages.data;
 
   return (
-    <Workspace page="RAID register">
+    <Workspace page="RAID register" description={DESCRIPTION}>
       <FilterBar
         search={lists.raid}
         counts={{
@@ -129,13 +131,7 @@ function RaidRegister(): ReactNode {
             : "The RAID register is empty."}
         </EmptyState>
       ) : (
-        <ul className="record-list">
-          {items.map((item) => (
-            <li key={item.id}>
-              <RaidRow item={item} />
-            </li>
-          ))}
-        </ul>
+        <RaidBoard items={items} totals={counts?.byType ?? {}} />
       )}
       <ShowMore
         shown={items.length}

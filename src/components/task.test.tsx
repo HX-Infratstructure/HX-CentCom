@@ -100,12 +100,13 @@ async function renderPage(url: string, page: string, tasks: readonly Task[] = TA
   await screen.findByRole("heading", { level: 1, name: page, hidden: true });
 }
 
-/** The rendered task (a card or a row) whose heading names `title`. */
+/** The rendered task (a card, a list row, or a main-table row) whose link names `title`. */
 function taskNamed(title: string): HTMLElement {
   const found = screen
-    .getAllByRole("article")
-    .find((a) => within(a).queryByRole("heading", { name: title }) !== null);
-  if (found === undefined) throw new Error(`No task titled ${title}`);
+    .getAllByRole("link", { name: title })
+    .map((link) => link.closest<HTMLElement>("article, tr"))
+    .find((task) => task !== null);
+  if (found === undefined || found === null) throw new Error(`No task titled ${title}`);
   return found;
 }
 
@@ -113,7 +114,7 @@ const RULE =
   "This task's commit is not its repository's head, an open pull request's head, or a merged pull request's merge commit.";
 
 describe("the stale badge", () => {
-  it("marks only the stale task's card on the board, and says what stale means", async () => {
+  it("marks only the stale task's row in the main table, and says what stale means", async () => {
     await renderPage("/tasks", "Tasks");
 
     expect(within(taskNamed("Pin the router build")).getByText("Stale commit")).toHaveAttribute(

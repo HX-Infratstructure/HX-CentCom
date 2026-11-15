@@ -1,6 +1,5 @@
-import { useCallback, useId, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
 import {
   infiniteQueryOptions,
   queryOptions,
@@ -12,11 +11,17 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { adaptDecision, adaptDecisionPages, adaptWorkspace, toAppError } from "@/components/adapt";
-import { DecisionDetail, DecisionList } from "@/components/decision";
+import { BoardGroup } from "@/components/board";
+import { DecisionDetail, DecisionTable } from "@/components/decision";
 import { detailFrom } from "@/components/detail";
 import { EmptyState, ErrorState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
-import { DECISION_STATUS_LABELS, splitInbox, type AgentDirectory } from "@/components/model";
+import {
+  DECISION_STATUS_HUES,
+  DECISION_STATUS_LABELS,
+  splitInbox,
+  type AgentDirectory,
+} from "@/components/model";
 import { useOpenRecord } from "@/components/open-record";
 import type { Decision, DecisionsPage, DecisionStatus, GateType } from "@/components/server-types";
 import { FilterBar } from "@/components/url-state";
@@ -62,6 +67,8 @@ function decisionPages(query: DecisionQuery) {
   });
 }
 
+const DESCRIPTION = "Pending owner decisions, ordered by what they block, and the decided history.";
+
 export const Route = createFileRoute("/decisions")({
   validateSearch: (raw) => lists.decisions.validate(raw),
   loaderDeps: ({ search }) => lists.decisions.filters(search),
@@ -79,12 +86,12 @@ export const Route = createFileRoute("/decisions")({
       { title: "Decisions | HX-CentCom" },
       {
         name: "description",
-        content: "Pending owner decisions, ordered by what they block, and the decided history.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Decisions | HX-CentCom" },
       {
         property: "og:description",
-        content: "Pending owner decisions, ordered by what they block, and the decided history.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -108,37 +115,39 @@ function DecisionsPage(): ReactNode {
   const filtered = lists.decisions.active(filters);
 
   return (
-    <Workspace page="Decisions">
+    <Workspace page="Decisions" description={DESCRIPTION}>
       <FilterBar
         search={lists.decisions}
         counts={{ type: counts.byGateType, status: counts.byStatus }}
         label="Filter decisions"
       />
-      {filters.status === undefined ? (
-        <>
+      <div className="board-groups">
+        {filters.status === undefined ? (
+          <>
+            <DecisionSection
+              title="Pending"
+              query={{ gateType: filters.type, status: "Pending" }}
+              agents={ws.agents}
+              empty={
+                filtered ? "No pending decisions of this type." : "No decision is waiting on you."
+              }
+            />
+            <HistorySection
+              gateType={filters.type}
+              total={counts.total - (counts.byStatus.Pending ?? 0)}
+              agents={ws.agents}
+              filtered={filtered}
+            />
+          </>
+        ) : (
           <DecisionSection
-            title="Pending"
-            query={{ gateType: filters.type, status: "Pending" }}
+            title={DECISION_STATUS_LABELS[filters.status]}
+            query={{ gateType: filters.type, status: filters.status }}
             agents={ws.agents}
-            empty={
-              filtered ? "No pending decisions of this type." : "No decision is waiting on you."
-            }
+            empty="No decisions match these filters."
           />
-          <HistorySection
-            gateType={filters.type}
-            total={counts.total - (counts.byStatus.Pending ?? 0)}
-            agents={ws.agents}
-            filtered={filtered}
-          />
-        </>
-      ) : (
-        <DecisionSection
-          title={DECISION_STATUS_LABELS[filters.status]}
-          query={{ gateType: filters.type, status: filters.status }}
-          agents={ws.agents}
-          empty="No decisions match these filters."
-        />
-      )}
+        )}
+      </div>
       <DecisionDetail
         detail={detailFrom(record.id, ws.decisions, byId)}
         owner={owner}
@@ -159,7 +168,6 @@ function DecisionSection({
   agents: AgentDirectory;
   empty: string;
 }): ReactNode {
-  const headingId = useId();
   const select = useCallback(
     (data: InfiniteData<DecisionsPage, string | undefined>) => {
       const adapted = adaptDecisionPages(data.pages, agents);
@@ -173,15 +181,22 @@ function DecisionSection({
   );
   const pages = useSuspenseInfiniteQuery({ ...decisionPages(query), select });
   const total = pages.data.counts?.total;
+  const status = query.status;
   return (
-    <section aria-labelledby={headingId} className="page-section">
-      <h2 id={headingId} className="section-title">
-        {title} {total !== undefined && <span className="count">{total}</span>}
-      </h2>
+    <BoardGroup
+      title={title}
+      hue={
+        status === undefined || status === "not_pending" ? "green" : DECISION_STATUS_HUES[status]
+      }
+      count={total === undefined ? null : decisionCount(total)}
+    >
       {pages.data.items.length === 0 ? (
         <EmptyState>{empty}</EmptyState>
       ) : (
-        <DecisionList decisions={pages.data.items} />
+        <DecisionTable
+          decisions={pages.data.items}
+          when={status === "Pending" ? "age" : "decided"}
+        />
       )}
       <ShowMore
         shown={pages.data.items.length}
@@ -192,8 +207,12 @@ function DecisionSection({
         error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
         onShowMore={() => void pages.fetchNextPage()}
       />
-    </section>
+    </BoardGroup>
   );
+}
+
+function decisionCount(total: number): string {
+  return `${total} ${total === 1 ? "decision" : "decisions"}`;
 }
 
 /** Collapsed until asked for. The server sends only non-pending rows, so every page is history. */
@@ -209,7 +228,6 @@ function HistorySection({
   filtered: boolean;
 }): ReactNode {
   const [open, setOpen] = useState(false);
-  const listId = useId();
   const select = useCallback(
     (data: InfiniteData<DecisionsPage, string | undefined>) =>
       adaptDecisionPages(data.pages, agents),
@@ -224,40 +242,32 @@ function HistorySection({
   const { hasNextPage, fetchNextPage } = pages;
 
   return (
-    <section className="page-section">
-      <h2 className="section-title">
-        <button
-          type="button"
-          className="disclosure"
-          aria-expanded={open}
-          aria-controls={listId}
-          onClick={() => setOpen((was) => !was)}
-        >
-          <ChevronRight aria-hidden="true" />
-          History <span className="count">{total}</span>
-        </button>
-      </h2>
-      <div id={listId} hidden={!open}>
-        {pages.isPending && open && <p className="quiet">Loading decided history.</p>}
-        {pages.isError && !pages.isFetchNextPageError && (
-          <ErrorState error={toAppError(pages.error)} retry={() => void pages.refetch()} />
-        )}
-        {pages.isSuccess && total === 0 && (
-          <EmptyState>
-            {filtered ? "No decided decisions of this type." : "Nothing has been decided yet."}
-          </EmptyState>
-        )}
-        {items.length > 0 && <DecisionList decisions={items} />}
-        <ShowMore
-          shown={items.length}
-          total={total}
-          noun="decisions"
-          hasMore={hasNextPage}
-          pending={pages.isFetchingNextPage}
-          error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
-          onShowMore={() => void fetchNextPage()}
-        />
-      </div>
-    </section>
+    <BoardGroup
+      title="History"
+      hue="green"
+      count={decisionCount(total)}
+      open={open}
+      onToggle={() => setOpen((was) => !was)}
+    >
+      {pages.isPending && open && <p className="quiet">Loading decided history.</p>}
+      {pages.isError && !pages.isFetchNextPageError && (
+        <ErrorState error={toAppError(pages.error)} retry={() => void pages.refetch()} />
+      )}
+      {pages.isSuccess && total === 0 && (
+        <EmptyState>
+          {filtered ? "No decided decisions of this type." : "Nothing has been decided yet."}
+        </EmptyState>
+      )}
+      {items.length > 0 && <DecisionTable decisions={items} when="decided" />}
+      <ShowMore
+        shown={items.length}
+        total={total}
+        noun="decisions"
+        hasMore={hasNextPage}
+        pending={pages.isFetchingNextPage}
+        error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
+        onShowMore={() => void fetchNextPage()}
+      />
+    </BoardGroup>
   );
 }

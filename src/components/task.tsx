@@ -1,13 +1,18 @@
-import { useId, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { ChevronRight, CircleAlert } from "lucide-react";
 import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
 import { lists } from "./lists";
 import {
   ATTENTION_LABELS,
   BLOCKED_ON_LABELS,
+  GROUP_HUES,
   REQUIREMENT_STATE_LABELS,
   TASK_GROUP_LABELS,
   attentionOf,
+  statusHue,
+  type Coverage,
+  type StatusRef,
   type TaskView,
 } from "./model";
 import {
@@ -19,7 +24,8 @@ import {
   SourceLink,
   Time,
 } from "./record-parts";
-import { formatUtcDay } from "./format";
+import { formatUtcDay, formatUtcShort } from "./format";
+import type { TaskGroup } from "./server-types";
 import { FilterLink, RecordLink } from "./url-state";
 
 /** The id of the tasks page's update log section, which "Updates for <task>" scrolls to. */
@@ -38,29 +44,256 @@ function StaleBadge({ task }: { task: TaskView }): ReactNode {
   );
 }
 
+const GROUPS = Object.keys(TASK_GROUP_LABELS) as TaskGroup[];
+
+function byGroup(tasks: readonly TaskView[]): ReadonlyMap<TaskGroup, readonly TaskView[]> {
+  const groups = new Map<TaskGroup, TaskView[]>();
+  for (const task of tasks) {
+    const group = groups.get(task.group) ?? [];
+    group.push(task);
+    groups.set(task.group, group);
+  }
+  return groups;
+}
+
+/** What blocks the task, as an icon that keeps the dense row on one line; the label is its title and its text. */
+function BlockedMark({ task }: { task: TaskView }): ReactNode {
+  if (task.blocked_on === "none") return null;
+  const label = BLOCKED_ON_LABELS[task.blocked_on];
+  return (
+    <span className="blocked-mark" title={label}>
+      <CircleAlert aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+/** The assignee's avatar and name, or an empty avatar for an unassigned task. */
+function Assignee({ task }: { task: TaskView }): ReactNode {
+  if (task.assignee !== null) return <AgentBadge agent={task.assignee} variant="person" />;
+  return (
+    <span className="agent-person unassigned">
+      <span className="avatar" aria-hidden="true" />
+      Unassigned
+    </span>
+  );
+}
+
+/**
+ * The main table: one section per group in workflow order, a colored edge on every row, a status battery per group.
+ * `compact` tightens the rows for a dashboard.
+ */
+export function TaskTable({
+  tasks,
+  compact = false,
+}: {
+  tasks: readonly TaskView[];
+  compact?: boolean | undefined;
+}): ReactNode {
+  const groups = byGroup(tasks);
+  return (
+    <div className="board-groups" data-compact={compact ? "true" : undefined}>
+      {GROUPS.map((group) => {
+        const rows = groups.get(group);
+        return rows === undefined ? null : <GroupTable key={group} group={group} tasks={rows} />;
+      })}
+    </div>
+  );
+}
+
+const COLUMNS = ["Task", "Agent", "Status", "Repository", "Timeline", "Requirements", "Due"];
+
+function GroupTable({ group, tasks }: { group: TaskGroup; tasks: readonly TaskView[] }): ReactNode {
+  const [open, setOpen] = useState(true);
+  const headingId = useId();
+  const tableId = useId();
+  return (
+    <section className="board-group" data-hue={GROUP_HUES[group]} aria-labelledby={headingId}>
+      <h3 id={headingId} className="group-title">
+        <button
+          type="button"
+          className="disclosure"
+          aria-expanded={open}
+          aria-controls={tableId}
+          onClick={() => setOpen(!open)}
+        >
+          <ChevronRight aria-hidden="true" />
+          {TASK_GROUP_LABELS[group]}
+        </button>
+        <span className="count">
+          {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
+        </span>
+      </h3>
+      <div id={tableId} className="table-scroll" hidden={!open}>
+        <table className="board-table" aria-labelledby={headingId}>
+          <colgroup>
+            <col className="col-task" />
+            <col className="col-agent" />
+            <col className="col-status" />
+            <col className="col-repo" />
+            <col className="col-timeline" />
+            <col className="col-reqs" />
+            <col className="col-due" />
+          </colgroup>
+          <thead>
+            <tr>
+              {COLUMNS.map((name) => (
+                <th key={name} scope="col">
+                  {name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => (
+              <TaskRow key={task.id} task={task} />
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={2} />
+              <td className="battery-cell">
+                <StatusBattery tasks={tasks} />
+              </td>
+              <td colSpan={4} />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function TaskRow({ task: t }: { task: TaskView }): ReactNode {
+  return (
+    <tr>
+      <th scope="row" className="task-cell">
+        <span className="task-line">
+          <RecordLink kind="task" id={t.id} className="task-link">
+            {t.title}
+          </RecordLink>
+          <code className="record-id">{t.id}</code>
+          <StaleBadge task={t} />
+          <BlockedMark task={t} />
+        </span>
+      </th>
+      <td>
+        <Assignee task={t} />
+      </td>
+      <td className="status-cell" data-hue={statusHue(t.statusLabel)}>
+        {t.statusLabel.label}
+      </td>
+      <td className="repo-cell">{t.repository}</td>
+      <td className="center-cell">
+        <TimelinePill task={t} />
+      </td>
+      <td className="center-cell">
+        <ProvenCount progress={t.progress} />
+      </td>
+      <td className="center-cell">
+        {t.due_date !== null && (
+          <time dateTime={t.due_date} title={formatUtcDay(t.due_date)}>
+            {formatUtcShort(t.due_date)}
+          </time>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/** Start to due as a pill in the group's color; a task without both dates leaves the cell empty. */
+function TimelinePill({ task: t }: { task: TaskView }): ReactNode {
+  if (t.start_date === null || t.due_date === null) return null;
+  return (
+    <span
+      className="timeline-pill"
+      title={`${formatUtcDay(t.start_date)} to ${formatUtcDay(t.due_date)}`}
+    >
+      {formatUtcShort(t.start_date)} – {formatUtcShort(t.due_date)}
+    </span>
+  );
+}
+
+/** "2/3" proven, with a bar that repeats it. */
+function ProvenCount({ progress }: { progress: Coverage }): ReactNode {
+  if (progress.total === 0) return <span className="quiet">None</span>;
+  return (
+    <span className="proven">
+      <span>
+        {progress.proven}/{progress.total}
+        <span className="sr-only"> proven</span>
+      </span>
+      <span className="meter" aria-hidden="true">
+        <span
+          className="meter-fill"
+          style={{ inlineSize: `${(progress.proven / progress.total) * 100}%` }}
+        />
+      </span>
+    </span>
+  );
+}
+
+/** How tasks split across status labels: open labels first, then done ones, each in the order it first appears. */
+function statusParts(tasks: readonly TaskView[]): readonly { status: StatusRef; count: number }[] {
+  const counts = new Map<string, { status: StatusRef; count: number }>();
+  for (const { statusLabel } of tasks) {
+    const entry = counts.get(statusLabel.id) ?? { status: statusLabel, count: 0 };
+    entry.count += 1;
+    counts.set(statusLabel.id, entry);
+  }
+  return [...counts.values()].sort((a, b) => Number(a.status.isDone) - Number(b.status.isDone));
+}
+
+/** Every task by status: one wide battery and a legend with each label's count and share. */
+export function StatusOverview({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
+  const parts = statusParts(tasks);
+  return (
+    <div className="status-overview">
+      <StatusBattery tasks={tasks} />
+      <ul className="battery-legend">
+        {parts.map((p) => (
+          <li key={p.status.id} data-hue={statusHue(p.status)}>
+            <span className="legend-swatch" aria-hidden="true" />
+            {p.status.label}
+            <span className="legend-count">{p.count}</span>
+            <span className="quiet">{Math.round((p.count / tasks.length) * 100)}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function StatusBattery({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
+  const parts = statusParts(tasks);
+  const summary = parts.map((p) => `${p.status.label} ${p.count}`).join(", ");
+  return (
+    <span className="battery" role="img" aria-label={summary} title={summary}>
+      {parts.map((p) => (
+        <span key={p.status.id} data-hue={statusHue(p.status)} style={{ flexGrow: p.count }} />
+      ))}
+    </span>
+  );
+}
+
 /** Columns in TASK_GROUP_LABELS order. Read-only: no service writes `group`, so the board offers no drag. */
 export function KanbanBoard({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
   const baseId = useId();
-  const byGroup = new Map<string, TaskView[]>();
-  for (const task of tasks) {
-    const column = byGroup.get(task.group) ?? [];
-    column.push(task);
-    byGroup.set(task.group, column);
-  }
+  const groups = byGroup(tasks);
   return (
     <div className="kanban">
-      {Object.entries(TASK_GROUP_LABELS).map(([group, label]) => {
-        const column = byGroup.get(group) ?? [];
+      {GROUPS.map((group) => {
+        const column = groups.get(group) ?? [];
         const headingId = `${baseId}-${group}`;
         return (
           <section
             key={group}
             className="kanban-col"
-            data-group={group}
+            data-hue={GROUP_HUES[group]}
             aria-labelledby={headingId}
           >
             <h3 id={headingId} className="kanban-head">
-              {label} <span className="count">{column.length}</span>
+              {TASK_GROUP_LABELS[group]} <span className="count">{column.length}</span>
             </h3>
             {column.length > 0 ? (
               <ul className="kanban-cards">
@@ -82,21 +315,18 @@ export function KanbanBoard({ tasks }: { tasks: readonly TaskView[] }): ReactNod
 
 function TaskCard({ task: t }: { task: TaskView }): ReactNode {
   return (
-    <article className="task-card">
+    <article className="task-card" data-hue={statusHue(t.statusLabel)}>
       <h4 className="card-title">
         <RecordLink kind="task" id={t.id} className="row-link">
           {t.title}
         </RecordLink>
       </h4>
       <div className="card-meta">
+        <span className="card-status">{t.statusLabel.label}</span>
         <code className="record-id">{t.id}</code>
-        {t.assignee !== null ? (
-          <AgentBadge agent={t.assignee} variant="chip" />
-        ) : (
-          <span className="quiet">Unassigned</span>
-        )}
         <StaleBadge task={t} />
       </div>
+      <Assignee task={t} />
       <CoverageMeter progress={t.progress} compact />
       {t.blocked_on !== "none" && <p className="attention">{BLOCKED_ON_LABELS[t.blocked_on]}</p>}
       {t.due_date !== null && (
@@ -105,39 +335,6 @@ function TaskCard({ task: t }: { task: TaskView }): ReactNode {
         </p>
       )}
     </article>
-  );
-}
-
-/** Compact task rows: what it is, who has it, what blocks it, and how much is proven. */
-export function TaskList({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
-  return (
-    <ul className="record-list">
-      {tasks.map((t) => (
-        <li key={t.id}>
-          <article className="record-row">
-            <h3 className="row-title">
-              <RecordLink kind="task" id={t.id} className="row-link">
-                {t.title}
-              </RecordLink>
-            </h3>
-            <div className="row-meta">
-              <code className="record-id">{t.id}</code>
-              {t.assignee !== null ? (
-                <AgentBadge agent={t.assignee} variant="chip" />
-              ) : (
-                <span>Unassigned</span>
-              )}
-              <span>{t.statusLabel.label}</span>
-              <StaleBadge task={t} />
-            </div>
-            {t.blocked_on !== "none" && (
-              <p className="attention">{BLOCKED_ON_LABELS[t.blocked_on]}</p>
-            )}
-            <CoverageMeter progress={t.progress} compact />
-          </article>
-        </li>
-      ))}
-    </ul>
   );
 }
 

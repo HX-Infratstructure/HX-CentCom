@@ -59,10 +59,11 @@ describe("a pull request's state in the list", () => {
     expect(row).not.toHaveTextContent("Open");
   });
 
-  it("leaves an open PR unlabeled", () => {
+  it("labels an open PR as Open and nothing else", () => {
     renderRows([pr(23, "Add the eval dashboard", "open")]);
     const row = rowOf("Add the eval dashboard");
     expect(row).toHaveTextContent(`${REPO} #23`);
-    expect(row).not.toHaveTextContent(/Open|Closed|Merged|Gone/);
+    expect(row).toHaveTextContent("Open");
+    expect(row).not.toHaveTextContent(/Closed|Merged|Gone/);
   });
 });

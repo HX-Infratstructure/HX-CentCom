@@ -4,7 +4,7 @@ import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { toAppError } from "@/components/adapt";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
-import { PullRequestList } from "@/components/pull-request";
+import { PullRequestBoard } from "@/components/pull-request";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { prPages, type PrQuery } from "@/lib/task-data";
@@ -14,6 +14,8 @@ type PrFilters = ReturnType<typeof lists.prs.filters>;
 function prQuery(filters: PrFilters): PrQuery {
   return { repo: filters.repo, state: filters.state };
 }
+
+const DESCRIPTION = "Pull requests as the last GitHub sync stored them, newest first.";
 
 export const Route = createFileRoute("/pull-requests")({
   validateSearch: (raw) => lists.prs.validate(raw),
@@ -26,12 +28,12 @@ export const Route = createFileRoute("/pull-requests")({
       { title: "Pull requests | HX-CentCom" },
       {
         name: "description",
-        content: "Pull requests as the last GitHub sync stored them, newest first.",
+        content: DESCRIPTION,
       },
       { property: "og:title", content: "Pull requests | HX-CentCom" },
       {
         property: "og:description",
-        content: "Pull requests as the last GitHub sync stored them, newest first.",
+        content: DESCRIPTION,
       },
     ],
   }),
@@ -45,7 +47,7 @@ function PullRequestsPage(): ReactNode {
   const { items, counts } = pages.data;
 
   return (
-    <Workspace page="Pull requests">
+    <Workspace page="Pull requests" description={DESCRIPTION}>
       <FilterBar
         search={lists.prs}
         counts={{ repo: counts?.byRepo ?? {}, state: counts?.byState ?? {} }}
@@ -58,7 +60,7 @@ function PullRequestsPage(): ReactNode {
             : "No GitHub sync has stored pull requests yet."}
         </EmptyState>
       ) : (
-        <PullRequestList prs={items} />
+        <PullRequestBoard prs={items} totals={counts?.byState ?? {}} />
       )}
       <ShowMore
         shown={items.length}

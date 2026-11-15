@@ -1,33 +1,75 @@
 import { useId, type ReactNode } from "react";
+import { BoardGroup, BoardTable, PersonCell, StatusCell, type BoardColumn } from "./board";
 import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
-import { LESSON_STATUS_LABELS, type LessonView } from "./model";
+import { LESSON_STATUS_HUES, LESSON_STATUS_LABELS, groupRows, type LessonView } from "./model";
 import { AgentBadge, Fact, Facts, SourceLink, Time } from "./record-parts";
 import { RichText } from "./rich-text";
 import { RecordLink } from "./url-state";
 
-export function LessonRow({ lesson }: { lesson: LessonView }): ReactNode {
+const STATUSES = Object.keys(LESSON_STATUS_LABELS) as LessonView["status"][];
+
+const COLUMNS: readonly BoardColumn[] = [
+  { name: "Title", width: "auto" },
+  { name: "Tags", width: 260 },
+  { name: "Recorded by", width: 170 },
+  { name: "Status", width: 124 },
+  { name: "Updated", width: 104 },
+];
+
+/** Lessons grouped by status. `totals` is the server's count per status under the other filters. */
+export function LessonBoard({
+  lessons,
+  totals,
+}: {
+  lessons: readonly LessonView[];
+  totals: Readonly<Partial<Record<LessonView["status"], number>>>;
+}): ReactNode {
   return (
-    <article className="record-row lesson-row">
-      <h3 className="row-title">
-        <RecordLink kind="lesson" id={lesson.id} className="row-link">
-          {lesson.title}
-        </RecordLink>
-      </h3>
-      <p className="row-summary">{lesson.summary}</p>
-      <div className="row-meta">
-        <span className="status-label" data-status={lesson.status}>
-          {LESSON_STATUS_LABELS[lesson.status]}
+    <div className="board-groups">
+      {groupRows(STATUSES, lessons, (lesson) => lesson.status).map(({ key, rows }) => {
+        const total = totals[key] ?? rows.length;
+        return (
+          <BoardGroup
+            key={key}
+            title={LESSON_STATUS_LABELS[key]}
+            hue={LESSON_STATUS_HUES[key]}
+            count={`${total} ${total === 1 ? "lesson" : "lessons"}`}
+          >
+            <BoardTable columns={COLUMNS}>
+              {rows.map((lesson) => (
+                <LessonRow key={lesson.id} lesson={lesson} />
+              ))}
+            </BoardTable>
+          </BoardGroup>
+        );
+      })}
+    </div>
+  );
+}
+
+function LessonRow({ lesson }: { lesson: LessonView }): ReactNode {
+  return (
+    <tr>
+      <th scope="row">
+        <span className="task-line">
+          <RecordLink kind="lesson" id={lesson.id} className="task-link">
+            {lesson.title}
+          </RecordLink>
+          <code className="record-id">{lesson.id}</code>
         </span>
-        {lesson.status === "adopted" && (
-          <span>
-            Enforced by <SourceLink source={lesson.enforcedBy} compact />
-          </span>
-        )}
+      </th>
+      <td className="clip-cell">
         <Tags tags={lesson.tags} />
-        <code className="record-id">{lesson.id}</code>
-      </div>
-    </article>
+      </td>
+      <PersonCell agent={lesson.creator} empty="Not recorded" />
+      <StatusCell hue={LESSON_STATUS_HUES[lesson.status]}>
+        {LESSON_STATUS_LABELS[lesson.status]}
+      </StatusCell>
+      <td className="center-cell">
+        <Time at={lesson.updatedAt} />
+      </td>
+    </tr>
   );
 }
 
@@ -63,11 +105,20 @@ function LessonBody({ lesson }: { lesson: LessonView }): ReactNode {
   const baseId = useId();
   return (
     <>
+      <div className="sheet-pills">
+        <span className="status-pill" data-hue={LESSON_STATUS_HUES[lesson.status]}>
+          {LESSON_STATUS_LABELS[lesson.status]}
+        </span>
+      </div>
       {SECTIONS.map(([field, heading]) => {
         const text = lesson[field];
         if (text === null) return null;
         return (
-          <section key={field} aria-labelledby={`${baseId}-${field}`} className="sheet-section">
+          <section
+            key={field}
+            aria-labelledby={`${baseId}-${field}`}
+            className="sheet-section sheet-description"
+          >
             <h3 id={`${baseId}-${field}`}>{heading}</h3>
             <RichText source={text} />
           </section>

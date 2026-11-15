@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, isInaccessible, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, isInaccessible, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { routeTree } from "@/routeTree.gen";
 import type { Agent, StatusLabel, Task, UpdatesPage, Workspace } from "./server-types";
@@ -85,8 +85,11 @@ async function renderTasks(url: string, tasks: readonly Task[], updateDeps: obje
   await screen.findByRole("heading", { level: 1, name: "Tasks" });
 }
 
-function cardTitles(): readonly (string | null)[] {
-  return screen.queryAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+/** The task names in the main table, top to bottom. */
+function taskTitles(): readonly (string | null)[] {
+  return screen
+    .queryAllByRole("rowheader")
+    .map((cell) => within(cell).getByRole("link").textContent);
 }
 
 /** A chip reads as its label and its count, for example "Atlas 2". */
@@ -118,13 +121,13 @@ describe("the task board's agent filter", () => {
   it("shows only the chosen agent's tasks", async () => {
     await renderTasks("/tasks?agent=atlas", ROSTER, { agentId: "atlas" });
 
-    expect(cardTitles()).toEqual(["Draft the shadow hook config", "Route the LiteLLM hook"]);
+    expect(taskTitles()).toEqual(["Draft the shadow hook config", "Route the LiteLLM hook"]);
   });
 
   it("shows every task, unassigned ones included, without the filter", async () => {
     await renderTasks("/tasks", ROSTER);
 
-    expect(cardTitles()).toEqual([
+    expect(taskTitles()).toEqual([
       "Draft the shadow hook config",
       "Wire the eval dashboard",
       "Route the LiteLLM hook",
@@ -139,7 +142,7 @@ describe("the task board's agent filter", () => {
     expect(screen.getAllByRole("status").map((s) => s.textContent)).toContain(
       "No tasks match these filters.",
     );
-    expect(cardTitles()).toEqual([]);
+    expect(taskTitles()).toEqual([]);
   });
 
   it("counts every agent's tasks on the agent chips and only the chosen agent's on the repository chips", async () => {
@@ -147,6 +150,13 @@ describe("the task board's agent filter", () => {
 
     expectChips("Agent", ["Atlas 2", "Beacon 2"]);
     expectChips("Repository", ["HX-CentCom 1", "HX-LiteLLM 1"]);
+  });
+
+  it("names the chosen agent and its count on the Agent toolbar button, and leaves Repository unset", async () => {
+    await renderTasks("/tasks?agent=atlas", ROSTER, { agentId: "atlas" });
+
+    const buttons = screen.getByRole("group", { name: "Filter tasks" }).querySelectorAll("summary");
+    expect([...buttons].map((b) => b.textContent)).toEqual(["AgentAtlas2", "Repository"]);
   });
 
   it("counts every task on the repository chips without the agent filter", async () => {
@@ -164,6 +174,114 @@ describe("the task board's agent filter", () => {
     ]);
 
     expectChips("Repository", ["constructor 1", "HX-CentCom 1", "toString 1"]);
+  });
+});
+
+describe("the tasks main table", () => {
+  const TABLE: readonly Task[] = [
+    task({
+      id: "IRP-61",
+      title: "Draft the shadow hook config",
+      group: "backlog",
+      status: "Waiting",
+      start_date: "2026-11-02",
+      due_date: "2026-11-13",
+    }),
+    task({
+      id: "IRP-62",
+      title: "Wire the eval dashboard",
+      status: "In progress",
+      progress: { proven: 2, total: 3, percent: 67 },
+    }),
+    task({ id: "IRP-63", title: "Pin the router build", group: "backlog", status: "Waiting" }),
+    task({
+      id: "IRP-64",
+      title: "Write the release notes",
+      group: "done",
+      status: "Complete",
+      open: false,
+    }),
+  ];
+
+  function group(name: RegExp): HTMLElement {
+    return screen.getByRole("region", { name });
+  }
+
+  /** The row's cells after the task name, in column order: Agent, Status, Repository, Timeline, Requirements, Due. */
+  function cellsOf(title: string): readonly HTMLElement[] {
+    const row = screen.getByRole("link", { name: title }).closest("tr");
+    if (row === null) throw new Error(`No table row for ${title}`);
+    return within(row).getAllByRole("cell");
+  }
+
+  it("is the default view, with the Main table tab current", async () => {
+    await renderTasks("/tasks", TABLE);
+
+    const tabs = within(screen.getByRole("navigation", { name: "Task view" })).getAllByRole("link");
+    expect(tabs.map((t) => t.textContent)).toEqual(["Main table", "Kanban", "Timeline"]);
+    expect(tabs[0]).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("heading", { level: 4 })).toBeNull();
+  });
+
+  it("groups the rows in workflow order and leaves out a group with no tasks", async () => {
+    await renderTasks("/tasks", TABLE);
+
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+      "Backlog2 tasks",
+      "In progress1 task",
+      "Done1 task",
+    ]);
+    expect(
+      within(group(/^Backlog/))
+        .getAllByRole("rowheader")
+        .map((h) => within(h).getByRole("link").textContent),
+    ).toEqual(["Draft the shadow hook config", "Pin the router build"]);
+  });
+
+  it("fills each status cell with its label in the status color", async () => {
+    await renderTasks("/tasks", TABLE);
+
+    const [, waiting] = cellsOf("Draft the shadow hook config");
+    const [, working] = cellsOf("Wire the eval dashboard");
+    const [, complete] = cellsOf("Write the release notes");
+    expect(waiting).toHaveTextContent("Waiting");
+    expect(waiting).toHaveAttribute("data-hue", "grey");
+    expect(working).toHaveTextContent("In progress");
+    expect(working).toHaveAttribute("data-hue", "orange");
+    expect(complete).toHaveTextContent("Complete");
+    expect(complete).toHaveAttribute("data-hue", "green");
+  });
+
+  it("shows the agent, the planned dates, and the proven requirements in their columns", async () => {
+    await renderTasks("/tasks", TABLE);
+
+    const [agent, , repo, timeline] = cellsOf("Draft the shadow hook config");
+    expect(agent).toHaveTextContent("Atlas");
+    expect(repo).toHaveTextContent("HX-CentCom");
+    expect(timeline).toHaveTextContent("2 Nov – 13 Nov");
+    const [, , , , requirements] = cellsOf("Wire the eval dashboard");
+    expect(requirements).toHaveTextContent("2/3 proven");
+  });
+
+  it("ends each group with a battery of its status split", async () => {
+    await renderTasks("/tasks", TABLE);
+
+    expect(within(group(/^Backlog/)).getByRole("img")).toHaveAccessibleName("Waiting 2");
+    expect(within(group(/^Done/)).getByRole("img")).toHaveAccessibleName("Complete 1");
+  });
+
+  it("collapses a group from its caret and opens it again", async () => {
+    await renderTasks("/tasks", TABLE);
+
+    const caret = within(group(/^Backlog/)).getByRole("button", { name: "Backlog" });
+    expect(caret).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(caret);
+    expect(caret).toHaveAttribute("aria-expanded", "false");
+    expect(isInaccessible(within(group(/^Backlog/)).getByRole("table", { hidden: true }))).toBe(
+      true,
+    );
+    fireEvent.click(caret);
+    expect(within(group(/^Backlog/)).getByRole("table")).toBeVisible();
   });
 });
 
@@ -194,7 +312,7 @@ describe("the task board's columns", () => {
   }
 
   it("shows four columns in workflow order, each counting its cards", async () => {
-    await renderTasks("/tasks", BOARD);
+    await renderTasks("/tasks?view=kanban", BOARD);
 
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
       "Backlog 2",
@@ -205,7 +323,7 @@ describe("the task board's columns", () => {
   });
 
   it("puts each card in the column of its group", async () => {
-    await renderTasks("/tasks", BOARD);
+    await renderTasks("/tasks?view=kanban", BOARD);
 
     expect(column("Backlog 2")).toEqual([
       "Draft the shadow hook config",
@@ -216,7 +334,7 @@ describe("the task board's columns", () => {
   });
 
   it("says an empty column has no tasks", async () => {
-    await renderTasks("/tasks", BOARD);
+    await renderTasks("/tasks?view=kanban", BOARD);
 
     expect(column("Ready for owner 0")).toEqual([]);
     expect(screen.getByRole("region", { name: "Ready for owner 0" })).toHaveTextContent("No tasks");

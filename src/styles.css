@@ -51,21 +51,24 @@
   --text-2xl--line-height: 1.25;
 }
 :root {
-  --background: oklch(0.982 0.002 160);
-  --foreground: oklch(0.25 0.009 170);
+  /* monday.com's work-management palette: #F6F7FB surface, #323338 text, #0073EA accent, #E6E9EF grid lines. */
+  --background: oklch(0.977 0.005 275);
+  --foreground: oklch(0.322 0.009 277);
   --card: oklch(1 0 0);
-  --primary: oklch(0.46 0.108 164);
+  --primary: oklch(0.56 0.2 257);
   --primary-foreground: oklch(0.995 0 0);
-  --secondary: oklch(0.95 0.003 160);
-  --muted: oklch(0.96 0.003 160);
-  --muted-foreground: oklch(0.5 0.014 170);
-  --accent: oklch(0.94 0.021 160);
-  --border: oklch(0.91 0.005 160);
-  --destructive: oklch(0.57 0.16 30);
-  --rail: oklch(0.205 0.007 170);
-  --rail-muted: oklch(0.64 0.01 160);
-  --rail-text: oklch(0.87 0.005 160);
-  --rail-active: oklch(0.29 0.012 165);
+  --primary-soft: oklch(0.925 0.04 250);
+  --secondary: oklch(0.955 0.006 270);
+  --muted: oklch(0.967 0.004 265);
+  --muted-foreground: oklch(0.5 0.027 283);
+  --accent: oklch(0.955 0.014 255);
+  --border: oklch(0.933 0.009 265);
+  --destructive: oklch(0.575 0.194 16);
+  --rail: oklch(0.977 0.005 275);
+  --rail-muted: oklch(0.5 0.027 283);
+  --rail-text: oklch(0.322 0.009 277);
+  --rail-active: oklch(0.925 0.04 250);
+  --green: oklch(0.46 0.108 164);
   --green-soft: oklch(0.945 0.025 160);
   --amber: oklch(0.51 0.11 70);
   --amber-soft: oklch(0.96 0.034 80);
@@ -74,8 +77,27 @@
   --stone: oklch(0.52 0.015 190);
   --violet: oklch(0.5 0.13 295);
   --violet-soft: oklch(0.95 0.025 295);
-  --input-border: oklch(0.64 0.008 165);
-  --shadow: 0 8px 30px oklch(0.2 0.01 160 / 0.08);
+  --input-border: oklch(0.64 0.012 275);
+  /*
+   * Board hues. The bright value is monday's own color, used only where no text sits on it: row edges, card tops,
+   * and the proven meter. The ink is the same hue darkened until white text on it, and it as text on white, reads at
+   * 4.5:1.
+   */
+  --hue-green: oklch(0.732 0.179 155);
+  --hue-green-ink: oklch(0.52 0.179 155);
+  --hue-orange: oklch(0.803 0.153 70);
+  --hue-orange-ink: oklch(0.57 0.17 60);
+  --hue-red: oklch(0.619 0.194 16);
+  --hue-red-ink: oklch(0.575 0.194 16);
+  --hue-purple: oklch(0.613 0.191 307);
+  --hue-purple-ink: oklch(0.575 0.191 307);
+  --hue-blue: oklch(0.69 0.159 257);
+  --hue-blue-ink: oklch(0.555 0.159 257);
+  --hue-grey: oklch(0.82 0 0);
+  --hue-grey-ink: oklch(0.55 0.01 275);
+  --shadow: 0 4px 16px oklch(0.3 0.04 275 / 0.07), 0 1px 3px oklch(0.3 0.04 275 / 0.06);
+  --card-shadow: 0 1px 4px oklch(0.3 0.04 275 / 0.12);
+  --popover-shadow: 0 8px 28px oklch(0.3 0.04 275 / 0.16), 0 1px 4px oklch(0.3 0.04 275 / 0.1);
 }
 @layer base {
   * {
@@ -115,15 +137,11 @@
   outline: 2px solid var(--primary);
   outline-offset: 3px;
 }
-.workspace-rail :focus-visible {
-  outline-color: var(--rail-text);
-}
 
 @layer components {
-  /* The rail color fills its column, so the rail reads as one band however long the page is. */
   .app-shell {
     display: grid;
-    grid-template-columns: 224px minmax(0, 1fr);
+    grid-template-columns: 236px minmax(0, 1fr);
     min-height: 100vh;
     background: var(--rail);
   }
@@ -133,73 +151,127 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    padding: 24px 16px 20px;
+    padding: 16px 12px 16px;
     background: var(--rail);
     color: var(--rail-text);
   }
   .brand {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 0 8px;
-    color: var(--primary-foreground);
-    font-size: var(--text-lg);
+    gap: 10px;
+    padding: 8px;
+    border-radius: var(--radius-lg);
+    color: var(--foreground);
+    font-size: var(--text-base);
     font-weight: 600;
     line-height: 1.25;
+  }
+  .brand:hover {
+    background: var(--secondary);
   }
   .brand-mark {
     display: grid;
     place-items: center;
     flex-shrink: 0;
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     border-radius: var(--radius-lg);
     background: var(--primary);
-    font-size: 15px;
+    color: var(--primary-foreground);
+    font-size: 13px;
     font-weight: 700;
   }
   .brand-name small {
     display: block;
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--rail-muted);
     font-size: var(--text-xs);
     font-weight: 400;
   }
   .env-label {
     margin-top: auto;
-    padding: 0 12px;
+    padding: 0 10px;
     color: var(--rail-muted);
     font-size: var(--text-xs);
   }
   .work-area {
     min-width: 0;
-    background: var(--background);
+    padding: 12px 12px 12px 0;
   }
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    min-height: 64px;
-    padding: 12px 34px;
-    border-bottom: 1px solid var(--border);
+  /* The one raised surface: the board sits on it the way a monday board sits on its workspace. */
+  .board-surface {
+    min-height: calc(100vh - 24px);
+    border-radius: 12px;
     background: var(--card);
+    box-shadow: var(--shadow);
   }
-  .topbar h1 {
-    font-size: var(--text-xl);
-    line-height: var(--text-xl--line-height);
-    font-weight: 600;
+  .board-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 4px 16px;
+    padding: 22px 32px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .board-heading {
+    display: grid;
+    gap: 4px;
+    padding-bottom: 14px;
+  }
+  .board-header h1 {
+    font-size: var(--text-2xl);
+    line-height: var(--text-2xl--line-height);
+    font-weight: 700;
+  }
+  .board-description {
+    max-width: 72ch;
+    color: var(--muted-foreground);
+    font-size: var(--text-base);
+  }
+  .view-tabs {
+    grid-column: 1 / -1;
+  }
+  .view-tabs ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .view-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px 10px;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    color: var(--muted-foreground);
+    font-size: var(--text-base);
+    font-weight: 500;
+  }
+  .view-tab svg {
+    width: 16px;
+    height: 16px;
+  }
+  .view-tab:hover {
+    background: var(--secondary);
+    color: var(--foreground);
+  }
+  .view-tab[data-status="active"] {
+    color: var(--foreground);
+    box-shadow: inset 0 -2px 0 var(--primary);
   }
   /* Agent tones. The selectors are the list of known tone names; any other `agents.color` renders neutral. */
   .agent-badge,
   .agent-chip,
-  .chip,
-  .gantt-bar {
+  .agent-person,
+  .option-avatar,
+  .chip {
     --tone-fg: var(--stone);
     --tone-bg: var(--secondary);
   }
   [data-tone="green"] {
-    --tone-fg: var(--primary);
+    --tone-fg: var(--green);
     --tone-bg: var(--green-soft);
   }
   [data-tone="sky"] {
@@ -221,37 +293,40 @@
 
   .rail-nav {
     display: grid;
-    gap: 4px;
-    margin-top: 32px;
+    gap: 2px;
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
   }
   .rail-link {
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 36px;
-    padding: 0 12px;
+    height: 34px;
+    padding: 0 10px;
     border-radius: var(--radius-md);
     color: var(--rail-text);
-    font-size: var(--text-sm);
-    font-weight: 500;
+    font-size: var(--text-base);
   }
   .rail-link:hover {
-    background: var(--rail-active);
+    background: var(--secondary);
   }
   .rail-link[data-status="active"] {
     background: var(--rail-active);
-    color: var(--primary-foreground);
+    font-weight: 600;
   }
   .rail-link svg {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     flex-shrink: 0;
+    color: var(--muted-foreground);
+  }
+  .rail-link[data-status="active"] svg {
+    color: var(--primary);
   }
 
   .page {
-    max-width: 1240px;
-    margin: 0 auto;
-    padding: 32px 34px 56px;
+    padding: 16px 32px 48px;
   }
   .page-section {
     margin-top: 32px;
@@ -288,41 +363,161 @@
   .disclosure[aria-expanded="true"] svg {
     transform: rotate(90deg);
   }
-  .view-tabs {
-    margin: 4px 0 18px;
-  }
 
-  .overview {
+  .dashboard {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 340px;
-    grid-template-rows: auto auto 1fr;
-    grid-template-areas:
-      "feed decisions"
-      "feed tasks"
-      "feed prs";
-    gap: 0 48px;
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
   }
+  .summary {
+    display: grid;
+    gap: 16px;
+  }
+  .number-widgets {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  /* The 6 px edge in the widget's bright hue repeats the board's group edge; the number takes the readable ink. */
+  .number-widget {
+    display: grid;
+    gap: 8px;
+    height: 100%;
+    padding: 14px 16px 16px 22px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--card);
+    box-shadow: inset 6px 0 0 var(--hue);
+    transition:
+      border-color 0.15s ease-out,
+      box-shadow 0.15s ease-out;
+  }
+  .number-widget:hover {
+    border-color: color-mix(in oklab, var(--hue) 50%, var(--border));
+    box-shadow:
+      inset 6px 0 0 var(--hue),
+      var(--card-shadow);
+  }
+  .number-label {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--muted-foreground);
+  }
+  .number-value {
+    font-size: 34px;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--hue-ink);
+  }
+  .widget {
+    min-width: 0;
+    padding: 16px 20px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--card);
+  }
+  .widget-title {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 12px;
+    font-size: var(--text-base);
+    font-weight: 600;
+  }
+  .status-overview {
+    display: grid;
+    gap: 12px;
+  }
+  .status-overview .battery {
+    height: 30px;
+  }
+  .battery-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--text-sm);
+  }
+  .battery-legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .legend-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: var(--hue-ink);
+  }
+  .legend-count {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .dashboard-columns {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 20px;
+  }
+  .dashboard-stack {
+    display: grid;
+    gap: 20px;
+    align-content: start;
+  }
+  /* The feed takes the height of the decisions and PRs beside it and scrolls inside, as a monday updates widget does. */
   .overview-feed {
-    grid-area: feed;
+    display: flex;
+    flex-direction: column;
   }
-  .overview-decisions {
-    grid-area: decisions;
+  .overview-feed .update-feed {
+    flex: 1 1 0;
+    min-height: 420px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
-  .overview-tasks {
-    grid-area: tasks;
+  .overview-decisions .record-list,
+  .overview-prs .record-list {
+    border-top: 0;
   }
-  .overview-prs {
-    grid-area: prs;
-  }
-  .overview-decisions,
-  .overview-tasks {
-    padding-bottom: 32px;
+  .overview-decisions .record-list > li:last-child,
+  .overview-prs .record-list > li:last-child {
+    border-bottom: 0;
   }
   .overview-decisions .record-row,
-  .overview-tasks .record-row,
   .overview-prs .record-row {
     padding: 12px 0;
+  }
+  .overview-decisions .row-summary {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: var(--text-sm);
+  }
+  .section-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 20px;
+    margin-bottom: 4px;
+  }
+  .section-bar .section-title {
+    margin-bottom: 0;
+  }
+  .section-bar .filter-bar {
+    padding: 0;
+  }
+  .overview-prs .row-title .source-link {
+    color: var(--foreground);
+    text-decoration-color: transparent;
+  }
+  .overview-prs .row-title .source-link:hover {
+    text-decoration-color: currentColor;
   }
 
   .quiet {
@@ -378,9 +573,9 @@
   .filter-bar {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 14px 28px;
-    padding: 4px 0 16px;
+    align-items: center;
+    gap: 6px 4px;
+    padding: 0 0 14px;
   }
   .facet {
     display: grid;
@@ -396,23 +591,126 @@
     font-weight: 500;
     color: var(--muted-foreground);
   }
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
+  .toolbar-menu {
+    position: relative;
+  }
+  .toolbar-button,
+  .facet-select {
+    display: inline-flex;
+    align-items: center;
     gap: 6px;
+    height: 32px;
+    padding: 0 8px 0 10px;
+    border-radius: 4px;
+    font-size: var(--text-sm);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  .toolbar-button {
+    list-style: none;
+  }
+  .toolbar-button::-webkit-details-marker {
+    display: none;
+  }
+  .toolbar-button:hover,
+  .facet-select:hover,
+  .toolbar-menu[open] > .toolbar-button {
+    background: var(--secondary);
+  }
+  .toolbar-menu[data-active] > .toolbar-button,
+  .facet-select[data-active] {
+    background: var(--primary-soft);
+  }
+  .toolbar-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--muted-foreground);
+  }
+  .toolbar-caret {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--muted-foreground);
+    transition: transform 0.15s ease-out;
+  }
+  .toolbar-menu[open] .toolbar-caret {
+    transform: rotate(180deg);
+  }
+  .toolbar-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 220px;
+    overflow: hidden;
+    color: var(--primary);
+    font-weight: 500;
+    text-overflow: ellipsis;
+  }
+  .toolbar-value .chip-count {
+    color: var(--primary);
+  }
+  .avatar-stack {
+    display: inline-flex;
+    padding-left: 5px;
+  }
+  .avatar-stack .option-avatar {
+    margin-left: -3px;
+    font-size: 8px;
+    box-shadow: 0 0 0 1.5px var(--card);
+  }
+  .option-avatar {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--tone-fg);
+    color: var(--primary-foreground);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .option-avatar::before {
+    content: attr(data-initials);
+  }
+  .toolbar-value .option-avatar {
+    width: 20px;
+    height: 20px;
+    font-size: 8px;
+  }
+  .toolbar-panel {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    left: 0;
+    width: max-content;
+    min-width: 240px;
+    max-width: min(340px, calc(100vw - 48px));
+    padding: 12px 8px 8px;
+    border-radius: var(--radius-lg);
+    background: var(--card);
+    box-shadow: var(--popover-shadow);
+  }
+  .toolbar-panel .facet-label {
+    padding: 0 8px 4px;
+  }
+  .chips {
+    display: grid;
+    gap: 2px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
   .chip {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    height: 28px;
-    padding: 0 10px;
-    border: 1px solid var(--input-border);
-    border-radius: var(--radius-md);
-    background: var(--card);
+    gap: 10px;
+    height: 36px;
+    padding: 0 8px;
+    border-radius: 4px;
     font-size: var(--text-sm);
     white-space: nowrap;
   }
@@ -420,18 +718,21 @@
     background: var(--secondary);
   }
   .chip[aria-current="true"] {
-    border-color: var(--primary);
-    background: var(--primary);
-    color: var(--primary-foreground);
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-weight: 500;
+  }
+  .chip-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .chip-mark {
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
     background: var(--tone-fg);
-  }
-  .chip[aria-current="true"] .chip-mark {
-    outline: 1px solid var(--primary-foreground);
   }
   .chip-count {
     font-size: var(--text-xs);
@@ -439,7 +740,7 @@
     color: var(--muted-foreground);
   }
   .chip[aria-current="true"] .chip-count {
-    color: var(--primary-foreground);
+    color: var(--primary);
   }
   .facet-tabs ul {
     display: flex;
@@ -466,32 +767,96 @@
     color: var(--foreground);
     box-shadow: inset 0 -2px 0 var(--primary);
   }
-  .facet-select select,
-  .facet-days input {
-    height: 30px;
-    padding: 0 8px;
-    border: 1px solid var(--input-border);
-    border-radius: var(--radius-md);
-    background: var(--card);
-    color: var(--foreground);
+  .facet-select {
+    position: relative;
+  }
+  .facet-select .facet-label {
     font-size: var(--text-sm);
+    font-weight: 400;
+    color: var(--foreground);
+  }
+  .facet-select select {
+    max-width: 200px;
+    height: 32px;
+    padding: 0 20px 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--muted-foreground);
+    font: inherit;
+    cursor: pointer;
+    appearance: none;
+  }
+  .facet-select[data-active] select {
+    color: var(--primary);
+    font-weight: 500;
+  }
+  .facet-select .toolbar-caret {
+    position: absolute;
+    right: 8px;
+    pointer-events: none;
   }
   .facet-days {
-    grid-template-columns: auto auto;
-    column-gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    min-width: 300px;
+    padding: 0 8px 6px;
+  }
+  /* Below 364px the 300px floor plus the panel's 16px padding exceeds the panel's 100vw - 48px cap. */
+  @media (max-width: 363px) {
+    .facet-days {
+      grid-template-columns: minmax(0, 1fr);
+      min-width: 0;
+    }
   }
   .facet-days legend {
+    float: left;
+    grid-column: 1 / -1;
     margin-bottom: 6px;
+    padding: 0;
   }
   .facet-days label {
     display: grid;
-    gap: 4px;
+    gap: 6px;
     font-size: var(--text-xs);
+    font-weight: 500;
     color: var(--muted-foreground);
   }
-  .clear-filters {
-    align-self: center;
+  .facet-days input {
+    width: 100%;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    background: var(--card);
+    color: var(--foreground);
+    font: inherit;
     font-size: var(--text-sm);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  .facet-days input:hover {
+    border-color: var(--foreground);
+  }
+  .facet-days input:focus-visible {
+    border-color: var(--primary);
+    outline: 0;
+    box-shadow: 0 0 0 3px var(--primary-soft);
+  }
+  .facet-days input::-webkit-calendar-picker-indicator {
+    opacity: 0.55;
+    cursor: pointer;
+  }
+  .clear-filters {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 4px;
+    font-size: var(--text-sm);
+    text-decoration: none;
+  }
+  .clear-filters:hover {
+    background: var(--primary-soft);
   }
 
   .record-list {
@@ -558,40 +923,50 @@
     list-style: none;
     font-size: var(--text-sm);
   }
-  .type-label {
-    font-weight: 500;
-    color: var(--foreground);
+  .decision-row {
+    grid-template-columns: 96px minmax(0, 1fr);
+    grid-template-areas:
+      "type main"
+      ". meta";
+    gap: 4px 14px;
+    align-items: start;
+  }
+  .decision-row > .type-pill {
+    grid-area: type;
+    margin-top: 1px;
+  }
+  .decision-main {
+    display: grid;
+    grid-area: main;
+    gap: 4px;
+    min-width: 0;
+  }
+  .decision-row > .row-meta {
+    grid-area: meta;
+    margin-top: 0;
+  }
+  .type-pill,
+  .pr-state {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 4px;
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    white-space: nowrap;
   }
   .status-label[data-status="Pending"] {
     color: var(--amber);
     font-weight: 500;
   }
-  .status-label[data-status="Decided"],
-  .status-label[data-status="adopted"] {
+  .status-label[data-status="Decided"] {
     color: var(--primary);
     font-weight: 500;
   }
-  .severity {
-    font-weight: 500;
-  }
-  .severity[data-severity="critical"],
-  .severity[data-severity="high"] {
-    color: var(--destructive);
-  }
-  .severity[data-severity="medium"] {
-    color: var(--amber);
-  }
-  .pr-state {
-    font-weight: 500;
-    color: var(--foreground);
-  }
-  .pr-state[data-state="merged"] {
-    color: var(--violet);
-  }
-  .pr-state[data-state="gone"] {
-    color: var(--amber);
-  }
-
   .agent-badge {
     display: inline-flex;
     align-items: center;
@@ -615,18 +990,6 @@
   .agent-name {
     font-weight: 600;
   }
-  /* An automation post: an outlined mark with no tone, so it never reads as the agent whose change triggered it. */
-  .agent-badge.system-badge {
-    --tone-fg: var(--muted-foreground);
-    --tone-bg: transparent;
-  }
-  .system-badge .agent-mark {
-    border: 1px dashed var(--input-border);
-  }
-  .system-badge .agent-name {
-    font-weight: 500;
-    color: var(--muted-foreground);
-  }
   .agent-chip {
     display: inline-flex;
     align-items: center;
@@ -640,19 +1003,55 @@
     white-space: nowrap;
   }
 
+  .update-feed {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
   .update-item {
     display: grid;
     gap: 6px;
-    padding: 14px 0;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--card);
   }
   .update-head {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px 12px;
+    gap: 6px 10px;
+  }
+  .update-head .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 11px;
+  }
+  .update-head .agent-person-name {
+    font-weight: 600;
+  }
+  /* An automation post: an outlined avatar with no tone, so it never reads as the agent whose change triggered it. */
+  .system-person .avatar {
+    border: 1px dashed var(--input-border);
+    background: none;
+    color: var(--muted-foreground);
+  }
+  .system-person .avatar svg {
+    width: 15px;
+    height: 15px;
+  }
+  .system-person .agent-person-name {
+    color: var(--muted-foreground);
   }
   .update-how {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--secondary);
     font-size: var(--text-xs);
+    font-weight: 500;
     color: var(--muted-foreground);
   }
   .update-time {
@@ -660,7 +1059,13 @@
     font-size: var(--text-xs);
     color: var(--muted-foreground);
   }
+  .update-status,
+  .update-note,
+  .update-refs {
+    margin-left: 40px;
+  }
   .update-status {
+    font-size: var(--text-sm);
     font-weight: 500;
   }
   .update-note {
@@ -672,7 +1077,7 @@
   .update-refs {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
     gap: 4px 14px;
     font-size: var(--text-xs);
   }
@@ -704,30 +1109,464 @@
     background: var(--primary);
   }
 
+  /* Board hues. Every fill under text and every colored label uses --hue-ink; --hue never sits under text. */
+  [data-hue="green"] {
+    --hue: var(--hue-green);
+    --hue-ink: var(--hue-green-ink);
+  }
+  [data-hue="orange"] {
+    --hue: var(--hue-orange);
+    --hue-ink: var(--hue-orange-ink);
+  }
+  [data-hue="red"] {
+    --hue: var(--hue-red);
+    --hue-ink: var(--hue-red-ink);
+  }
+  [data-hue="purple"] {
+    --hue: var(--hue-purple);
+    --hue-ink: var(--hue-purple-ink);
+  }
+  [data-hue="blue"] {
+    --hue: var(--hue-blue);
+    --hue-ink: var(--hue-blue-ink);
+  }
+  [data-hue="grey"] {
+    --hue: var(--hue-grey);
+    --hue-ink: var(--hue-grey-ink);
+  }
+
+  .board-groups {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    padding-top: 6px;
+  }
+  .group-title {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 8px;
+    color: var(--hue-ink);
+    font-size: var(--text-lg);
+    font-weight: 600;
+  }
+  .group-title .disclosure {
+    align-items: center;
+    font-weight: 600;
+  }
+  .group-title .disclosure svg {
+    width: 18px;
+    height: 18px;
+  }
+  .group-title .count {
+    font-size: var(--text-sm);
+  }
+  /* Positioned, so the sr-only text in the cells scrolls with the table instead of widening the page. */
+  .table-scroll {
+    position: relative;
+    overflow-x: auto;
+  }
+  .board-table {
+    width: 100%;
+    min-width: 1000px;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: var(--text-sm);
+  }
+  .col-task {
+    width: auto;
+  }
+  .col-agent {
+    width: 150px;
+  }
+  .col-status {
+    width: 136px;
+  }
+  .col-repo {
+    width: 150px;
+  }
+  .col-timeline {
+    width: 150px;
+  }
+  .col-reqs {
+    width: 120px;
+  }
+  .col-due {
+    width: 88px;
+  }
+  .board-table th,
+  .board-table td {
+    height: 38px;
+    padding: 0 10px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: middle;
+  }
+  .board-groups[data-compact] .board-table th,
+  .board-groups[data-compact] .board-table td {
+    height: 34px;
+  }
+  .board-table thead th {
+    height: 34px;
+    border-top: 1px solid var(--border);
+    background: var(--muted);
+    color: var(--muted-foreground);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    text-align: center;
+  }
+  .board-table thead th:first-child {
+    text-align: left;
+  }
+  /* The group's 6 px edge runs down the first column, header and summary rows included. */
+  .board-table tr > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    padding-left: 16px;
+    background: var(--card);
+    box-shadow: inset 6px 0 0 var(--hue);
+  }
+  .board-table thead tr > :first-child {
+    background: var(--muted);
+    border-top-left-radius: var(--radius-md);
+  }
+  .board-table tfoot tr > :first-child {
+    border-bottom-left-radius: var(--radius-md);
+  }
+  .board-table tbody tr:hover > * {
+    background: var(--muted);
+  }
+  .board-table tbody th {
+    font-weight: 400;
+  }
+  /* The title gives way first; the id and the warning marks always show. */
+  .task-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .task-line > * {
+    flex-shrink: 0;
+  }
+  .task-line > .task-link {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--foreground);
+    font-size: var(--text-base);
+    text-overflow: ellipsis;
+  }
+  .task-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .task-cell .attention {
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--amber-soft);
+    font-size: var(--text-xs);
+    line-height: 20px;
+  }
+  .blocked-mark {
+    display: inline-flex;
+    color: var(--amber);
+  }
+  .blocked-mark svg {
+    width: 16px;
+    height: 16px;
+  }
+  /* monday's signature: the whole cell is the status color, the label centered in white. */
+  .board-table .status-cell {
+    background: var(--hue-ink);
+    border-right-color: var(--card);
+    border-bottom-color: var(--card);
+    color: var(--primary-foreground);
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .board-table tbody tr:hover > .status-cell {
+    background: var(--hue-ink);
+  }
+  .repo-cell {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .board-table .center-cell {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .timeline-pill {
+    display: inline-block;
+    min-width: 100%;
+    padding: 0 10px;
+    border-radius: 12px;
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    line-height: 22px;
+    white-space: nowrap;
+  }
+  .proven {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-xs);
+  }
+  .proven .meter {
+    width: 44px;
+    height: 6px;
+    background: var(--secondary);
+  }
+  .proven .meter-fill {
+    background: var(--hue-green);
+  }
+  .board-table tfoot td {
+    height: 34px;
+    border-right: 0;
+    background: var(--card);
+  }
+  .board-table tfoot .battery-cell {
+    padding: 0 6px;
+  }
+  .battery {
+    display: flex;
+    gap: 1px;
+    height: 22px;
+    overflow: hidden;
+    border-radius: 4px;
+  }
+  .battery > span {
+    flex-basis: 0;
+    background: var(--hue-ink);
+  }
+
+  /* An empty status cell is monday's blank grey, not the group's color the cell would otherwise inherit. */
+  .board-table .status-cell[data-empty],
+  .board-table tbody tr:hover > .status-cell[data-empty] {
+    background: var(--secondary);
+  }
+  .clip-cell {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .board-table td.clip-cell {
+    color: var(--muted-foreground);
+  }
+  .id-run {
+    display: inline-flex;
+    gap: 8px;
+  }
+  .board-table .tag-list {
+    flex-wrap: nowrap;
+  }
+  .task-line > .source-link {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--foreground);
+    font-size: var(--text-base);
+    text-decoration: none;
+    text-overflow: ellipsis;
+  }
+  .task-line > .source-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .board-table .sha {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--muted-foreground);
+  }
+
+  /* The activity log: one line per change, like monday's item log. */
+  .activity-log {
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    list-style: none;
+    overflow: hidden;
+  }
+  .activity-log > li + li {
+    border-top: 1px solid var(--border);
+  }
+  .activity-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 20px;
+    align-items: start;
+    padding: 12px 16px;
+    background: var(--card);
+  }
+  .activity-row:hover {
+    background: var(--muted);
+  }
+  .activity-main {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+  .activity-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    min-width: 0;
+    font-size: var(--text-sm);
+  }
+  .activity-head .agent-person {
+    font-weight: 600;
+  }
+  .activity-head .id-link {
+    color: var(--primary);
+    font-family: inherit;
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .activity-head .id-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .activity-head .type-pill {
+    height: 22px;
+    border-radius: 11px;
+  }
+  .activity-row .change-list {
+    padding-left: 34px;
+    color: var(--muted-foreground);
+  }
+  .change-field {
+    color: var(--muted-foreground);
+  }
+  .change-from {
+    color: var(--muted-foreground);
+    text-decoration: line-through;
+    text-decoration-color: var(--input-border);
+  }
+  .change-to {
+    color: var(--foreground);
+    font-weight: 500;
+  }
+  .activity-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding-left: 34px;
+    font-size: var(--text-xs);
+    color: var(--muted-foreground);
+  }
+  .activity-side {
+    display: grid;
+    justify-items: end;
+    gap: 8px;
+    font-size: var(--text-xs);
+    color: var(--muted-foreground);
+    white-space: nowrap;
+  }
+  .revert-action {
+    display: grid;
+    justify-items: end;
+    gap: 8px;
+    white-space: normal;
+  }
+  .revert-button {
+    height: 28px;
+    gap: 6px;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
+    font-weight: 600;
+  }
+  .revert-button svg {
+    width: 14px;
+    height: 14px;
+  }
+  .revert-button:hover {
+    border-color: var(--hue-red-ink);
+    color: var(--hue-red-ink);
+  }
+  .restore-list {
+    display: grid;
+    gap: 6px;
+    margin: 4px 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--muted);
+    color: var(--foreground);
+    list-style: none;
+  }
+
+  .agent-person {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .avatar {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--tone-fg);
+    color: var(--primary-foreground);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .agent-person.unassigned {
+    color: var(--muted-foreground);
+  }
+  .unassigned .avatar {
+    border: 1px dashed var(--input-border);
+    background: none;
+  }
+  .agent-person-name {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   .kanban {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 16px;
+    gap: 14px;
     align-items: start;
+    padding-top: 6px;
   }
   .kanban-col {
     display: grid;
-    gap: 10px;
-    padding-top: 10px;
-    border-top: 2px solid var(--stone);
-  }
-  .kanban-col[data-group="in_progress"] {
-    border-top-color: var(--sky);
-  }
-  .kanban-col[data-group="ready_for_owner"] {
-    border-top-color: var(--amber);
-  }
-  .kanban-col[data-group="done"] {
-    border-top-color: var(--primary);
+    gap: 8px;
+    padding: 0 8px 10px;
+    border-radius: var(--radius-lg);
+    background: var(--muted);
   }
   .kanban-head {
-    font-size: var(--text-sm);
+    margin: 0 -8px;
+    padding: 9px 12px;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+    font-size: var(--text-base);
     font-weight: 600;
+  }
+  .kanban-head .count {
+    color: inherit;
+    opacity: 0.9;
+  }
+  .kanban-col > .quiet {
+    padding: 4px;
   }
   .kanban-cards {
     display: grid;
@@ -740,18 +1579,19 @@
     position: relative;
     display: grid;
     gap: 8px;
-    padding: 12px;
-    border: 1px solid var(--border);
+    padding: 10px 12px 12px;
+    border-top: 4px solid var(--hue);
     border-radius: var(--radius-lg);
     background: var(--card);
+    box-shadow: var(--card-shadow);
   }
   .task-card:hover {
-    border-color: var(--input-border);
+    box-shadow: 0 3px 10px oklch(0.3 0.04 275 / 0.16);
   }
   .card-title {
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     font-weight: 500;
-    line-height: 1.45;
+    line-height: 1.4;
   }
   .card-meta {
     display: flex;
@@ -759,6 +1599,14 @@
     align-items: center;
     gap: 6px 10px;
     font-size: var(--text-xs);
+  }
+  .card-status {
+    padding: 0 8px;
+    border-radius: 4px;
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+    font-weight: 600;
+    line-height: 20px;
   }
   .task-card p {
     font-size: var(--text-xs);
@@ -820,9 +1668,32 @@
     gap: 6px 16px;
     font-size: var(--text-sm);
   }
+  .sheet-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 12px;
+    border-radius: 12px;
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    white-space: nowrap;
+  }
   .sheet-section {
     display: grid;
     gap: 8px;
+  }
+  /* The record's own words on a quiet panel, so they read apart from the facts below. */
+  .sheet-description {
+    padding: 14px 16px;
+    border-radius: var(--radius-lg);
+    background: var(--muted);
   }
   .sheet-section h3 {
     font-size: var(--text-sm);
@@ -980,11 +1851,14 @@
     white-space: pre-line;
   }
 
+  /* The owner's form wears the Pending purple edge, the color of the group it moves the decision out of. */
   .decide-form {
     display: grid;
     gap: 18px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-top: 6px solid var(--hue-purple);
+    border-radius: var(--radius-lg);
   }
   .decide-form h3 {
     font-size: var(--text-base);
@@ -1044,6 +1918,41 @@
     height: 16px;
     margin: 0;
     accent-color: var(--primary);
+  }
+  /* The outcome picker reads like monday's status column: each choice fills with its color when chosen. */
+  .status-picker {
+    gap: 8px;
+  }
+  .status-picker .radio {
+    position: relative;
+    height: 34px;
+    padding: 0 16px 0 12px;
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .status-picker .radio:hover {
+    border-color: var(--hue-ink);
+  }
+  .status-picker .radio:has(input:checked) {
+    border-color: var(--hue-ink);
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+  }
+  .status-picker .radio:has(input:checked) input {
+    accent-color: var(--primary-foreground);
+  }
+  .status-picker .radio:has(input:focus-visible) {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+  .field textarea:focus-visible,
+  .field input:not([type="radio"]):focus-visible {
+    border-color: var(--primary);
+    outline: 2px solid var(--primary-soft);
+    outline-offset: 0;
   }
   .form-actions {
     display: flex;
@@ -1186,21 +2095,20 @@
     align-self: center;
     display: flex;
     align-items: center;
-    height: 28px;
+    height: 26px;
     margin: 0 3px;
-    padding: 0 8px;
+    padding: 0 10px;
     overflow: hidden;
-    border: 1px solid var(--tone-fg);
-    border-radius: var(--radius-md);
-    background: var(--tone-bg);
-    color: var(--tone-fg);
+    border-radius: 13px;
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
   }
+  /* Proven share as a darker band, so the white label keeps its contrast across the whole bar. */
   .bar-fill {
     position: absolute;
     inset-block: 0;
     left: 0;
-    background: currentColor;
-    opacity: 0.16;
+    background: oklch(0 0 0 / 0.18);
   }
   .bar-label {
     position: relative;
@@ -1240,25 +2148,24 @@
   }
 
   @media (max-width: 1100px) {
-    .overview {
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: none;
-      grid-template-areas:
-        "decisions"
-        "feed"
-        "tasks"
-        "prs";
+    .number-widgets {
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     }
-    .overview-feed {
-      padding-bottom: 32px;
+    .dashboard-columns {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .overview-feed .update-feed {
+      flex: none;
+      min-height: 0;
+      overflow-y: visible;
     }
   }
   @media (max-width: 960px) {
     .app-shell {
-      grid-template-columns: 72px minmax(0, 1fr);
+      grid-template-columns: 68px minmax(0, 1fr);
     }
     .workspace-rail {
-      padding-inline: 12px;
+      padding-inline: 10px;
     }
     .brand {
       justify-content: center;
@@ -1273,7 +2180,7 @@
       justify-content: center;
       padding: 12px;
     }
-    .topbar {
+    .board-header {
       padding-inline: 24px;
     }
     .page {
@@ -1284,9 +2191,43 @@
     }
   }
   @media (max-width: 700px) {
+    .activity-row .change-list,
+    .activity-meta {
+      padding-left: 0;
+    }
+    .number-widgets {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .number-widgets > li:last-child:nth-child(odd) {
+      grid-column: 1 / -1;
+    }
+    .number-widget {
+      padding: 12px 12px 14px 18px;
+    }
+    .number-value {
+      font-size: 28px;
+    }
+    .widget {
+      padding: 14px 14px 16px;
+    }
+    .decision-row {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "type"
+        "main"
+        "meta";
+    }
+    .decision-row > .type-pill {
+      justify-self: start;
+    }
+    .update-status,
+    .update-note,
+    .update-refs {
+      margin-left: 0;
+    }
     .app-shell {
       display: block;
-      background: var(--background);
     }
     .workspace-rail {
       position: static;
@@ -1294,7 +2235,19 @@
       align-items: center;
       justify-content: space-between;
       height: auto;
-      padding: 12px 18px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      padding: 4px;
+    }
+    .work-area {
+      padding: 0;
+    }
+    .board-surface {
+      min-height: 0;
+      border-radius: 0;
+      box-shadow: none;
     }
     .brand-name {
       display: block;
@@ -1311,17 +2264,32 @@
     .rail-nav {
       display: flex;
       margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
     }
     .rail-link {
       height: 36px;
-      padding: 8px 10px;
+      padding: 8px;
     }
-    .topbar {
-      min-height: 56px;
-      padding: 10px 18px;
+    .board-header {
+      padding: 16px 16px 0;
+    }
+    .board-header h1 {
+      font-size: var(--text-xl);
+      line-height: var(--text-xl--line-height);
+    }
+    .board-heading {
+      padding-bottom: 10px;
+    }
+    .view-tab {
+      padding-inline: 8px;
+      font-size: var(--text-sm);
     }
     .page {
-      padding: 20px 18px 40px;
+      padding: 14px 16px 40px;
+    }
+    .board-toolbar .facet {
+      grid-auto-flow: row;
     }
     .gantt {
       --gantt-label: 168px;

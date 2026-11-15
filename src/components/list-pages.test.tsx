@@ -392,6 +392,10 @@ function articlesIn(container: () => HTMLElement) {
   return () => within(container()).queryAllByRole("article");
 }
 
+function rowHeadersIn(container: () => HTMLElement) {
+  return () => within(container()).queryAllByRole("rowheader");
+}
+
 type ListPage = {
   readonly page: string;
   readonly url: string;
@@ -471,7 +475,7 @@ const LIST_PAGES: Readonly<Record<string, ListPage>> = {
     url: "/tasks",
     seed: [[["updates", {}], firstPage(updates([], 0))]],
     list: main,
-    rows: () => within(main()).queryAllByRole("heading", { level: 4 }),
+    rows: () => within(main()).queryAllByRole("rowheader"),
     paged: false,
     filtered: {
       url: "/tasks?agent=atlas",
@@ -493,7 +497,7 @@ const LIST_PAGES: Readonly<Record<string, ListPage>> = {
       ],
     ],
     list: () => region(/^Pending/),
-    rows: articlesIn(() => region(/^Pending/)),
+    rows: rowHeadersIn(() => region(/^Pending/)),
     paged: true,
     filtered: {
       url: "/decisions?type=deploy",
@@ -520,7 +524,7 @@ const LIST_PAGES: Readonly<Record<string, ListPage>> = {
     url: "/raid",
     seed: [[["raid", "list", {}], firstPage(raid(range(PAGE_SIZE, raidItem), 27))]],
     list: main,
-    rows: articlesIn(main),
+    rows: rowHeadersIn(main),
     paged: true,
     filtered: {
       url: "/raid?severity=high",
@@ -546,7 +550,7 @@ const LIST_PAGES: Readonly<Record<string, ListPage>> = {
     url: "/lessons",
     seed: [[["lessons", "list", {}], firstPage(lessons(range(PAGE_SIZE, lesson), 25))]],
     list: main,
-    rows: articlesIn(main),
+    rows: rowHeadersIn(main),
     paged: true,
     filtered: {
       url: "/lessons?status=retired",
@@ -598,7 +602,7 @@ const LIST_PAGES: Readonly<Record<string, ListPage>> = {
     url: "/pull-requests",
     seed: [[["prs", "list", {}], firstPage(prs(range(PAGE_SIZE, pullRequest), 26))]],
     list: main,
-    rows: () => within(main()).queryAllByText(/ #\d+$/),
+    rows: rowHeadersIn(main),
     paged: true,
     filtered: {
       url: "/pull-requests?state=merged",
@@ -644,5 +648,160 @@ describe.each(Object.entries(LIST_PAGES))("T14 %s", (_, list) => {
       "true",
     );
     expect(router.state.location.search).toEqual(filtered.search);
+  });
+});
+
+/** Each board group on the page: its heading and its color, in page order. */
+function boardGroups(): readonly { name: string; hue: string | null }[] {
+  return screen.getAllByRole("region").flatMap((region) => {
+    const heading = within(region).queryByRole("heading", { level: 2 });
+    if (heading === null || !region.classList.contains("board-group")) return [];
+    return [{ name: heading.textContent ?? "", hue: region.getAttribute("data-hue") }];
+  });
+}
+
+/** The colored cell in `column` of the row headed `row`, as its text and its color. */
+function cellIn(row: string, column: string): { text: string; hue: string | null } {
+  const header = screen.getByRole("rowheader", { name: new RegExp(row) });
+  const table = header.closest("table") as HTMLElement;
+  const columns = within(table)
+    .getAllByRole("columnheader")
+    .map((c) => c.textContent);
+  const cell = (header.closest("tr") as HTMLElement).children[columns.indexOf(column)];
+  return { text: cell?.textContent ?? "", hue: cell?.getAttribute("data-hue") ?? null };
+}
+
+describe("the monday boards", () => {
+  it("Decisions: the inbox is a purple Pending group with colored gate pills and status cells", async () => {
+    await renderList("/decisions", "Decisions", [
+      [["decisions", "counts", {}], decisions([], 32)],
+      [
+        ["decisions", "list", { status: "Pending" }],
+        firstPage(decisions([decision(1, { gate_type: "deploy", blocks: ["IRP-04"] })], 1)),
+      ],
+    ]);
+
+    expect(boardGroups()).toEqual([
+      { name: "Pending1 decision", hue: "purple" },
+      { name: "History6 decisions", hue: "green" },
+    ]);
+    expect(cellIn("D-101", "Status")).toEqual({ text: "Pending", hue: "purple" });
+    expect(cellIn("D-101", "Type")).toEqual({ text: "Deploy", hue: null });
+    const row = screen.getByRole("rowheader", { name: /D-101/ }).closest("tr") as HTMLElement;
+    expect(within(row).getByText("Deploy")).toHaveAttribute("data-hue", "purple");
+    expect(screen.getByRole("button", { name: "History" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("RAID: one group per type in SPEC order, severity and status as colored cells", async () => {
+    await renderList("/raid", "RAID register", [
+      [
+        ["raid", "list", {}],
+        firstPage(
+          raid(
+            [
+              raidItem(1, { type: "issue", severity: "critical", status: "monitoring" }),
+              raidItem(2, { severity: null }),
+            ],
+            2,
+          ),
+        ),
+      ],
+    ]);
+
+    expect(boardGroups()).toEqual([
+      { name: "Risks27 items", hue: "red" },
+      { name: "Issues1 item", hue: "orange" },
+    ]);
+    expect(cellIn("RAID-01", "Severity")).toEqual({ text: "Critical", hue: "red" });
+    expect(cellIn("RAID-01", "Status")).toEqual({ text: "Monitoring", hue: "blue" });
+    expect(cellIn("RAID-02", "Severity")).toEqual({ text: "", hue: null });
+  });
+
+  it("Lessons: one group per status, with tag chips and a colored status cell", async () => {
+    await renderList("/lessons", "Lessons", [
+      [
+        ["lessons", "list", {}],
+        firstPage(
+          lessons(
+            [
+              lesson(1, {
+                status: "adopted",
+                enforced_by_url: `https://github.com/${REPO}/pull/9`,
+                tags: ["benchmark", "build"],
+              }),
+              lesson(2),
+            ],
+            2,
+          ),
+        ),
+      ],
+    ]);
+
+    expect(boardGroups()).toEqual([
+      { name: "Proposed22 lessons", hue: "blue" },
+      { name: "Adopted1 lesson", hue: "green" },
+    ]);
+    expect(cellIn("L-01", "Status")).toEqual({ text: "Adopted", hue: "green" });
+    expect(cellIn("L-01", "Tags").text).toBe("benchmarkbuild");
+  });
+
+  it("Activity: each entry shows its actor, a colored action pill, the record and the change", async () => {
+    await renderList("/activity", "Activity", [
+      [
+        ["activity", "list", {}],
+        firstPage(
+          activities(
+            [
+              activity(1, {
+                action: "raid.update",
+                entity: "raid_item",
+                entity_id: "RAID-03",
+                before: { status: "open" },
+                after: { status: "closed" },
+              }),
+            ],
+            1,
+          ),
+        ),
+      ],
+    ]);
+
+    const entry = screen.getByRole("article");
+    expect(within(entry).getByText("Beacon")).toBeInTheDocument();
+    expect(
+      within(entry).getByRole("heading", { level: 3, name: "RAID item updated" }),
+    ).toHaveAttribute("data-hue", "orange");
+    expect(within(entry).getByRole("link", { name: "RAID item RAID-03" })).toBeInTheDocument();
+    expect(within(entry).getByRole("listitem")).toHaveTextContent("status Open → Closed");
+  });
+
+  it("Pull requests: groups in board order, each state a colored cell", async () => {
+    await renderList("/pull-requests", "Pull requests", [
+      [
+        ["prs", "list", {}],
+        firstPage(
+          prs(
+            [
+              pullRequest(1, { state: "closed" }),
+              pullRequest(2, { state: "merged" }),
+              pullRequest(3),
+            ],
+            3,
+          ),
+        ),
+      ],
+    ]);
+
+    expect(boardGroups()).toEqual([
+      { name: "Open18 pull requests", hue: "green" },
+      { name: "Merged5 pull requests", hue: "purple" },
+      { name: "Closed3 pull requests", hue: "grey" },
+    ]);
+    expect(cellIn("Change 99", "State")).toEqual({ text: "Closed", hue: "grey" });
+    expect(cellIn("Change 98", "State")).toEqual({ text: "Merged", hue: "purple" });
+    expect(cellIn("Change 97", "Head").text).toBe("3e39a5c");
   });
 });

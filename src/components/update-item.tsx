@@ -13,7 +13,7 @@ import { RecordLink } from "./url-state";
 
 export function UpdateList({ updates }: { updates: readonly UpdateView[] }): ReactNode {
   return (
-    <ul className="record-list">
+    <ul className="update-feed">
       {updates.map((u) => (
         <li key={u.id}>
           <UpdateItem update={u} />
@@ -72,7 +72,7 @@ function Origin({ origin, kind }: { origin: UpdateOrigin; kind: UpdateKind }): R
     case "agent":
       return (
         <>
-          <AgentBadge agent={origin.author} />
+          <AgentBadge agent={origin.author} variant="person" />
           <span className="update-how">
             {`${UPDATE_KIND_LABELS[kind]} via ${UPDATE_SOURCE_LABELS[origin.source]}`}
           </span>
@@ -81,11 +81,11 @@ function Origin({ origin, kind }: { origin: UpdateOrigin; kind: UpdateKind }): R
     case "system":
       return (
         <>
-          <span className="agent-badge system-badge">
-            <span className="agent-mark" aria-hidden="true">
+          <span className="agent-person system-person">
+            <span className="avatar" aria-hidden="true">
               <Workflow />
             </span>
-            <span className="agent-name">System</span>
+            <span className="agent-person-name">System</span>
           </span>
           <span className="update-how">{`after ${origin.trigger.name}'s change`}</span>
         </>

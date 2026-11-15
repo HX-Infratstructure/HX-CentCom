@@ -1,4 +1,11 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
+import {
+  CalendarDays,
+  ChevronDown,
+  CircleUserRound,
+  ListFilter,
+  type LucideIcon,
+} from "lucide-react";
 import { Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ITEM,
@@ -15,6 +22,7 @@ import {
   type SearchOf,
   type SpecCore,
 } from "./list-search";
+import { formatUtcShort, initials } from "./format";
 import type { AgentDirectory } from "./model";
 import { RECORD_ROUTES, type RecordKind } from "./open-record";
 
@@ -67,7 +75,7 @@ function FilterBarView({
   const raw: Record<string, unknown> = useSearch({ strict: false });
   const current = core.validate(raw);
   return (
-    <div role="group" aria-label={label} className="filter-bar">
+    <div role="group" aria-label={label} className="filter-bar toolbar">
       {core.facets.map(([key, f]) =>
         f.kind === "days" ? (
           <DaysFacet key={key} name={key} label={f.label} value={current[key]} />
@@ -116,6 +124,113 @@ function facetOptions(
       return { value, label: agent?.name ?? value, count, tone: agent?.tone ?? null };
     })
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+/** The toolbar icon of each facet kind, as monday.com marks its Person, Filter and Date buttons. */
+const FACET_ICONS = {
+  agent: CircleUserRound,
+  open: ListFilter,
+  closed: ListFilter,
+  days: CalendarDays,
+} as const satisfies Record<Facet["kind"], LucideIcon>;
+
+const VIEWPORT_MARGIN = 16;
+
+/** Slides an open panel left until it ends inside the viewport, but never past the viewport's left margin. */
+function keepInViewport(menu: HTMLDetailsElement | null, panel: HTMLDivElement | null): void {
+  if (menu?.open !== true || panel === null) return;
+  panel.style.translate = "";
+  const { left, right } = panel.getBoundingClientRect();
+  const width = document.documentElement.clientWidth;
+  const shift = Math.max(VIEWPORT_MARGIN - left, Math.min(0, width - VIEWPORT_MARGIN - right));
+  if (shift !== 0) panel.style.translate = `${shift}px`;
+}
+
+/**
+ * A toolbar button that opens its options below it. A native disclosure, so the button states its expanded state and
+ * works without script; script only closes it on Escape, on a click outside, and after an option is chosen, and slides
+ * the open panel back inside a narrow viewport.
+ */
+function ToolbarMenu({
+  kind,
+  label,
+  active,
+  preview,
+  children,
+}: {
+  kind: Facet["kind"];
+  label: string;
+  /** The chosen value, shown on the button. */
+  active?: ReactNode;
+  /** Shown on the button while nothing is chosen, for example the agents' avatars. */
+  preview?: ReactNode;
+  children: ReactNode;
+}): ReactNode {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const Icon = FACET_ICONS[kind];
+  useEffect(() => {
+    const close = (event: Event) => {
+      const menu = ref.current;
+      if (menu?.open !== true) return;
+      if (event instanceof KeyboardEvent) {
+        if (event.key !== "Escape") return;
+        menu.open = false;
+        menu.querySelector("summary")?.focus();
+      } else if (!(event.target instanceof Node && menu.contains(event.target))) {
+        menu.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, []);
+  return (
+    <details
+      ref={ref}
+      className="toolbar-menu"
+      data-active={active === undefined ? undefined : "true"}
+      onToggle={() => keepInViewport(ref.current, panelRef.current)}
+    >
+      <summary className="toolbar-button">
+        <Icon aria-hidden="true" className="toolbar-icon" />
+        <span>{label}</span>
+        {active ?? preview}
+        <ChevronDown aria-hidden="true" className="toolbar-caret" />
+      </summary>
+      <div
+        ref={panelRef}
+        className="toolbar-panel"
+        onClick={(event) => {
+          if (event.target instanceof Element && event.target.closest("a") !== null) {
+            if (ref.current !== null) ref.current.open = false;
+          }
+        }}
+      >
+        {children}
+      </div>
+    </details>
+  );
+}
+
+/** An agent's initials drawn by CSS from `data-initials`, so a chip's text stays its label and its count. */
+function OptionMark({ option, kind }: { option: Option; kind: Facet["kind"] }): ReactNode {
+  if (kind === "agent") {
+    return (
+      <span
+        className="option-avatar"
+        data-tone={option.tone ?? undefined}
+        data-initials={initials(option.label)}
+        aria-hidden="true"
+      />
+    );
+  }
+  return option.tone === null ? null : (
+    <span className="chip-mark" data-tone={option.tone} aria-hidden="true" />
+  );
 }
 
 function ChoiceFacet({
@@ -170,9 +285,11 @@ function ChoiceFacet({
     );
   }
 
+  const Icon = FACET_ICONS[f.kind];
   if (options.length > MAX_CHIPS) {
     return (
-      <label className="facet facet-select">
+      <label className="facet-select" data-active={value === undefined ? undefined : "true"}>
+        <Icon aria-hidden="true" className="toolbar-icon" />
         <span className="facet-label">{f.label}</span>
         <select
           value={value ?? ""}
@@ -191,38 +308,63 @@ function ChoiceFacet({
             </option>
           ))}
         </select>
+        <ChevronDown aria-hidden="true" className="toolbar-caret" />
       </label>
     );
   }
 
+  const chosen = options.find((o) => o.value === value);
   return (
-    <div role="group" aria-labelledby={labelId} className="facet">
-      <span id={labelId} className="facet-label">
-        {f.label}
-      </span>
-      <ul className="chips">
-        {options.map((o) => {
-          const selected = o.value === value;
-          return (
-            <li key={o.value}>
-              <Link
-                to="."
-                search={patch({ [name]: selected ? undefined : o.value })}
-                resetScroll={false}
-                activeOptions={EXACT}
-                aria-current={selected ? "true" : undefined}
-                data-tone={o.tone ?? undefined}
-                className="chip"
-              >
-                {o.tone !== null && <span className="chip-mark" aria-hidden="true" />}
-                {o.label}
-                <span className="chip-count">{o.count}</span>
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+    <ToolbarMenu
+      kind={f.kind}
+      label={f.label}
+      active={
+        chosen && (
+          <span className="toolbar-value">
+            <OptionMark option={chosen} kind={f.kind} />
+            {chosen.label}
+            <span className="chip-count">{chosen.count}</span>
+          </span>
+        )
+      }
+      preview={
+        f.kind === "agent" ? (
+          <span className="avatar-stack" aria-hidden="true">
+            {options.slice(0, 3).map((o) => (
+              <OptionMark key={o.value} option={o} kind="agent" />
+            ))}
+          </span>
+        ) : undefined
+      }
+    >
+      <div role="group" aria-labelledby={labelId} className="facet">
+        <span id={labelId} className="facet-label">
+          {f.label}
+        </span>
+        <ul className="chips">
+          {options.map((o) => {
+            const selected = o.value === value;
+            return (
+              <li key={o.value}>
+                <Link
+                  to="."
+                  search={patch({ [name]: selected ? undefined : o.value })}
+                  resetScroll={false}
+                  activeOptions={EXACT}
+                  aria-current={selected ? "true" : undefined}
+                  data-tone={o.tone ?? undefined}
+                  className="chip"
+                >
+                  <OptionMark option={o} kind={f.kind} />
+                  <span className="chip-label">{o.label}</span>
+                  <span className="chip-count">{o.count}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </ToolbarMenu>
   );
 }
 
@@ -245,28 +387,36 @@ function DaysFacet({
       replace: true,
       resetScroll: false,
     });
+  const range =
+    from || to ? (
+      <span className="toolbar-value">
+        {from ? formatUtcShort(from) : "Any day"} – {to ? formatUtcShort(to) : "today"}
+      </span>
+    ) : undefined;
   return (
-    <fieldset className="facet facet-days">
-      <legend className="facet-label">{label}</legend>
-      <label>
-        From (UTC)
-        <input
-          type="date"
-          value={from}
-          max={to || undefined}
-          onChange={(event) => set(event.currentTarget.value, to)}
-        />
-      </label>
-      <label>
-        To (UTC)
-        <input
-          type="date"
-          value={to}
-          min={from || undefined}
-          onChange={(event) => set(from, event.currentTarget.value)}
-        />
-      </label>
-    </fieldset>
+    <ToolbarMenu kind="days" label={label} active={range}>
+      <fieldset className="facet facet-days">
+        <legend className="facet-label">{label}</legend>
+        <label>
+          From (UTC)
+          <input
+            type="date"
+            value={from}
+            max={to || undefined}
+            onChange={(event) => set(event.currentTarget.value, to)}
+          />
+        </label>
+        <label>
+          To (UTC)
+          <input
+            type="date"
+            value={to}
+            min={from || undefined}
+            onChange={(event) => set(from, event.currentTarget.value)}
+          />
+        </label>
+      </fieldset>
+    </ToolbarMenu>
   );
 }
 

@@ -72,8 +72,12 @@ async function renderPullRequests(url: string) {
   return router;
 }
 
-function prNumbers(): readonly (string | null)[] {
-  return screen.queryAllByText(/ #\d+$/).map((e) => e.textContent);
+/** Each board row as "repository #number", in board order. */
+function prNumbers(): readonly string[] {
+  return screen.queryAllByRole("rowheader").map((header) => {
+    const [repo, number] = within(header.closest("tr") as HTMLElement).getAllByRole("cell");
+    return `${repo?.textContent ?? ""} ${number?.textContent ?? ""}`;
+  });
 }
 
 function chips(facet: string): readonly string[] {

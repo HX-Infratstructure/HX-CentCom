@@ -29,6 +29,105 @@ export const TASK_GROUP_LABELS = {
   done: "Done",
 } as const satisfies Record<S.TaskGroup, string>;
 
+/**
+ * The six board colors of monday.com's status palette. `[data-hue]` in styles.css maps each to a bright edge for
+ * group rows and bars, and to a darker ink that white text reads on at 4.5:1.
+ */
+export type BoardHue = "green" | "orange" | "red" | "purple" | "blue" | "grey";
+
+export const GROUP_HUES = {
+  backlog: "grey",
+  in_progress: "blue",
+  ready_for_owner: "purple",
+  done: "green",
+} as const satisfies Record<S.TaskGroup, BoardHue>;
+
+/** Status labels are rows with no color (seed.ts), so the board colors the seeded labels by id. */
+const STATUS_HUES: ReadonlyMap<string, BoardHue> = new Map([
+  ["Complete", "green"],
+  ["In progress", "orange"],
+  ["Blocked", "red"],
+  ["Waiting", "grey"],
+  ["Ready for owner", "purple"],
+]);
+
+/** Any other label is green when it counts as done, otherwise blue. */
+export function statusHue(status: StatusRef): BoardHue {
+  return STATUS_HUES.get(status.id) ?? (status.isDone ? "green" : "blue");
+}
+
+/** Each gate type's pill color; the pill always carries the type's name, so color is never the only signal. */
+export const GATE_HUES = {
+  merge: "green",
+  deploy: "purple",
+  live_run: "orange",
+  host: "red",
+  scope: "blue",
+  assignment: "blue",
+  policy: "grey",
+} as const satisfies Record<S.GateType, BoardHue>;
+
+/** A PR state's color; a state outside the filter vocabulary reads grey. */
+export const PR_STATE_HUES = {
+  open: "green",
+  closed: "grey",
+  merged: "purple",
+  gone: "red",
+} as const satisfies Record<S.GithubPrState, BoardHue>;
+
+/** Pending waits on the owner; Decided is the outcome the register exists for; the other two are set aside. */
+export const DECISION_STATUS_HUES = {
+  Pending: "purple",
+  Decided: "green",
+  Deferred: "grey",
+  Superseded: "grey",
+} as const satisfies Record<S.DecisionStatus, BoardHue>;
+
+export const RAID_TYPE_HUES = {
+  risk: "red",
+  assumption: "blue",
+  issue: "orange",
+  dependency: "purple",
+} as const satisfies Record<S.RaidType, BoardHue>;
+
+export const SEVERITY_HUES = {
+  critical: "red",
+  high: "orange",
+  medium: "blue",
+  low: "grey",
+} as const satisfies Record<S.Severity, BoardHue>;
+
+export const RAID_STATUS_HUES = {
+  open: "orange",
+  monitoring: "blue",
+  closed: "green",
+} as const satisfies Record<S.RaidStatus, BoardHue>;
+
+export const LESSON_STATUS_HUES = {
+  proposed: "blue",
+  adopted: "green",
+  retired: "grey",
+} as const satisfies Record<S.LessonStatus, BoardHue>;
+
+/** Values in a fixed display order, each with the rows that carry it; values with no rows are left out. */
+export function groupRows<K extends string, R>(
+  order: readonly K[],
+  rows: readonly R[],
+  keyOf: (row: R) => K,
+): readonly { readonly key: K; readonly rows: readonly R[] }[] {
+  const byKey = new Map<K, R[]>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    const list = byKey.get(key) ?? [];
+    list.push(row);
+    byKey.set(key, list);
+  }
+  return order.flatMap((key) => {
+    const list = byKey.get(key);
+    return list === undefined ? [] : [{ key, rows: list }];
+  });
+}
+
 export const BLOCKED_ON_LABELS = {
   owner_decision: "Waiting on an owner decision",
   assignment: "Needs an owner to assign it",
@@ -72,6 +171,14 @@ export const PR_STATE_LABELS = {
 } as const satisfies Record<S.GithubPrState, string>;
 export type PrState = keyof typeof PR_STATE_LABELS;
 
+/** The state as a board group and cell name it; the filter keeps the longer label, which the cell shows on hover. */
+export const PR_STATE_SHORT_LABELS = {
+  open: "Open",
+  closed: "Closed",
+  merged: "Merged",
+  gone: "Gone",
+} as const satisfies Record<PrState, string>;
+
 export const REQUIREMENT_STATE_LABELS = {
   PASS: "Proven",
   FAIL: "Failed",
@@ -102,6 +209,22 @@ export const ACTIVITY_ACTION_LABELS = {
   "lesson.update": "Lesson updated",
   "activity.revert": "Change reverted",
 } as const satisfies Record<S.ActivityAction, string>;
+
+/** The action pill's color: what was recorded, by its kind of change, so a log reads at a glance. */
+export const ACTIVITY_ACTION_HUES = {
+  "task.progress": "blue",
+  "requirement.set": "blue",
+  "decision.request": "purple",
+  "decision.decide": "green",
+  "key.issue": "grey",
+  "key.revoke": "red",
+  "key.bootstrap": "grey",
+  "raid.create": "orange",
+  "raid.update": "orange",
+  "lesson.create": "green",
+  "lesson.update": "green",
+  "activity.revert": "red",
+} as const satisfies Record<S.ActivityAction, BoardHue>;
 
 export const RAID_TYPE_LABELS = {
   risk: "Risk",
