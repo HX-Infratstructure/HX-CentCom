@@ -239,14 +239,15 @@ For a `gone` PR, the sync sets its state to `gone` and prints `github-sync gone 
 
 ### Checks V-C
 
-| ID   | Command on HX-15                                                                                                                  | Expected                                                   |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| V-C1 | `systemctl --user show hx-centcom-github-sync -p Result,ExecMainStatus` after the first run                                       | `Result=success`, `ExecMainStatus=0`                       |
-| V-C2 | `curl -s http://192.168.50.215:5420/api/v1/workspace \| python3 -c 'import json, sys; print(len(json.load(sys.stdin)["repos"]))'` | Equal to the next command's count. It was 38 on 2026-11-14 |
-| V-C2 | `gh api --paginate 'orgs/HX-Infratstructure/repos?per_page=100' --jq '.[] \| select(.archived \| not) \| .name' \| wc -l`         | The number of non-archived repositories                    |
-| V-C3 | `systemctl --user list-timers hx-centcom-github-sync.timer`                                                                       | A next run is listed                                       |
-| V-C3 | `journalctl --user -u hx-centcom-github-sync -n 40 --no-pager` after two more runs                                                | Both runs end in success                                   |
-| V-C4 | `journalctl --user -u hx-centcom-github-sync --no-pager \| grep -cF -f ~/caio-notes/love-t.md`                                    | `0`. The journal holds counts and errors, never the token  |
+| ID   | Command on HX-15                                                                                                                  | Expected                                                                                                                                                              |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| V-C1 | `systemctl --user show hx-centcom-github-sync -p Result,ExecMainStatus` after the first run                                       | `Result=success`, `ExecMainStatus=0`                                                                                                                                  |
+| V-C2 | `curl -s http://192.168.50.215:5420/api/v1/workspace \| python3 -c 'import json, sys; print(len(json.load(sys.stdin)["repos"]))'` | Equal to `heads=N` in the next command's line. It was 38 on 2026-11-14                                                                                                |
+| V-C2 | `journalctl --user -u hx-centcom-github-sync -n 20 --no-pager -o cat \| grep 'github-sync ok' \| tail -1`                         | The latest `github-sync ok` line. `heads=N` counts the non-archived repositories that have a head, and `empty=N` counts those the sync skipped because they have none |
+| V-C2 | `gh api --paginate 'orgs/HX-Infratstructure/repos?per_page=100' --jq '.[] \| select(.archived \| not) \| .name' \| wc -l`         | Context only, not a pass criterion. The non-archived count. It matches `repos=N` (`heads` plus `empty`) in that line unless the org changed since the run             |
+| V-C3 | `systemctl --user list-timers hx-centcom-github-sync.timer`                                                                       | A next run is listed                                                                                                                                                  |
+| V-C3 | `journalctl --user -u hx-centcom-github-sync -n 40 --no-pager` after two more runs                                                | Both runs end in success                                                                                                                                              |
+| V-C4 | `journalctl --user -u hx-centcom-github-sync --no-pager \| grep -cF -f ~/caio-notes/love-t.md`                                    | `0`. The journal holds counts and errors, never the token                                                                                                             |
 
 ## Deploy a later commit (GO for that SHA)
 

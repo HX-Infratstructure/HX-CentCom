@@ -70,6 +70,17 @@ async function nextDecisionId(tx: Tx): Promise<string> {
   return formatDecisionId(row.n);
 }
 
+async function unknownStatus(tx: Tx, status: string): Promise<Issue> {
+  const labels = await tx
+    .select({ id: statusLabels.id })
+    .from(statusLabels)
+    .orderBy(statusLabels.id);
+  return {
+    path: "status",
+    message: `no status ${status}; the valid statuses are ${labels.map((l) => l.id).join(", ")}`,
+  };
+}
+
 type ProgressInput = typeof bodyProgressInput | typeof mcpProgressInput;
 type ProgressPlan = UpdatePlan<ProgressInput, TaskRoot, PostedProgress>;
 type ProgressContext = Parameters<ProgressPlan["apply"]>[1];
@@ -155,7 +166,7 @@ export function postProgressPlan(taskId: string, via: "mcp" | undefined): Progre
         [label] = await tx.select().from(statusLabels).where(eq(statusLabels.id, input.status));
         if (!label) {
           throw ServiceError.invalid("The status is unknown.", [
-            { path: "status", message: `no status ${input.status}` },
+            await unknownStatus(tx, input.status),
           ]);
         }
       }
@@ -231,7 +242,7 @@ export const createTaskPlan: CreatePlan<typeof createTaskInput, CreatedTask> = {
     const agent = taskAssignee(actor, input.agentId);
     const issues: Issue[] = [];
     const [label] = await tx.select().from(statusLabels).where(eq(statusLabels.id, input.status));
-    if (!label) issues.push({ path: "status", message: `no status ${input.status}` });
+    if (!label) issues.push(await unknownStatus(tx, input.status));
     if (agent !== null) {
       const [active] = await tx
         .select({ id: agents.id })

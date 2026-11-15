@@ -38,7 +38,8 @@ centcom progress --task IRP-04 --note "Router tests pass" \
 	--link "CI=https://github.com/OWNER/REPO/actions/runs/1" --sha 3e39a5c --pr https://github.com/OWNER/REPO/pull/12
 ```
 
-`--task` and `--note` are required, `--link <label=url>` can repeat, and `centcom help` lists every flag. On success,
+`--task` and `--note` are required, `--link <label=url>` can repeat, and `centcom help` lists every flag and the
+`--status` labels. On success,
 `centcom` prints the new update's id and exits 0. A usage error exits 2 and sends nothing. Any other failure exits 1
 and prints `centcom: <code> (<status>): <message>` on stderr. A local error, such as `key_mode`, `config`, or
 `unreachable`, has no status. `unauthorized` (401) means the server does not know the key, and `forbidden` (403) means
@@ -80,6 +81,9 @@ success, `centcom` prints the new item's id, such as `RAID-07`. When the item is
 ```sh
 centcom raid update RAID-08 --status closed --resolution "Freed 200 GB on the HX-9 volume"
 ```
+
+`--resolution` applies only to an issue. Close a risk, an assumption, or a dependency with `--status closed` alone,
+because the server answers `invalid` (400) to a `--resolution` on any other type.
 
 `raid update` takes one item id and at least one field flag, and it refuses `--type`, because the type cannot change.
 It sends only the flags you give, so the other fields keep their values, and it prints the same lines as `raid add`.
