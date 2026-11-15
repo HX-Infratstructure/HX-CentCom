@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   createLessonInput,
   createRaidItemInput,
+  createTaskInput,
   decisionQueryInput,
   lessonQueryInput,
   postProgressInput,
@@ -162,6 +163,22 @@ const TOOLS: readonly McpTool[] = [
     write: false,
     input: updateQueryInput.removeDefault().strict(),
     run: async (args, { services }) => read(await services.listUpdates(args)),
+  }),
+  tool({
+    name: "create_task",
+    description:
+      "Register your own work as a task, so you can post progress to it. id is uppercase letters or digits, a dash, then more (3-24 characters, unique). The task is assigned to you; only the owner passes agentId, to assign any active agent or none. status is a status label (default Waiting). sourceUrl is required: an http(s) URL, or hx15:<absolute path> for a record only on HX-15.",
+    write: true,
+    destructive: false,
+    input: createTaskInput
+      .innerType()
+      .omit({ progress: true })
+      .extend({ idempotencyKey: writeArgs.idempotencyKey })
+      .strict(),
+    run: async ({ idempotencyKey, ...input }, { services, actor }) => {
+      const result = await services.createTask(actor, input, { idempotencyKey });
+      return fromWrite(result, result.value);
+    },
   }),
   tool({
     name: "post_progress",

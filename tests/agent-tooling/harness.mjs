@@ -23,6 +23,9 @@ export function okReply(req) {
   if (req.method === "GET" && req.path.endsWith("/api/v1/workspace")) {
     return { status: 200, body: { actor: { agentId: "CC1", role: "agent" }, tasks: [] } };
   }
+  if (req.method === "POST" && req.path.endsWith("/api/v1/tasks")) {
+    return { status: 201, body: { task: { version: 1, ...req.body } } };
+  }
   if (req.method === "POST" && req.path.endsWith("/api/v1/raid")) {
     return {
       status: 201,

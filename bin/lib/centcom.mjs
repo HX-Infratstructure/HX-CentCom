@@ -38,6 +38,9 @@ export function openDashboard(env, { source }) {
         ? { agentId: actor.agentId, role: String(actor.role ?? "unknown") }
         : null;
     },
+    async addTask(task, { signal }) {
+      return idOf((await write("POST", "api/v1/tasks", task, signal))?.task, "task", root.origin);
+    },
     async addRaidItem(item, { signal }) {
       return raidWrite(await write("POST", "api/v1/raid", item, signal));
     },

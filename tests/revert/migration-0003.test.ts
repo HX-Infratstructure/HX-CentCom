@@ -1,6 +1,6 @@
-// Migration 0003 widens the activity_log action CHECK for the owner's revert (F5), and its snapshot matches schema.ts,
-// so the next `npm run db:generate` carries only the change its author made (P3-1). drizzle-kit reads only schema.ts,
-// so the snapshot holds no RAID or lesson table: one there would make a later generate emit DROPs.
+// Migration 0003 widens the activity_log action CHECK for the owner's revert (F5), and the newest snapshot matches
+// schema.ts, so the next `npm run db:generate` carries only the change its author made (P3-1). drizzle-kit reads only
+// schema.ts, so the snapshot holds no RAID or lesson table: one there would make a later generate emit DROPs.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { generateDrizzleJson, generateMigration, type DrizzleSnapshotJSON } from "drizzle-kit/api";
@@ -30,9 +30,8 @@ afterAll(async () => {
 });
 
 describe("migration 0003", () => {
-  it("is the journal's fourth entry, and the newest snapshot is its own", () => {
+  it("is the journal's fourth entry", () => {
     expect(journal.entries.find((e) => e.idx === 3)?.tag).toBe("0003_activity_revert");
-    expect(latestSnapshotFile).toBe("0003_snapshot.json");
   });
 
   it("lets the database store an activity.revert row", async () => {

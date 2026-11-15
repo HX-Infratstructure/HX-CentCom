@@ -150,7 +150,7 @@ describe("T9: read-only MCP", () => {
   it.each([
     ["an agent", "CC1"],
     ["the owner", "Agent Zero"],
-  ])("with %s's key all thirteen tools are listed", async (_label, agentId) => {
+  ])("with %s's key all fourteen tools are listed", async (_label, agentId) => {
     const client = await api.mcp(await api.authFor(agentId));
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names, "read and write tools").toEqual([...READ_TOOLS, ...WRITE_TOOLS].sort());

@@ -20,6 +20,11 @@ const LESSON_ADD = [
   ["--recommendation", "Parse every body."],
   ["--source", "https://github.com/o/r/pull/12"],
 ];
+const TASK_ADD = [
+  ["--id", "CC-90"],
+  ["--title", "Register agent work"],
+  ["--source", "https://github.com/o/r/issues/7"],
+];
 const without = (pairs, flag) => pairs.filter(([f]) => f !== flag).flat();
 
 async function cli(t, { args = PROGRESS, home = makeHome(t).home, reply, env = {} } = {}) {
@@ -219,6 +224,11 @@ const USAGE_ERRORS = [
     ["lesson", "add", ...without(LESSON_ADD, flag)],
     flag,
   ]),
+  ...TASK_ADD.map(([flag]) => [
+    `task add without ${flag}`,
+    ["task", "add", ...without(TASK_ADD, flag)],
+    flag,
+  ]),
   ["lesson update without an id", ["lesson", "update", "--status", "adopted"], "<id> is required"],
   [
     "lesson update with two ids",
@@ -246,6 +256,10 @@ for (const [why, args, names] of USAGE_ERRORS) {
 test("help prints usage and exits 0", async (t) => {
   const r = await run(BIN.cli, { args: ["help"], env: { HOME: makeHome(t).home } });
   assert.match(r.stdout, /centcom progress --task/);
+  assert.match(
+    r.stdout,
+    /centcom task add --id <id> --title <title> --source <source> \[--repo <repo>\]/,
+  );
   assert.match(r.stdout, /centcom raid add --type/);
   assert.match(r.stdout, /centcom raid update <id> /);
   assert.match(r.stdout, /centcom lesson add --title/);
@@ -389,6 +403,60 @@ test("raid update --no-escalated sends escalated false", async (t) => {
   assert.deepEqual([r.code, r.stdout], [0, "RAID-01\n"]);
 });
 
+test("task add posts the given fields with a fresh Idempotency-Key and prints the task id", async (t) => {
+  const r = await cli(t, {
+    args: [
+      "task",
+      "add",
+      ...TASK_ADD.flat(),
+      "--repo",
+      "HX-CentCom",
+      "--host",
+      "HX-15",
+      "--start",
+      "2026-11-15",
+      "--due",
+      "2026-11-16",
+      "--status",
+      "In progress",
+      "--note",
+      "Registered by the hook",
+    ],
+  });
+  assert.deepEqual(r.requests.map(wire), [
+    {
+      method: "POST",
+      path: "/api/v1/tasks",
+      authorization: "Bearer <FAKE_KEY>",
+      accept: "application/json",
+      contentType: "application/json",
+      body: {
+        id: "CC-90",
+        title: "Register agent work",
+        sourceUrl: "https://github.com/o/r/issues/7",
+        repository: "HX-CentCom",
+        host: "HX-15",
+        startDate: "2026-11-15",
+        dueDate: "2026-11-16",
+        status: "In progress",
+        note: "Registered by the hook",
+      },
+    },
+  ]);
+  assert.match(r.requests[0].headers["idempotency-key"], UUID_V4);
+  assert.deepEqual([r.code, r.stdout, r.stderr], [0, "CC-90\n", ""]);
+});
+
+test("task add sends only the given fields", async (t) => {
+  const r = await cli(t, { args: ["task", "add", ...TASK_ADD.flat()] });
+  assert.deepEqual(r.requests[0].body, {
+    id: "CC-90",
+    title: "Register agent work",
+    sourceUrl: "https://github.com/o/r/issues/7",
+  });
+  assert.equal(r.code, 0);
+});
+
 test("lesson add posts the given fields and prints the lesson id", async (t) => {
   const r = await cli(t, {
     args: [
@@ -473,6 +541,7 @@ const NO_ID_ANSWERS = [
     ["raid", "update", "RAID-01", "--status", "closed"],
     { status: 200, body: { item: {}, decision: null } },
   ],
+  ["task add", ["task", "add", ...TASK_ADD.flat()], { status: 201, body: { task: null } }],
   ["lesson add", ["lesson", "add", ...LESSON_ADD.flat()], { status: 201, body: { lesson: null } }],
   [
     "lesson update",

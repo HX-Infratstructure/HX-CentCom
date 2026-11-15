@@ -24,6 +24,7 @@ export const READ_TOOLS = [
 export const WRITE_TOOLS = [
   "add_lesson",
   "add_raid_item",
+  "create_task",
   "post_progress",
   "request_decision",
   "set_requirement",

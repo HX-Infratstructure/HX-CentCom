@@ -17,6 +17,7 @@ import type { GithubPrQueryInput, GithubPrsPage } from "./github";
 import type { WebhookConfig } from "./webhook";
 import type {
   ActivityQueryInput,
+  CreateTaskInput,
   DecideInput,
   DecisionQueryInput,
   PostProgressInput,
@@ -108,10 +109,11 @@ export type DecisionsPage = Page<Decision> & { readonly counts: DecisionCounts }
 /**
  * One snapshot. `updates`, `updatesCursor` and `counts.updates` equal `listUpdates({})` at that snapshot, and
  * `counts.decisions` equals `listDecisions({}).counts`. Tasks, requirements, agents, status labels and repository heads
- * are whole. Only the seed creates tasks, agents and status labels, and the GitHub sync writes the repository heads.
- * `setRequirement` creates requirements, so they grow through the API; they stay whole because the task sheet reads
- * them from this snapshot and has no read of its own. `decisions` holds every Pending decision and every decision
- * whose `blocks` holds a task that is not done; `listDecisions` pages the rest, and `listGithubPrs` the pull requests.
+ * are whole. `createTask` creates tasks; only the seed creates agents and status labels, and the GitHub sync writes the
+ * repository heads. `setRequirement` creates requirements, so they grow through the API; they stay whole because the
+ * task sheet reads them from this snapshot and has no read of its own. `decisions` holds every Pending decision and
+ * every decision whose `blocks` holds a task that is not done; `listDecisions` pages the rest, and `listGithubPrs` the
+ * pull requests.
  */
 export type Workspace = {
   readonly tasks: readonly Task[];
@@ -165,6 +167,8 @@ export type WriteResult<T> = {
 };
 
 export type TaskRef = { readonly id: string; readonly version: number };
+/** The stored row: the caller's fields, blocked_on none, no commit, version 1. */
+export type CreatedTask = { readonly task: TaskRow };
 export type PostedProgress = {
   readonly update: TaskUpdate;
   readonly task: TaskRef & { readonly status: string };
@@ -196,8 +200,9 @@ export type RevertResult = {
 };
 
 /**
- * SPEC §4's ten names and their arguments, plus `listDecisions`. Every write takes whatever `resolveActor` returned;
- * null is `unauthorized` (401) inside the pipeline, so no transport can forget it. Bodies are parsed at runtime.
+ * SPEC §4's ten names and their arguments, plus `listDecisions` and `createTask`. Every write takes whatever
+ * `resolveActor` returned; null is `unauthorized` (401) inside the pipeline, so no transport can forget it. Bodies are
+ * parsed at runtime.
  */
 export interface Services {
   resolveActor(authHeader: string | null): Promise<Actor | null>;
@@ -212,6 +217,15 @@ export interface Services {
   /** The work of `agentId`, else of the actor's agent; 400 at agentId with neither, 404 for an unknown agent. */
   myWork(actor: Actor | null, agentId?: string): Promise<MyWork>;
   listGithubPrs(query?: GithubPrQueryInput): Promise<GithubPrsPage>;
+  /**
+   * 401, 403 for an agent that names another agent, 400, 409 `conflict` for a taken id. An agent's task is
+   * its own; the owner assigns any active agent or none.
+   */
+  createTask(
+    actor: Actor | null,
+    input: CreateTaskInput,
+    opts?: CreateOptions,
+  ): Promise<WriteResult<CreatedTask>>;
   postProgress(
     actor: Actor | null,
     taskId: string,

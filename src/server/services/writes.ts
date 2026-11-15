@@ -14,6 +14,7 @@ import {
 import { ServiceError, type Issue } from "./errors";
 import {
   bodyProgressInput,
+  createTaskInput,
   decideInput,
   issueKeyInput,
   mcpProgressInput,
@@ -24,8 +25,10 @@ import {
   sourceRef,
 } from "./inputs";
 import type { BootstrapPlan, CreatePlan, UpdatePlan } from "./pipeline";
+import { taskAssignee } from "./policy";
 import { computeProgress, NO_REQUIREMENTS } from "./reads";
 import type {
+  CreatedTask,
   DecidedDecision,
   Decision,
   IssuedKey,
@@ -216,6 +219,54 @@ export function postProgressPlan(taskId: string, via: "mcp" | undefined): Progre
     },
   };
 }
+
+/**
+ * An agent registers its own work. Columns no input gives keep their defaults: blocked_on none, no commit,
+ * version 1, no requirements. repository and host are NOT NULL, so an omitted one is stored as "".
+ */
+export const createTaskPlan: CreatePlan<typeof createTaskInput, CreatedTask> = {
+  action: "task.create",
+  input: createTaskInput,
+  async apply(tx, { actor, input, at }) {
+    const agent = taskAssignee(actor, input.agentId);
+    const issues: Issue[] = [];
+    const [label] = await tx.select().from(statusLabels).where(eq(statusLabels.id, input.status));
+    if (!label) issues.push({ path: "status", message: `no status ${input.status}` });
+    if (agent !== null) {
+      const [active] = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(eq(agents.id, agent), eq(agents.active, true)));
+      if (!active) issues.push({ path: "agentId", message: `no active agent ${agent}` });
+    }
+    if (!label || issues.length > 0)
+      throw ServiceError.invalid("The request body is invalid.", issues);
+    const [task] = await tx
+      .insert(engineeringTasks)
+      .values({
+        id: input.id,
+        title: input.title,
+        agent,
+        repository: input.repository ?? "",
+        host: input.host ?? "",
+        status: label.id,
+        group: groupForStatus(label, "backlog"),
+        start_date: input.startDate ?? null,
+        due_date: input.dueDate ?? null,
+        note: input.note ?? null,
+        source_url: input.sourceUrl,
+        updated_at: at,
+      })
+      .onConflictDoNothing({ target: engineeringTasks.id })
+      .returning();
+    if (!task) throw ServiceError.conflict(`Task ${input.id} already exists.`);
+    return {
+      status: 201,
+      value: { task },
+      activity: { entity: "task", entityId: task.id, before: null, after: task },
+    };
+  },
+};
 
 export function setRequirementPlan(
   taskId: string,

@@ -1,7 +1,7 @@
 # Post progress to HX-CentCom
 
 CC1, CC2, Codex, and OpenCode post progress to the tasks page of HX-CentCom at `http://192.168.50.207:8420`. Two tools
-in `bin/` do it. `centcom` posts an update, or records a RAID item or a lesson, when an agent runs it. `centcom-hook`
+in `bin/` do it. `centcom` registers a task, posts an update, or records a RAID item or a lesson, when an agent runs it. `centcom-hook`
 is a Claude Code hook that posts for CC1 and CC2 after a successful `git push`, `gh pr create`, or `gh pr merge`. Both
 tools need Node 22 and run from the shared clone `/home/hxsa/HX-CentCom`, where CC1 moves the clone once the swarm is
 idle. Run them in place or through a symlink, because both import `bin/lib/centcom.mjs`.
@@ -44,6 +44,23 @@ and prints `centcom: <code> (<status>): <message>` on stderr. A local error, suc
 `unreachable`, has no status. `unauthorized` (401) means the server does not know the key, and `forbidden` (403) means
 the task belongs to another agent ([API errors](API.md#errors)). The CLI waits 10 seconds and does not retry. Each run sends a new
 `Idempotency-Key`, so check the tasks page before you rerun after a timeout.
+
+## Register your work
+
+An update needs a task that belongs to you. If your current work has no task, register one, then post to it:
+
+```sh
+centcom task add --id CC2-07 --title "Wire the LiteLLM hook" \
+	--source https://github.com/OWNER/REPO/issues/7 --repo HX-LiteLLM --host HX-6 --status "In progress"
+centcom progress --task CC2-07 --note "Hook config drafted"
+```
+
+`--id`, `--title`, and `--source` are required. The id is 3 to 24 characters: uppercase letters or digits, a dash, then
+more, and no task may have it yet. `--repo`, `--host`, `--start` and `--due` (`YYYY-MM-DD`), `--status` (default
+`Waiting`), and `--note` are optional. The task is yours: the server records your key's agent as its agent. On success,
+`centcom` prints the task id. A taken id fails with `conflict (409)`. The MCP tool `create_task` and
+[`POST /api/v1/tasks`](API.md#post-apiv1tasks) take the same fields. Only the owner assigns a task to another agent or
+leaves it unassigned.
 
 ## Record a RAID item or a lesson
 
@@ -151,7 +168,7 @@ echo .centcom-task >> "$(git rev-parse --git-path info/exclude)"
 ```
 
 In a worktree, the second command writes to the main clone's `.git/info/exclude`, so one line covers every worktree.
-The task must belong to your agent. For another agent's task, the server answers 403 and the hook stays silent.
+The task must belong to your agent. If it does not exist yet, [register it](#register-your-work) first. For another agent's task, the server answers 403 and the hook stays silent.
 
 ### Know when the hook posts
 

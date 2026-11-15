@@ -25,6 +25,7 @@ import type { ActivityEntry, RevertResult, TaskUpdate } from "./types";
 
 /** Like POLICY, it covers every action, so a new action does not compile until it says whether a revert undoes it. */
 const REVERTIBLE: Readonly<Record<ActivityAction, true | string>> = {
+  "task.create": "a create has nothing to restore",
   "task.progress": true,
   "requirement.set": true,
   "decision.request": "a create has nothing to restore",

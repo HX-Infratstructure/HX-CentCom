@@ -24,6 +24,7 @@ export const ERROR_COPY = {
   not_found: "This record no longer exists.",
   version_conflict: "This record changed after you opened it.",
   not_revertible: "This change cannot be reverted.",
+  conflict: "A record with this id already exists.",
   invalid: "Some fields need a change.",
   idempotency_mismatch: "An earlier request used the same request key with different content.",
   unreachable: "The request did not complete.",

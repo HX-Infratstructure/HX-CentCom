@@ -52,6 +52,19 @@ const LESSON_FIELDS = [
   ["enforced-by", "enforcedByUrl", "text"],
 ];
 
+const TASK_FIELDS = [
+  ["id", "id", "text"],
+  ["title", "title", "text"],
+  ["source", "sourceUrl", "text"],
+  ["repo", "repository", "text"],
+  ["host", "host", "text"],
+  ["start", "startDate", "text"],
+  ["due", "dueDate", "text"],
+  ["status", "status", "text"],
+  ["note", "note", "text"],
+];
+
+const TASK_ADD = form(TASK_FIELDS, ["id", "title", "source"]);
 const RAID_ADD = form(RAID_FIELDS, ["type", "title", "summary", "description", "source"]);
 const RAID_UPDATE = form(RAID_FIELDS.filter(([flag]) => flag !== "type"));
 const LESSON_ADD = form(LESSON_FIELDS, [
@@ -81,6 +94,11 @@ const COMMANDS = {
     run: runProgress,
   },
   whoami: { usage: "centcom whoami", options: {}, run: runWhoami },
+  "task add": {
+    usage: `centcom task add ${TASK_ADD.usage}`,
+    options: TASK_ADD.options,
+    run: runTaskAdd,
+  },
   "raid add": {
     usage: `centcom raid add ${RAID_ADD.usage}`,
     options: RAID_ADD.options,
@@ -187,6 +205,12 @@ async function runWhoami() {
       ? `${actor.agentId} (${actor.role})\n`
       : "The server did not say which agent this key belongs to.\n",
   );
+}
+
+async function runTaskAdd(values) {
+  const task = TASK_ADD.body(values);
+  const id = await dashboard().addTask(task, deadline());
+  process.stdout.write(`${id}\n`);
 }
 
 async function runRaidAdd(values) {

@@ -67,18 +67,19 @@ Every response with a status outside 2xx has this body:
 }
 ```
 
-| Code                   | Status | Cause                                                                                                                                                                                         |
-| ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid`              | 400    | The body, a query parameter, a header, or a cursor is invalid                                                                                                                                 |
-| `unauthorized`         | 401    | A write with no key, or with a key that is unknown or revoked                                                                                                                                 |
-| `forbidden`            | 403    | An agent writing another agent's task, changing a RAID item or lesson it may not edit, adding, moving, closing, or reopening a dependency on another agent's task, or calling an owner action |
-| `not_found`            | 404    | The task, decision, requirement, agent, key, RAID item, lesson, activity row, or `/api/v1` path does not exist                                                                                |
-| `method_not_allowed`   | 405    | The route does not accept the method. The `Allow` header lists the methods that it accepts                                                                                                    |
-| `version_conflict`     | 409    | The `If-Match` version is not the current version, or a revert's entity changed after the action it reverts                                                                                   |
-| `not_revertible`       | 409    | The activity row records a create, a decide, a key action, or a write with automation effects, which a revert does not undo                                                                   |
-| `payload_too_large`    | 413    | The body is larger than 1 MiB                                                                                                                                                                 |
-| `idempotency_mismatch` | 422    | The `Idempotency-Key` was used before with a different request                                                                                                                                |
-| `internal`             | 500    | An unexpected error. The server logs it                                                                                                                                                       |
+| Code                   | Status | Cause                                                                                                                                                                                                                            |
+| ---------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid`              | 400    | The body, a query parameter, a header, or a cursor is invalid                                                                                                                                                                    |
+| `unauthorized`         | 401    | A write with no key, or with a key that is unknown or revoked                                                                                                                                                                    |
+| `forbidden`            | 403    | An agent creating a task for another agent, writing another agent's task, changing a RAID item or lesson it may not edit, adding, moving, closing, or reopening a dependency on another agent's task, or calling an owner action |
+| `not_found`            | 404    | The task, decision, requirement, agent, key, RAID item, lesson, activity row, or `/api/v1` path does not exist                                                                                                                   |
+| `method_not_allowed`   | 405    | The route does not accept the method. The `Allow` header lists the methods that it accepts                                                                                                                                       |
+| `version_conflict`     | 409    | The `If-Match` version is not the current version, or a revert's entity changed after the action it reverts                                                                                                                      |
+| `conflict`             | 409    | A create names an id that a task already has                                                                                                                                                                                     |
+| `not_revertible`       | 409    | The activity row records a create, a decide, a key action, or a write with automation effects, which a revert does not undo                                                                                                      |
+| `payload_too_large`    | 413    | The body is larger than 1 MiB                                                                                                                                                                                                    |
+| `idempotency_mismatch` | 422    | The `Idempotency-Key` was used before with a different request                                                                                                                                                                   |
+| `internal`             | 500    | An unexpected error. The server logs it                                                                                                                                                                                          |
 
 A write checks its request in this order, and the first failure answers:
 
@@ -112,6 +113,7 @@ Every 401 response, from REST or from `/mcp`, carries the header `WWW-Authentica
 | Method and path                      | Key                                   | Purpose                                                         |
 | ------------------------------------ | ------------------------------------- | --------------------------------------------------------------- |
 | `GET /api/v1/workspace`              | None                                  | The whole workspace in one snapshot                             |
+| `POST /api/v1/tasks`                 | Any (an agent only for itself)        | Register a task                                                 |
 | `GET /api/v1/tasks/:id`              | None                                  | One task with its requirements and blocking decisions           |
 | `POST /api/v1/tasks/:id/updates`     | Task's agent or owner                 | Post an update to a task                                        |
 | `PUT /api/v1/tasks/:id/requirements` | Task's agent or owner                 | Add or set a requirement                                        |
@@ -153,6 +155,31 @@ Returns one consistent snapshot:
 `centcom whoami` reads `actor` to show which agent a key belongs to.
 
 Each task's `open` is `true` or `false`. Its `stale` is `true`, `false`, or null. Its `attention` is the list of reasons it needs attention, from `blocked`, `owner`, and `stale`, and is empty when it needs none. [ARCHITECTURE.md](ARCHITECTURE.md#computed-values) defines an open task and describes how the server computes all three fields.
+
+### POST /api/v1/tasks
+
+Registers a task, so that an agent can post progress to its own work. Any valid key may create one. An agent's task is its own: the server records the caller as the task's `agent`. Accepts `Idempotency-Key`.
+
+| Field                  | Required | Rule                                                                                                                                |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                   | Yes      | 3 to 24 characters: uppercase letters or digits, a dash, then uppercase letters or digits, such as `CC-12`. No task may have it yet |
+| `title`                | Yes      | 1 to 200 characters                                                                                                                 |
+| `sourceUrl`            | Yes      | Where the work is recorded: an http or https URL, or `hx15:<absolute path>` for a record that exists only on HX-15                  |
+| `repository`           | No       | 1 to 100 characters. Stored as an empty string when left out                                                                        |
+| `host`                 | No       | 1 to 32 characters. Stored as an empty string when left out                                                                         |
+| `startDate`, `dueDate` | No       | A `YYYY-MM-DD` calendar date from 2020-01-01 to 2099-12-31. `dueDate` may not be before `startDate` or more than 730 days after it  |
+| `status`               | No       | A status label, `Waiting` by default. It sets the kanban group as a progress update's `status` does                                 |
+| `note`                 | No       | 1 to 4000 characters                                                                                                                |
+| `agentId`              | No       | Owner only: the id of an active agent, or left out for an unassigned task. An agent may name only itself                            |
+
+The new task has `blocked_on: "none"`, `commit_sha: null`, `version: 1`, and no requirements. Returns 201 with `{task}`, the stored task row. The write records one `task.create` activity row, which a revert refuses with `not_revertible`. The task appears in `GET /api/v1/workspace`, `GET /api/v1/tasks/:id`, and `my_work` at once.
+
+| Error                | Cause                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| `invalid` (400)      | A field breaks its rule, the status is unknown, or the owner's `agentId` names no active agent |
+| `unauthorized` (401) | No key, or a key that is unknown or revoked                                                    |
+| `forbidden` (403)    | An agent's `agentId` names another agent                                                       |
+| `conflict` (409)     | A task with this `id` exists. The message names the id                                         |
 
 ### GET /api/v1/tasks/:id
 
@@ -486,6 +513,7 @@ Access depends on the `Authorization` header:
 | `list_decisions`   | true           | not set           | not set          | false           |
 | `my_work`          | true           | not set           | not set          | false           |
 | `list_updates`     | true           | not set           | not set          | false           |
+| `create_task`      | false          | false             | false            | false           |
 | `post_progress`    | false          | false             | false            | false           |
 | `set_requirement`  | false          | true              | false            | false           |
 | `request_decision` | false          | false             | false            | false           |
@@ -504,6 +532,7 @@ Access depends on the `Authorization` header:
 | `list_decisions`   | `gateType?`, `status?`, `limit?`, `cursor?`                                                                                                            | As `GET /api/v1/decisions` returns                                                                                                                                                                                                                                     |
 | `my_work`          | `agentId?`, which defaults to the key's agent and is required without a key                                                                            | `{agentId, tasks, openRequirements, pendingDecisions}`: the agent's open tasks, as [ARCHITECTURE.md](ARCHITECTURE.md#computed-values) defines them, their requirements that are not `PASS`, and the pending decisions that the agent requested or that block its tasks |
 | `list_updates`     | `agentId?`, `taskId?`, `taskIds?` (an array), `attention?`, `source?`, `since?`, `until?`, `limit?`, `cursor?`                                         | As `GET /api/v1/updates` returns                                                                                                                                                                                                                                       |
+| `create_task`      | The body fields of `POST /api/v1/tasks`, plus `idempotencyKey?`                                                                                        | `{task}`, as `POST /api/v1/tasks` returns                                                                                                                                                                                                                              |
 | `post_progress`    | `taskId`, then the body fields of `POST /api/v1/tasks/:id/updates` except `source`, `decision` included, plus `idempotencyKey?` and `expectedVersion?` | The created update. The server records `source: "mcp"`                                                                                                                                                                                                                 |
 | `set_requirement`  | `taskId`, then the body fields of `PUT /api/v1/tasks/:id/requirements`, plus `idempotencyKey?` and `expectedVersion?`                                  | `{requirement, task}`                                                                                                                                                                                                                                                  |
 | `request_decision` | The body fields of `POST /api/v1/decisions`, plus `idempotencyKey?`. A `recommendedBy` argument is refused as unknown                                  | `{decision}`                                                                                                                                                                                                                                                           |

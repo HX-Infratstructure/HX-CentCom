@@ -146,6 +146,7 @@ const ERROR_PARSERS: {
       : null;
   },
   not_revertible: (_, message) => ({ code: "not_revertible", message }),
+  conflict: (_, message) => ({ code: "conflict", message }),
   idempotency_mismatch: (_, message) => ({ code: "idempotency_mismatch", message }),
 };
 

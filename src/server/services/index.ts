@@ -35,6 +35,7 @@ import type { IssuedKey, ServiceDeps, Services as CoreServices } from "./types";
 import { withDecidedWebhook } from "./webhook";
 import {
   bootstrapOwnerKeyPlan,
+  createTaskPlan,
   decidePlan,
   issueKeyPlan,
   postProgressPlan,
@@ -65,6 +66,7 @@ export function createServices(db: Db, deps: Partial<ServiceDeps> = {}): Service
     getTask: (taskId) => getTask(db, taskId),
     myWork: (actor, agentId) => myWork(db, actor, agentId),
     listGithubPrs: (query) => listGithubPrs(db, query),
+    createTask: (actor, input, opts = {}) => write.create(actor, input, opts, createTaskPlan),
     postProgress: (actor, taskId, input, opts = {}) =>
       write.update(actor, input, opts, withLessonsAsk(postProgressPlan(taskId, opts.via))),
     setRequirement: (actor, taskId, input, opts = {}) =>
@@ -136,6 +138,7 @@ export {
 } from "./github";
 export {
   issueKeyInput,
+  createTaskInput,
   postProgressInput,
   setRequirementInput,
   requestDecisionInput,
@@ -143,6 +146,7 @@ export {
   updateQueryInput,
   activityQueryInput,
   decisionQueryInput,
+  type CreateTaskInput,
   type PostProgressInput,
   type SetRequirementInput,
   type RequestDecisionInput,
