@@ -3,7 +3,8 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routeTree.gen";
-import type { Agent, Lesson, LessonsPage, RaidItem, RaidPage, Workspace } from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { Agent, Lesson, LessonsPage, RaidItem, RaidPage } from "./server-types";
 
 const server = vi.hoisted(() => ({ getRaidItem: vi.fn(), getLesson: vi.fn() }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
@@ -20,20 +21,7 @@ const AGENTS: readonly Agent[] = [
   { id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true },
 ];
 
-const WORKSPACE: Workspace = {
-  tasks: [],
-  updates: [],
-  updatesCursor: null,
-  requirements: [],
-  decisions: [],
-  agents: AGENTS,
-  statusLabels: [],
-  repos: [],
-  counts: {
-    updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
-    decisions: { total: 0, byGateType: {}, byStatus: {} },
-  },
-};
+const WORKSPACE = workspaceWith({ agents: AGENTS });
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
