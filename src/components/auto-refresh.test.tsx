@@ -2,7 +2,8 @@ import { RouterProvider } from "@tanstack/react-router";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouter } from "@/router";
-import type { ActivityEntry, ActivityPage, Workspace } from "./server-types";
+import { workspaceWith } from "@/test/ui-fixtures";
+import type { ActivityEntry, ActivityPage } from "./server-types";
 
 const server = vi.hoisted(() => ({ listWorkspace: vi.fn(), listActivity: vi.fn() }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
@@ -12,20 +13,9 @@ vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
 }));
 
 // Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
-const WORKSPACE: Workspace = {
-  tasks: [],
-  updates: [],
-  updatesCursor: null,
-  requirements: [],
-  decisions: [],
+const WORKSPACE = workspaceWith({
   agents: [{ id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true }],
-  statusLabels: [],
-  repos: [],
-  counts: {
-    updates: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
-    decisions: { total: 0, byGateType: {}, byStatus: {} },
-  },
-};
+});
 
 const NO_ACTIVITY: ActivityPage = {
   items: [],
