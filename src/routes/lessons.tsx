@@ -12,7 +12,7 @@ import {
 } from "@tanstack/react-query";
 import { adaptLessons, adaptWorkspace, toAppError } from "@/components/adapt";
 import { detailFrom } from "@/components/detail";
-import { LessonDetail, LessonRow } from "@/components/lesson";
+import { LessonBoard, LessonDetail } from "@/components/lesson";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
 import { useOpenRecord } from "@/components/open-record";
@@ -119,13 +119,7 @@ function LessonsLog(): ReactNode {
             : "No lesson is recorded yet."}
         </EmptyState>
       ) : (
-        <ul className="record-list">
-          {items.map((lesson) => (
-            <li key={lesson.id}>
-              <LessonRow lesson={lesson} />
-            </li>
-          ))}
-        </ul>
+        <LessonBoard lessons={items} totals={counts?.byStatus ?? {}} />
       )}
       <ShowMore
         shown={items.length}

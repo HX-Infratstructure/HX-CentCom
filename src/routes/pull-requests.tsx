@@ -4,7 +4,7 @@ import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { toAppError } from "@/components/adapt";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
-import { PullRequestList } from "@/components/pull-request";
+import { PullRequestBoard } from "@/components/pull-request";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { prPages, type PrQuery } from "@/lib/task-data";
@@ -60,7 +60,7 @@ function PullRequestsPage(): ReactNode {
             : "No GitHub sync has stored pull requests yet."}
         </EmptyState>
       ) : (
-        <PullRequestList prs={items} />
+        <PullRequestBoard prs={items} totals={counts?.byState ?? {}} />
       )}
       <ShowMore
         shown={items.length}

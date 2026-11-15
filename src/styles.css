@@ -956,20 +956,9 @@
     color: var(--amber);
     font-weight: 500;
   }
-  .status-label[data-status="Decided"],
-  .status-label[data-status="adopted"] {
+  .status-label[data-status="Decided"] {
     color: var(--primary);
     font-weight: 500;
-  }
-  .severity {
-    font-weight: 500;
-  }
-  .severity[data-severity="critical"],
-  .severity[data-severity="high"] {
-    color: var(--destructive);
-  }
-  .severity[data-severity="medium"] {
-    color: var(--amber);
   }
   .agent-badge {
     display: inline-flex;
@@ -1352,6 +1341,163 @@
     background: var(--hue-ink);
   }
 
+  /* An empty status cell is monday's blank grey, not the group's color the cell would otherwise inherit. */
+  .board-table .status-cell[data-empty],
+  .board-table tbody tr:hover > .status-cell[data-empty] {
+    background: var(--secondary);
+  }
+  .clip-cell {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .board-table td.clip-cell {
+    color: var(--muted-foreground);
+  }
+  .id-run {
+    display: inline-flex;
+    gap: 8px;
+  }
+  .board-table .tag-list {
+    flex-wrap: nowrap;
+  }
+  .task-line > .source-link {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--foreground);
+    font-size: var(--text-base);
+    text-decoration: none;
+    text-overflow: ellipsis;
+  }
+  .task-line > .source-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .board-table .sha {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--muted-foreground);
+  }
+
+  /* The activity log: one line per change, like monday's item log. */
+  .activity-log {
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    list-style: none;
+    overflow: hidden;
+  }
+  .activity-log > li + li {
+    border-top: 1px solid var(--border);
+  }
+  .activity-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 20px;
+    align-items: start;
+    padding: 12px 16px;
+    background: var(--card);
+  }
+  .activity-row:hover {
+    background: var(--muted);
+  }
+  .activity-main {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+  .activity-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    min-width: 0;
+    font-size: var(--text-sm);
+  }
+  .activity-head .agent-person {
+    font-weight: 600;
+  }
+  .activity-head .id-link {
+    color: var(--primary);
+    font-family: inherit;
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .activity-head .id-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .activity-head .type-pill {
+    height: 22px;
+    border-radius: 11px;
+  }
+  .activity-row .change-list {
+    padding-left: 34px;
+    color: var(--muted-foreground);
+  }
+  .change-field {
+    color: var(--muted-foreground);
+  }
+  .change-from {
+    color: var(--muted-foreground);
+    text-decoration: line-through;
+    text-decoration-color: var(--input-border);
+  }
+  .change-to {
+    color: var(--foreground);
+    font-weight: 500;
+  }
+  .activity-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding-left: 34px;
+    font-size: var(--text-xs);
+    color: var(--muted-foreground);
+  }
+  .activity-side {
+    display: grid;
+    justify-items: end;
+    gap: 8px;
+    font-size: var(--text-xs);
+    color: var(--muted-foreground);
+    white-space: nowrap;
+  }
+  .revert-action {
+    display: grid;
+    justify-items: end;
+    gap: 8px;
+    white-space: normal;
+  }
+  .revert-button {
+    height: 28px;
+    gap: 6px;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
+    font-weight: 600;
+  }
+  .revert-button svg {
+    width: 14px;
+    height: 14px;
+  }
+  .revert-button:hover {
+    border-color: var(--hue-red-ink);
+    color: var(--hue-red-ink);
+  }
+  .restore-list {
+    display: grid;
+    gap: 6px;
+    margin: 4px 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--muted);
+    color: var(--foreground);
+    list-style: none;
+  }
+
   .agent-person {
     display: inline-flex;
     align-items: center;
@@ -1515,9 +1661,32 @@
     gap: 6px 16px;
     font-size: var(--text-sm);
   }
+  .sheet-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 12px;
+    border-radius: 12px;
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    white-space: nowrap;
+  }
   .sheet-section {
     display: grid;
     gap: 8px;
+  }
+  /* The record's own words on a quiet panel, so they read apart from the facts below. */
+  .sheet-description {
+    padding: 14px 16px;
+    border-radius: var(--radius-lg);
+    background: var(--muted);
   }
   .sheet-section h3 {
     font-size: var(--text-sm);
@@ -1675,11 +1844,14 @@
     white-space: pre-line;
   }
 
+  /* The owner's form wears the Pending purple edge, the color of the group it moves the decision out of. */
   .decide-form {
     display: grid;
     gap: 18px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-top: 6px solid var(--hue-purple);
+    border-radius: var(--radius-lg);
   }
   .decide-form h3 {
     font-size: var(--text-base);
@@ -1739,6 +1911,41 @@
     height: 16px;
     margin: 0;
     accent-color: var(--primary);
+  }
+  /* The outcome picker reads like monday's status column: each choice fills with its color when chosen. */
+  .status-picker {
+    gap: 8px;
+  }
+  .status-picker .radio {
+    position: relative;
+    height: 34px;
+    padding: 0 16px 0 12px;
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .status-picker .radio:hover {
+    border-color: var(--hue-ink);
+  }
+  .status-picker .radio:has(input:checked) {
+    border-color: var(--hue-ink);
+    background: var(--hue-ink);
+    color: var(--primary-foreground);
+  }
+  .status-picker .radio:has(input:checked) input {
+    accent-color: var(--primary-foreground);
+  }
+  .status-picker .radio:has(input:focus-visible) {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+  .field textarea:focus-visible,
+  .field input:not([type="radio"]):focus-visible {
+    border-color: var(--primary);
+    outline: 2px solid var(--primary-soft);
+    outline-offset: 0;
   }
   .form-actions {
     display: flex;
@@ -1977,6 +2184,10 @@
     }
   }
   @media (max-width: 700px) {
+    .activity-row .change-list,
+    .activity-meta {
+      padding-left: 0;
+    }
     .number-widgets {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;

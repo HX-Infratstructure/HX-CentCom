@@ -1,9 +1,11 @@
 import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { BoardTable, PersonCell, StatusCell, type BoardColumn } from "./board";
 import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
 import { ErrorState } from "./list-states";
 import {
+  DECISION_STATUS_HUES,
   DECISION_STATUS_LABELS,
   GATE_HUES,
   GATE_TYPE_LABELS,
@@ -81,6 +83,70 @@ export function DecisionList({ decisions }: { decisions: readonly DecisionView[]
   );
 }
 
+function decisionColumns(when: "age" | "decided"): readonly BoardColumn[] {
+  return [
+    { name: "Question", width: "auto" },
+    { name: "Type", width: 108 },
+    { name: "Summary", width: 220 },
+    { name: "Blocks", width: 110 },
+    { name: "Requested by", width: 160 },
+    { name: when === "age" ? "Age" : "Decided at", width: 96 },
+    { name: "Status", width: 120 },
+  ];
+}
+
+/** Decisions as a board table. `when` picks the time column, the request's age or the decision date. */
+export function DecisionTable({
+  decisions,
+  when,
+}: {
+  decisions: readonly DecisionView[];
+  when: "age" | "decided";
+}): ReactNode {
+  return (
+    <BoardTable columns={decisionColumns(when)}>
+      {decisions.map((d) => (
+        <tr key={d.id}>
+          <th scope="row">
+            <span className="task-line">
+              <RecordLink kind="decision" id={d.id} className="task-link">
+                {decisionTitle(d)}
+              </RecordLink>
+              <code className="record-id">{d.id}</code>
+            </span>
+          </th>
+          <td className="center-cell">
+            <span className="type-pill" data-hue={GATE_HUES[d.gate_type]}>
+              {GATE_TYPE_LABELS[d.gate_type]}
+            </span>
+          </td>
+          <td className="clip-cell" title={d.question === null ? undefined : d.summary}>
+            {d.question !== null && d.summary}
+          </td>
+          <td className="clip-cell">
+            <span className="id-run">
+              {d.blocks.map((taskId) => (
+                <RecordLink key={taskId} kind="task" id={taskId} className="id-link">
+                  {taskId}
+                </RecordLink>
+              ))}
+            </span>
+          </td>
+          <PersonCell agent={d.requester} empty="No requester recorded" />
+          <td className="center-cell">
+            {when === "age"
+              ? d.requestedAt !== null && <Time at={d.requestedAt} />
+              : d.decidedAt !== null && <Time at={d.decidedAt} format="date" />}
+          </td>
+          <StatusCell hue={DECISION_STATUS_HUES[d.status]}>
+            {DECISION_STATUS_LABELS[d.status]}
+          </StatusCell>
+        </tr>
+      ))}
+    </BoardTable>
+  );
+}
+
 /** The complete view of one decision (R11), with the decide form in owner mode while it is pending. */
 export function DecisionDetail({
   detail,
@@ -117,14 +183,16 @@ function DecisionBody({
   const blocksId = useId();
   return (
     <>
-      <p className="sheet-facts">
-        <span className="type-label">{GATE_TYPE_LABELS[d.gate_type]}</span>
-        <span className="status-label" data-status={d.status}>
+      <div className="sheet-pills">
+        <span className="type-pill" data-hue={GATE_HUES[d.gate_type]}>
+          {GATE_TYPE_LABELS[d.gate_type]}
+        </span>
+        <span className="status-pill" data-hue={DECISION_STATUS_HUES[d.status]}>
           {DECISION_STATUS_LABELS[d.status]}
         </span>
-      </p>
+      </div>
 
-      <section aria-labelledby={descriptionId} className="sheet-section">
+      <section aria-labelledby={descriptionId} className="sheet-section sheet-description">
         <h3 id={descriptionId}>Description</h3>
         <RichText source={d.description} />
       </section>
@@ -291,9 +359,9 @@ function DecideForm({
 
       <fieldset className="field" aria-invalid={statusIssue !== undefined || undefined}>
         <legend>Outcome</legend>
-        <div className="radio-row">
+        <div className="radio-row status-picker">
           {OUTCOMES.map((outcome) => (
-            <label key={outcome} className="radio">
+            <label key={outcome} className="radio" data-hue={DECISION_STATUS_HUES[outcome]}>
               <input type="radio" name="status" value={outcome} required />
               {DECISION_STATUS_LABELS[outcome]}
             </label>

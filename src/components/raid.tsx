@@ -1,12 +1,17 @@
 import type { ReactNode } from "react";
+import { BoardGroup, BoardTable, PersonCell, StatusCell, type BoardColumn } from "./board";
 import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
 import {
+  RAID_STATUS_HUES,
   RAID_STATUS_LABELS,
+  RAID_TYPE_HUES,
   RAID_TYPE_LABELS,
+  SEVERITY_HUES,
   SEVERITY_LABELS,
   VALIDATION_STATE_LABELS,
   assertNever,
+  groupRows,
   type BlockingRef,
   type RaidView,
 } from "./model";
@@ -14,37 +19,88 @@ import { AgentBadge, Fact, Facts, SourceLink, Time } from "./record-parts";
 import { RichText } from "./rich-text";
 import { RecordLink } from "./url-state";
 
-export function RaidRow({ item }: { item: RaidView }): ReactNode {
+const RAID_TYPES = Object.keys(RAID_TYPE_LABELS) as RaidView["type"][];
+
+const COLUMNS: readonly BoardColumn[] = [
+  { name: "Item", width: "auto" },
+  { name: "Severity", width: 120 },
+  { name: "Status", width: 120 },
+  { name: "Owner", width: 170 },
+  { name: "Tasks", width: 130 },
+  { name: "Review date", width: 112 },
+  { name: "Updated", width: 104 },
+];
+
+/** The register grouped by type in SPEC order. `totals` is the server's count per type under the other filters. */
+export function RaidBoard({
+  items,
+  totals,
+}: {
+  items: readonly RaidView[];
+  totals: Readonly<Partial<Record<RaidView["type"], number>>>;
+}): ReactNode {
   return (
-    <article className="record-row raid-row">
-      <h3 className="row-title">
-        <RecordLink kind="raid" id={item.id} className="row-link">
-          {item.title}
-        </RecordLink>
-      </h3>
-      <p className="row-summary">{item.summary}</p>
-      <div className="row-meta">
-        <span className="type-label">{RAID_TYPE_LABELS[item.type]}</span>
-        {item.severity !== null && (
-          <span className="severity" data-severity={item.severity}>
-            {SEVERITY_LABELS[item.severity]}
-          </span>
-        )}
-        <span>{RAID_STATUS_LABELS[item.status]}</span>
-        {item.reviewAt !== null && (
-          <span>
-            Review <Time at={item.reviewAt} format="date" />
-          </span>
-        )}
-        {item.owner !== null && <AgentBadge agent={item.owner} variant="chip" />}
-        {item.task_ids.map((taskId) => (
-          <RecordLink key={taskId} kind="task" id={taskId} className="id-link">
-            {taskId}
+    <div className="board-groups">
+      {groupRows(RAID_TYPES, items, (item) => item.type).map(({ key, rows }) => {
+        const total = totals[key] ?? rows.length;
+        return (
+          <BoardGroup
+            key={key}
+            title={RAID_PLURALS[key]}
+            hue={RAID_TYPE_HUES[key]}
+            count={`${total} ${total === 1 ? "item" : "items"}`}
+          >
+            <BoardTable columns={COLUMNS}>
+              {rows.map((item) => (
+                <RaidRow key={item.id} item={item} />
+              ))}
+            </BoardTable>
+          </BoardGroup>
+        );
+      })}
+    </div>
+  );
+}
+
+const RAID_PLURALS = {
+  risk: "Risks",
+  assumption: "Assumptions",
+  issue: "Issues",
+  dependency: "Dependencies",
+} as const satisfies Record<RaidView["type"], string>;
+
+function RaidRow({ item }: { item: RaidView }): ReactNode {
+  return (
+    <tr>
+      <th scope="row">
+        <span className="task-line">
+          <RecordLink kind="raid" id={item.id} className="task-link">
+            {item.title}
           </RecordLink>
-        ))}
-        <code className="record-id">{item.id}</code>
-      </div>
-    </article>
+          <code className="record-id">{item.id}</code>
+        </span>
+      </th>
+      <StatusCell hue={item.severity === null ? null : SEVERITY_HUES[item.severity]}>
+        {item.severity !== null && SEVERITY_LABELS[item.severity]}
+      </StatusCell>
+      <StatusCell hue={RAID_STATUS_HUES[item.status]}>{RAID_STATUS_LABELS[item.status]}</StatusCell>
+      <PersonCell agent={item.owner} empty="No owner" />
+      <td className="clip-cell">
+        <span className="id-run">
+          {item.task_ids.map((taskId) => (
+            <RecordLink key={taskId} kind="task" id={taskId} className="id-link">
+              {taskId}
+            </RecordLink>
+          ))}
+        </span>
+      </td>
+      <td className="center-cell">
+        {item.reviewAt !== null && <Time at={item.reviewAt} format="date" />}
+      </td>
+      <td className="center-cell">
+        <Time at={item.updatedAt} />
+      </td>
+    </tr>
   );
 }
 
@@ -65,7 +121,20 @@ export function RaidDetail({
     >
       {(item) => (
         <>
-          <div className="sheet-section">
+          <div className="sheet-pills">
+            <span className="type-pill" data-hue={RAID_TYPE_HUES[item.type]}>
+              {RAID_TYPE_LABELS[item.type]}
+            </span>
+            {item.severity !== null && (
+              <span className="status-pill" data-hue={SEVERITY_HUES[item.severity]}>
+                {SEVERITY_LABELS[item.severity]}
+              </span>
+            )}
+            <span className="status-pill" data-hue={RAID_STATUS_HUES[item.status]}>
+              {RAID_STATUS_LABELS[item.status]}
+            </span>
+          </div>
+          <div className="sheet-section sheet-description">
             <RichText source={item.description} />
           </div>
           <Facts>

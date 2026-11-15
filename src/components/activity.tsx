@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Undo2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "./list-states";
 import {
+  ACTIVITY_ACTION_HUES,
   ACTIVITY_ACTION_LABELS,
   ACTIVITY_ENTITY_LABELS,
   assertNever,
@@ -34,7 +36,7 @@ export function ActivityList({
   owner: OwnerActions | null;
 }): ReactNode {
   return (
-    <ul className="record-list">
+    <ul className="activity-log">
       {entries.map((entry) => (
         <li key={entry.id}>
           <ActivityRow entry={entry} owner={owner} />
@@ -52,39 +54,54 @@ function ActivityRow({
   owner: OwnerActions | null;
 }): ReactNode {
   return (
-    <article className="record-row">
-      <h3 className="row-title">{ACTIVITY_ACTION_LABELS[entry.action]}</h3>
-      {entry.changes.length > 0 && (
-        <ul className="change-list">
-          {entry.changes.map((change) => (
-            <li key={change.field}>
-              <span className="quiet">{change.field}</span> {changeText(change)}
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="row-meta">
-        <ChangedRecord entry={entry} />
-        <AgentBadge agent={entry.by} variant="chip" />
-        <Time at={entry.createdAt} />
-        {entry.commit_sha !== null && (
-          <code className="sha" title={entry.commit_sha}>
-            {entry.commit_sha.slice(0, 7)}
-          </code>
+    <article className="activity-row">
+      <div className="activity-main">
+        <div className="activity-head">
+          <AgentBadge agent={entry.by} variant="person" />
+          <h3 className="type-pill" data-hue={ACTIVITY_ACTION_HUES[entry.action]}>
+            {ACTIVITY_ACTION_LABELS[entry.action]}
+          </h3>
+          <ChangedRecord entry={entry} />
+        </div>
+        {entry.changes.length > 0 && (
+          <ul className="change-list">
+            {entry.changes.map((change) => (
+              <li key={change.field}>
+                <span className="change-field">{change.field}</span> <ChangeText change={change} />
+              </li>
+            ))}
+          </ul>
         )}
-        {entry.run_id !== null && <span>Run {entry.run_id}</span>}
+        {(entry.commit_sha !== null || entry.run_id !== null) && (
+          <p className="activity-meta">
+            {entry.commit_sha !== null && (
+              <code className="sha" title={entry.commit_sha}>
+                {entry.commit_sha.slice(0, 7)}
+              </code>
+            )}
+            {entry.run_id !== null && <span>Run {entry.run_id}</span>}
+          </p>
+        )}
       </div>
-      {owner !== null && entry.revertible && <RevertAction entry={entry} owner={owner} />}
+      <div className="activity-side">
+        <Time at={entry.createdAt} />
+        {owner !== null && entry.revertible && <RevertAction entry={entry} owner={owner} />}
+      </div>
     </article>
   );
 }
 
-function changeText(change: ActivityChange): string {
+function ChangeText({ change }: { change: ActivityChange }): ReactNode {
   switch (change.kind) {
     case "value":
-      return `${change.from} → ${change.to}`;
+      return (
+        <>
+          <span className="change-from">{change.from}</span> →{" "}
+          <span className="change-to">{change.to}</span>
+        </>
+      );
     case "edited":
-      return "edited";
+      return <span className="change-to">edited</span>;
     default:
       return assertNever(change);
   }
@@ -142,14 +159,21 @@ function RevertAction({ entry, owner }: { entry: ActivityView; owner: OwnerActio
   }
   const sending = state.phase === "sending";
   return (
-    <div className="grid justify-items-start gap-2 pt-1">
+    <div className="revert-action">
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button type="button" variant="outline" size="sm" disabled={sending}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="revert-button"
+            disabled={sending}
+          >
+            <Undo2 aria-hidden="true" />
             {sending ? "Reverting" : "Revert"}
           </Button>
         </AlertDialogTrigger>
-        <AlertDialogContent>
+        <AlertDialogContent className="border-t-[6px] border-t-[var(--hue-red)]">
           <AlertDialogHeader>
             <AlertDialogTitle>
               Restore {recordName(entry)} to how it was before this change?
@@ -157,7 +181,7 @@ function RevertAction({ entry, owner }: { entry: ActivityView; owner: OwnerActio
             <AlertDialogDescription asChild>
               <div className="grid gap-2">
                 {entry.changes.length > 0 && (
-                  <ul className="grid gap-1 text-foreground">
+                  <ul className="restore-list">
                     {entry.changes.map((change) => (
                       <li key={change.field}>{restoreText(change)}</li>
                     ))}
@@ -169,7 +193,12 @@ function RevertAction({ entry, owner }: { entry: ActivityView; owner: OwnerActio
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void revert()}>Revert</AlertDialogAction>
+            <AlertDialogAction
+              className="bg-[var(--hue-red-ink)] hover:bg-[var(--hue-red-ink)] hover:brightness-95"
+              onClick={() => void revert()}
+            >
+              Revert
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
