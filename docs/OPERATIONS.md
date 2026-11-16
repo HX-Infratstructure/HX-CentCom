@@ -89,9 +89,32 @@ Agents and the owner send their Bearer keys over plain HTTP on the HX LAN, which
 
 `deploy/hx15/verify.sh` only reads. It checks the app unit, `GET /`, `GET /api/v1/workspace`, and the MCP tool list without a key, and prints one `PASS` or `FAIL` line per check. Run it on HX-15, against the app port or the HX-7 URL ([Verify a running app](../deploy/hx15/README.md#verify-a-running-app)).
 
+### Check the live pages after a deploy
+
+`verify.sh` checks the units and the API. `npm run live-check` checks the pages, so run it after `verify.sh`. It opens each of the seven pages in Chromium and compares what they show with `/api/v1`, and it measures text contrast against WCAG AA. The checks take their filter values from the API's facet counts, so they need no fixed test data. `scripts/live-check/checks/index.ts` lists every check.
+
+The checker only reads, so it is safe to run at any time. It lets only GET and HEAD requests through. It aborts any other request, records it in `live-check.json`, and exits with code 1.
+
+Run it from the clone on HX-15. If the clone has no `node_modules`, or `package-lock.json` changed since the last install, run `npm ci` there first.
+
+```sh
+cd ~/HX-CentCom
+npm run live-check -- --base <url> --out <folder>
+```
+
+`<url>` is the app's URL, such as `http://192.168.50.207:8420`. Give `--out` a folder outside the clone. `install.sh` refuses a clone with untracked files, and the results would be untracked files. The checker uses Playwright's Chromium in `~/.cache/ms-playwright`. If that browser is missing, install it with `npx playwright install chromium`.
+
+The checker writes `<folder>/live-check.json`, which holds each check's status, evidence, and UTC time, and one screenshot per check in the same folder. Each check ends PASS, FAIL, or LIVE_NOT_EXECUTED. LIVE_NOT_EXECUTED means that the live data gave the check nothing to test.
+
+The exit code tells the result:
+
+- `0`: no check failed, and the checker blocked no request. LIVE_NOT_EXECUTED checks do not change the exit code.
+- `1`: a check failed, or the checker blocked a request.
+- `2`: a usage or setup error, such as a missing argument or a browser that does not start.
+
 ### Deploy a later commit
 
-Each new commit needs its own GO. Run `install.sh <new S>`. It keeps the release that `previous` points at and reinstalls the sync units if they are installed ([Deploy a later commit](../deploy/hx15/README.md#deploy-a-later-commit-go-for-that-sha)).
+Each new commit needs its own GO. Run `install.sh <new S>`. It keeps the release that `previous` points at and reinstalls the sync units if they are installed ([Deploy a later commit](../deploy/hx15/README.md#deploy-a-later-commit-go-for-that-sha)). After the install and `verify.sh`, [check the live pages](#check-the-live-pages-after-a-deploy).
 
 ### Roll back
 
