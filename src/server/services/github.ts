@@ -3,7 +3,7 @@
  * activity_log row. The sync is not an agent (activity_log.actor references agents), and copying GitHub's state is
  * not an actor's write.
  */
-import { and, desc, eq, getTableColumns, lt, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gt, lt, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/server/db/client";
 import { githubPrs, githubRepos } from "@/server/db/schema";
@@ -132,8 +132,34 @@ export type GithubPrCounts = {
 };
 export type GithubPrsPage = Page<PullRequest> & { readonly counts: GithubPrCounts };
 
-/** GitHub fixes a PR's id at creation, while fetched_at moves on every sync, so the id alone orders and pages. */
-const prCursor = z.tuple([z.number().int().positive()]);
+/** The board's order (`PR_GROUPS` in src/components/pull-request.tsx): still moving, landed, ended, left GitHub. */
+const PR_STATE_ORDER = [
+  "open",
+  "merged",
+  "closed",
+  "gone",
+] as const satisfies readonly GithubPrState[];
+
+/** A state's index in PR_STATE_ORDER. The column is text, so any other state ranks after them and still lists. */
+const prStateRank = sql<number>`(case ${githubPrs.state} ${sql.join(
+  PR_STATE_ORDER.map((state, rank) => sql`when ${state} then ${sql.raw(String(rank))}`),
+  sql` `,
+)} else ${sql.raw(String(PR_STATE_ORDER.length))} end)`.mapWith(Number);
+
+/**
+ * Rank first, then the highest id. GitHub fixes a PR's id at creation, while fetched_at moves on every sync, so
+ * [rank, id] orders and pages. With a state filter every row has one rank, so the id alone orders.
+ */
+const prCursor = z.tuple([
+  z.number().int().min(0).max(PR_STATE_ORDER.length),
+  z.number().int().positive(),
+]);
+
+function afterPrCursor(cursor: string | undefined): SQL | undefined {
+  if (cursor === undefined) return undefined;
+  const [rank, id] = decodeCursor(prCursor, cursor);
+  return or(gt(prStateRank, rank), and(eq(prStateRank, rank), lt(githubPrs.id, id)));
+}
 
 type PrFacet = "repo" | "state";
 
@@ -145,22 +171,18 @@ function prFilters(query: z.output<typeof githubPrQueryInput>, except?: PrFacet)
   return filters.filter((f): f is SQL => f !== undefined);
 }
 
-/** R12: the mirrored PRs, newest id first, in one REPEATABLE READ, READ ONLY snapshot. */
+/** R12: the mirrored PRs in PR_STATE_ORDER, newest id first in a state, in one REPEATABLE READ, READ ONLY snapshot. */
 export async function listGithubPrs(db: Db, raw: unknown): Promise<GithubPrsPage> {
   const query = parse(githubPrQueryInput, raw);
   return db.transaction(async (tx) => {
-    const after =
-      query.cursor === undefined
-        ? undefined
-        : lt(githubPrs.id, decodeCursor(prCursor, query.cursor)[0]);
-    const items = await page(
+    const ranked = await page(
       tx
-        .select()
+        .select({ pr: githubPrs, rank: prStateRank })
         .from(githubPrs)
-        .where(and(...prFilters(query), after))
-        .orderBy(desc(githubPrs.id)),
+        .where(and(...prFilters(query), afterPrCursor(query.cursor)))
+        .orderBy(asc(prStateRank), desc(githubPrs.id)),
       query.limit,
-      (row) => encodeCursor([row.id]),
+      (row) => encodeCursor([row.rank, row.pr.id]),
     );
     const [total] = await tx
       .select({ n: count })
@@ -177,7 +199,8 @@ export async function listGithubPrs(db: Db, raw: unknown): Promise<GithubPrsPage
       .where(and(...prFilters(query, "state")))
       .groupBy(githubPrs.state);
     return {
-      ...items,
+      items: ranked.items.map((row) => row.pr),
+      nextCursor: ranked.nextCursor,
       counts: { total: total?.n ?? 0, byRepo: tally(byRepo), byState: tally(byState) },
     };
   }, SNAPSHOT);
