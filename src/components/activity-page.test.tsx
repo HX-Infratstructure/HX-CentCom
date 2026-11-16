@@ -1,8 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type { ActivityCounts, ActivityEntry, ActivityPage, Agent } from "./server-types";
 
@@ -334,19 +332,7 @@ function page(
 
 async function renderActivity(url: string, owner: boolean) {
   if (owner) window.sessionStorage.setItem("hx-centcom.owner-key", OWNER_KEY);
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
-  });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  // The root route renders the whole document, so it mounts on `document` as the app does. Inside a <div>, React maps
-  // <body> onto an ancestor of its own container, and the focus a dialog restores on close never finishes dispatching.
-  render(<RouterProvider router={router} />, { container: document as unknown as HTMLElement });
-  await screen.findByRole("heading", { level: 1, name: "Activity" });
+  await renderApp(url, { heading: "Activity", onDocument: true });
 }
 
 /** The row of the change to `record`, named as the row names it ("Task CC-01"). */

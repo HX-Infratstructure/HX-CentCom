@@ -1,8 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp } from "@/test/render-app";
 import type { GithubPrsPage, PullRequest } from "./server-types";
 
 const server = vi.hoisted(() => ({ listGithubPrs: vi.fn() }));
@@ -57,21 +55,6 @@ function serverPage(
   return { items, nextCursor: more && last !== undefined ? String(last.id) : null, counts };
 }
 
-async function renderPullRequests(url: string) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
-  });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  render(<RouterProvider router={router} />);
-  await screen.findByRole("heading", { level: 1, name: "Pull requests" });
-  return router;
-}
-
 /** Each board row as "repository #number", in board order. */
 function prNumbers(): readonly string[] {
   return screen.queryAllByRole("rowheader").map((header) => {
@@ -95,7 +78,7 @@ describe("the pull request page", () => {
     server.listGithubPrs.mockImplementation(async ({ data }) =>
       serverPage(STORED, ALL_COUNTS, data),
     );
-    await renderPullRequests("/pull-requests");
+    await renderApp("/pull-requests", { heading: "Pull requests" });
 
     expect(prNumbers()).toHaveLength(20);
     expect(prNumbers()[0]).toBe(`${LITELLM} #100`);
@@ -120,8 +103,9 @@ describe("the pull request page", () => {
       byState: { open: 8, merged: 6, closed: 2 },
     };
     server.listGithubPrs.mockImplementation(async ({ data }) => serverPage(merged, counts, data));
-    const router = await renderPullRequests(
+    const router = await renderApp(
       `/pull-requests?repo=${encodeURIComponent(CENTCOM)}&state=merged`,
+      { heading: "Pull requests" },
     );
 
     expect(server.listGithubPrs).toHaveBeenCalledWith({ data: { repo: CENTCOM, state: "merged" } });
