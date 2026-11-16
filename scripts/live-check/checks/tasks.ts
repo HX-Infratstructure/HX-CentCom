@@ -1,21 +1,13 @@
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
 import { checked, noData, verdict } from "../verdict.ts";
 import { TasksPage } from "./pages/tasks-page.ts";
-
-interface WorkspaceTask {
-  readonly id: string;
-  readonly repository: string | null;
-  readonly stale: boolean;
-}
-
-interface Workspace {
-  readonly tasks: readonly WorkspaceTask[];
-  readonly updatesCursor: string | null;
-}
-
-interface UpdateList {
-  readonly items: readonly { readonly task_id: string | null }[];
-}
+import {
+  pickNarrowingValue,
+  sameOrder,
+  type UpdateList,
+  type Workspace,
+  type WorkspaceTask,
+} from "./shared.ts";
 
 async function labelsAndKanban(ctx: CheckContext): Promise<CheckOutcome> {
   const page = new TasksPage(ctx.session);
@@ -48,12 +40,12 @@ async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   });
 }
 
-function narrowingRepo(tasks: readonly WorkspaceTask[]): [string, number] | undefined {
+function narrowingRepo(tasks: readonly WorkspaceTask[]) {
   const tally = new Map<string, number>();
   for (const task of tasks) {
     if (task.repository) tally.set(task.repository, (tally.get(task.repository) ?? 0) + 1);
   }
-  return [...tally].filter(([, count]) => count < tasks.length).sort((a, b) => a[1] - b[1])[0];
+  return pickNarrowingValue(tally, tasks.length);
 }
 
 async function filterNarrows(ctx: CheckContext): Promise<CheckOutcome> {
@@ -102,8 +94,7 @@ async function staleBadge(ctx: CheckContext): Promise<CheckOutcome> {
     .filter((row) => row.stale)
     .map((row) => row.id)
     .sort();
-  const ok = shown.join() === expected.join();
-  return verdict([checked(ok, "Stale commit badges differ from the API")], {
+  return verdict([checked(sameOrder(shown, expected), "Stale commit badges differ from the API")], {
     expected,
     shown,
     rows: rows.length,

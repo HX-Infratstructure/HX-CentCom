@@ -4,6 +4,13 @@ import { ActivityPage } from "./pages/activity-page.ts";
 import type { ActivityChange } from "./pages/activity-page.ts";
 import { OverviewPage } from "./pages/overview-page.ts";
 import { PullRequestsPage } from "./pages/pull-requests-page.ts";
+import {
+  sameOrder,
+  type ActivityItem,
+  type ActivityList,
+  type PrList,
+  type Workspace,
+} from "./shared.ts";
 
 const PAGE_PATHS = [
   "/",
@@ -16,22 +23,6 @@ const PAGE_PATHS = [
 ];
 const OVERVIEW_PR_LIMIT = 8;
 const PR_PAGE_SIZE = 20;
-
-interface PrList {
-  readonly items: readonly { readonly title: string; readonly state: string }[];
-  readonly counts: { readonly total: number };
-}
-
-interface ActivityItem {
-  readonly actor: string;
-  readonly created_at: string;
-  readonly before: Readonly<Record<string, unknown>> | null;
-  readonly after: Readonly<Record<string, unknown>> | null;
-}
-
-interface AgentList {
-  readonly agents: readonly { readonly id: string; readonly display_name: string }[];
-}
 
 async function pagesLoad(ctx: CheckContext): Promise<CheckOutcome> {
   const page = new OverviewPage(ctx.session);
@@ -63,13 +54,14 @@ async function overviewOpenPrs(ctx: CheckContext): Promise<CheckOutcome> {
   const shown = await page.openPrTitles();
   const expected = api.items.slice(0, OVERVIEW_PR_LIMIT).map((pr) => pr.title);
   const screenshot = await ctx.screenshot("overview-open-prs");
-  const ok =
-    shown.length === expected.length && shown.every((title, index) => title === expected[index]);
-  return verdict([checked(ok, "Overview open PRs differ from the API's first page")], {
-    shown,
-    expected,
-    screenshot,
-  });
+  return verdict(
+    [checked(sameOrder(shown, expected), "Overview open PRs differ from the API's first page")],
+    {
+      shown,
+      expected,
+      screenshot,
+    },
+  );
 }
 
 async function pullRequestsOpenFirst(ctx: CheckContext): Promise<CheckOutcome> {
@@ -103,9 +95,13 @@ function checkChange(change: ActivityChange, item: ActivityItem) {
   return { ...change, before, after, agrees: inSnapshots && changed && change.from !== change.to };
 }
 
+/**
+ * Checks the first activity row that shows a changed field, not the first row, and matches it to the API item
+ * with the same time. That is intended: rows without a change have nothing to compare.
+ */
 async function activityRowChanges(ctx: CheckContext): Promise<CheckOutcome> {
-  const { items } = await ctx.api.getJson<{ items: readonly ActivityItem[] }>("/api/v1/activity");
-  const { agents } = await ctx.api.getJson<AgentList>("/api/v1/workspace");
+  const { items } = await ctx.api.getJson<ActivityList>("/api/v1/activity");
+  const { agents } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
   const page = new ActivityPage(ctx.session);
   await page.open();
   const row = await page.firstChangedRow();

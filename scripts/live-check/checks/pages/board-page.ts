@@ -55,6 +55,11 @@ export class BoardPage {
     return this.#session.page.locator(VISIBLE_ROWS).count();
   }
 
+  async rowIds(): Promise<readonly string[]> {
+    const ids = await this.#session.page.locator(`${VISIBLE_ROWS} ${ROW_ID}`).allTextContents();
+    return ids.map((id) => id.trim());
+  }
+
   async columns(): Promise<readonly string[]> {
     const names = await this.#session.page
       .locator(TABLE)
