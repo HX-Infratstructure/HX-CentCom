@@ -70,9 +70,7 @@ function activityContext(
   return fakeContext(
     {
       "/api/v1/activity": {
-        items: [
-          { entity, actor: "cc1", created_at: "2026-11-16T17:00:00.123456Z", before, after },
-        ],
+        items: [{ entity, actor: "cc1", created_at: "2026-11-16T17:00:00.123456Z", before, after }],
       },
       "/api/v1/workspace": {
         agents: [{ id: "cc1", display_name: "CC1" }],
@@ -144,32 +142,113 @@ describe("activity-row-changes", () => {
 
   test("a labelled field shows the page's labels", async () => {
     const cases = [
-      { entity: "decision", key: "status", from: "Pending", to: "Decided", shownFrom: "Pending", shownTo: "Decided" },
-      { entity: "requirement", key: "state", from: "PASS", to: "FAIL", shownFrom: "Proven", shownTo: "Failed" },
-      { entity: "raid_item", key: "validation_state", from: "unverified", to: "validated", shownFrom: "Unverified", shownTo: "Validated" },
-      { entity: "task", key: "status", from: "todo", to: "done", shownFrom: "To do", shownTo: "Done" },
-      { entity: "task", key: "status", from: "todo", to: "gone", shownFrom: "To do", shownTo: "gone" },
+      {
+        entity: "decision",
+        key: "status",
+        from: "Pending",
+        to: "Decided",
+        shownFrom: "Pending",
+        shownTo: "Decided",
+      },
+      {
+        entity: "requirement",
+        key: "state",
+        from: "PASS",
+        to: "FAIL",
+        shownFrom: "Proven",
+        shownTo: "Failed",
+      },
+      {
+        entity: "raid_item",
+        key: "validation_state",
+        from: "unverified",
+        to: "validated",
+        shownFrom: "Unverified",
+        shownTo: "Validated",
+      },
+      {
+        entity: "task",
+        key: "status",
+        from: "todo",
+        to: "done",
+        shownFrom: "To do",
+        shownTo: "Done",
+      },
+      {
+        entity: "task",
+        key: "status",
+        from: "todo",
+        to: "gone",
+        shownFrom: "To do",
+        shownTo: "gone",
+      },
     ];
     for (const c of cases) {
       const field = c.key.replace(/_/g, " ");
       const [from, to] = [c.shownFrom, c.shownTo];
-      const right = activityContext({ [c.key]: c.from }, { [c.key]: c.to }, { field, from, to }, c.entity);
-      assert.equal((await run("activity-row-changes", right)).status, "PASS", `${c.entity} ${c.key}`);
+      const right = activityContext(
+        { [c.key]: c.from },
+        { [c.key]: c.to },
+        { field, from, to },
+        c.entity,
+      );
+      assert.equal(
+        (await run("activity-row-changes", right)).status,
+        "PASS",
+        `${c.entity} ${c.key}`,
+      );
     }
   });
 
   test("a labelled field showing the wrong labels fails", async () => {
     const cases = [
-      { entity: "decision", key: "status", from: "Pending", to: "Decided", shownFrom: "wrong-a", shownTo: "wrong-b" },
-      { entity: "decision", key: "status", from: "Pending", to: "Decided", shownFrom: "Pending", shownTo: "Deferred" },
-      { entity: "requirement", key: "state", from: "PASS", to: "FAIL", shownFrom: "PASS", shownTo: "FAIL" },
-      { entity: "task", key: "status", from: "todo", to: "done", shownFrom: "todo", shownTo: "done" },
+      {
+        entity: "decision",
+        key: "status",
+        from: "Pending",
+        to: "Decided",
+        shownFrom: "wrong-a",
+        shownTo: "wrong-b",
+      },
+      {
+        entity: "decision",
+        key: "status",
+        from: "Pending",
+        to: "Decided",
+        shownFrom: "Pending",
+        shownTo: "Deferred",
+      },
+      {
+        entity: "requirement",
+        key: "state",
+        from: "PASS",
+        to: "FAIL",
+        shownFrom: "PASS",
+        shownTo: "FAIL",
+      },
+      {
+        entity: "task",
+        key: "status",
+        from: "todo",
+        to: "done",
+        shownFrom: "todo",
+        shownTo: "done",
+      },
     ];
     for (const c of cases) {
       const field = c.key.replace(/_/g, " ");
       const [from, to] = [c.shownFrom, c.shownTo];
-      const wrong = activityContext({ [c.key]: c.from }, { [c.key]: c.to }, { field, from, to }, c.entity);
-      assert.equal((await run("activity-row-changes", wrong)).status, "FAIL", `${c.entity} ${from} ${to}`);
+      const wrong = activityContext(
+        { [c.key]: c.from },
+        { [c.key]: c.to },
+        { field, from, to },
+        c.entity,
+      );
+      assert.equal(
+        (await run("activity-row-changes", wrong)).status,
+        "FAIL",
+        `${c.entity} ${from} ${to}`,
+      );
     }
   });
 });

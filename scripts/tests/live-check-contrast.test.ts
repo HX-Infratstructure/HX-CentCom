@@ -94,6 +94,9 @@ describe("contrast check evidence", () => {
     const outcome = await check.run(ctx);
     const pages = outcome.evidence["pages"] as { failing: { ratio: number; required: number }[] }[];
     assert.equal(outcome.status, "FAIL");
-    assert.deepEqual(pages[0]?.failing.map(({ ratio, required }) => [ratio, required]), [[4.49, 4.5]]);
+    assert.deepEqual(
+      pages[0]?.failing.map(({ ratio, required }) => [ratio, required]),
+      [[4.49, 4.5]],
+    );
   });
 });
