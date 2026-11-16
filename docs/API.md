@@ -463,7 +463,7 @@ Returns 200 with `{reverted, entity, entityId, version, systemUpdates}`: the rev
 | `state`           | `open`, `closed`, `merged`, or `gone`             |
 | `limit`, `cursor` | See [Lists and pagination](#lists-and-pagination) |
 
-Returns `{items, nextCursor, counts}`. Without a `state` filter, `items` lists open pull requests first, then merged, closed, and gone ones. Within each state, and with a `state` filter, the highest GitHub id comes first. A state change between two page requests moves a pull request in the order, so a later page can repeat or skip it. Each item has `id`, `repo`, `number`, `title`, `state`, `draft`, `head_sha`, `merge_commit_sha`, `url`, and `fetched_at`. `counts` is `{total, byRepo, byState}`. The GitHub sync writes these rows ([ARCHITECTURE.md](ARCHITECTURE.md#automations)).
+Returns `{items, nextCursor, counts}`. Without a `state` filter, `items` lists open pull requests first, then merged, closed, and gone ones. A pull request in any other state, which the GitHub sync does not write, would come last. Within each state, and with a `state` filter, the highest GitHub id comes first. A state change between two page requests moves a pull request in the order, so a later page can repeat or skip it. Each item has `id`, `repo`, `number`, `title`, `state`, `draft`, `head_sha`, `merge_commit_sha`, `url`, and `fetched_at`. `counts` is `{total, byRepo, byState}`. The GitHub sync writes these rows ([ARCHITECTURE.md](ARCHITECTURE.md#automations)).
 
 ## Decision webhook
 
