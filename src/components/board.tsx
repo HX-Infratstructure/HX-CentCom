@@ -1,5 +1,6 @@
 import { useId, useState, type MouseEvent, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
+import { OWN_ACTION } from "@/lib/own-action";
 import type { AgentRef, BoardHue } from "./model";
 import { AgentBadge } from "./record-parts";
 
@@ -89,9 +90,6 @@ export function BoardTable({
     </div>
   );
 }
-
-/** Controls that keep their own action inside a row, so a click on one does not also open the row. */
-const OWN_ACTION = "a[href], button, input, select, textarea, label, summary, [role='button']";
 
 /**
  * A board's rows. A click anywhere on a row follows the link in its header cell, which stays the keyboard's way in,

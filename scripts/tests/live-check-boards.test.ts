@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { checks } from "../live-check/checks/boards.ts";
+import { BoardPage } from "../live-check/checks/pages/board-page.ts";
 import type { ListPage } from "../live-check/checks/shared.ts";
 import type { CheckContext } from "../live-check/types.ts";
 
@@ -25,6 +26,12 @@ interface Site {
   readonly api: Map<string, ListPage>;
   readonly pages: Map<string, readonly string[]>;
   sheetDescription?: string;
+  /** A column whose cells hold their own control, such as a link to another record. */
+  controlColumn?: string;
+  /** The header of the route's first table when the clicked row sits in another table with other columns. */
+  firstTableColumns?: readonly string[];
+  /** A selector the page lacks, so reading its text times out. */
+  missing?: string;
 }
 
 function healthySite(): Site {
@@ -53,16 +60,28 @@ function fakeContext(site: Site): CheckContext {
   let item: string | null = null;
   const shown = () => site.pages.get(current) ?? [];
   const at = () => (item === null ? current : `${current}?item=${item}`);
-  const element = (selector: string): Record<string, unknown> => ({
-    count: async () => shown().length,
-    allTextContents: async () => (selector.includes("thead") ? ["ID", "Summary"] : [...shown()]),
-    first: () => element(selector),
-    nth: () => element(selector),
-    locator: (inner: string) => element(inner),
-    textContent: async () =>
-      selector.includes("sheet-description")
+  const columns = ["ID", "Summary", ...(site.controlColumn ? [site.controlColumn] : [])];
+  const element = (selector: string, cell = -1, ownTable = false): Record<string, unknown> => ({
+    count: async () =>
+      selector.includes("a[href]") ? Number(columns[cell] === site.controlColumn) : shown().length,
+    allTextContents: async () =>
+      selector.includes("thead")
+        ? ownTable
+          ? columns
+          : (site.firstTableColumns ?? columns)
+        : [...shown()],
+    first: () => element(selector, cell, ownTable),
+    nth: (n: number) => element(selector, selector === "th, td" ? n : cell, ownTable),
+    locator: (inner: string) =>
+      element(inner, cell, ownTable || inner.startsWith("xpath=ancestor::table")),
+    textContent: async () => {
+      if (site.missing && selector.includes(site.missing)) {
+        throw new Error(`locator.textContent: Timeout 10000ms exceeded (${selector})`);
+      }
+      return selector.includes("sheet-description")
         ? (site.sheetDescription ?? null)
-        : (shown()[0] ?? null),
+        : (shown()[0] ?? null);
+    },
     click: async () => {
       item = shown()[0] ?? null;
     },
@@ -205,9 +224,50 @@ describe("decision-summary-click", () => {
     assert.match(outcome.reason ?? "", /description/);
   });
 
+  test("opens the row against its own table's columns when the first table's differ", async () => {
+    const site = { ...decisionSite(DESCRIPTION, RENDERED), firstTableColumns: ["ID", "Age"] };
+    const outcome = await decisionSummaryClick.run(fakeContext(site));
+    assert.equal(outcome.status, "PASS", outcome.reason);
+  });
+
   test("records a decision without a description and does not fail on it", async () => {
     const outcome = await decisionSummaryClick.run(fakeContext(decisionSite(null, "")));
     assert.equal(outcome.status, "PASS", outcome.reason);
     assert.deepEqual(outcome.evidence["description"], { expected: null, shown: null });
+  });
+});
+
+describe("BoardPage.openRow", () => {
+  test("closes the sheet and clears ?item= when the open-sheet callback throws", async () => {
+    const ctx = fakeContext(decisionSite(DESCRIPTION, RENDERED));
+    const page = new BoardPage(ctx.session, "/decisions");
+    await page.load();
+    await assert.rejects(
+      page.openRow(0, "Summary", async () => {
+        throw new Error("read failed");
+      }),
+      /read failed/,
+    );
+    assert.equal(new URL(ctx.session.page.url()).searchParams.has("item"), false);
+  });
+
+  test("refuses a column whose cell holds its own control, naming the route and column", async () => {
+    const ctx = fakeContext({ ...decisionSite(DESCRIPTION, RENDERED), controlColumn: "Blocks" });
+    const page = new BoardPage(ctx.session, "/decisions");
+    await page.load();
+    await assert.rejects(
+      page.openRow(0, "Blocks"),
+      /\/decisions column "Blocks" holds its own control/,
+    );
+    assert.equal(new URL(ctx.session.page.url()).searchParams.has("item"), false);
+  });
+
+  test("fails naming the sheet's record ID when that element is missing, not as an empty ID", async () => {
+    const site = { ...decisionSite(DESCRIPTION, RENDERED), missing: ".detail-head" };
+    const ctx = fakeContext(site);
+    const page = new BoardPage(ctx.session, "/decisions");
+    await page.load();
+    await assert.rejects(page.openRow(0, "Summary"), /\/decisions sheet record ID not found/);
+    assert.equal(new URL(ctx.session.page.url()).searchParams.has("item"), false);
   });
 });

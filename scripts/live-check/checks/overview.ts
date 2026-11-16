@@ -158,8 +158,13 @@ function compareRow(
 async function activityRowChanges(ctx: CheckContext): Promise<CheckOutcome> {
   const page = new ActivityPage(ctx.session);
   await page.open();
-  const row = await page.firstChangedRow();
+  const rows = await page.rows();
   const screenshot = await ctx.screenshot("activity-row-changes");
+  if (rows === null)
+    return verdict([checked(false, "the page shows neither an activity row nor its empty state")], {
+      screenshot,
+    });
+  const row = rows.find((entry) => entry.changes.length > 0);
   if (!row)
     return verdict([noData("no row on the first page shows a changed field")], { screenshot });
   const { items } = await ctx.api.getJson<ActivityList>("/api/v1/activity");

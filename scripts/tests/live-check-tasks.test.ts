@@ -2,6 +2,8 @@ import { describe, test } from "node:test";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 import { checks } from "../live-check/checks/tasks.ts";
+import { TasksPage } from "../live-check/checks/pages/tasks-page.ts";
+import type { ReadOnlySession } from "../live-check/session.ts";
 import type { Workspace, WorkspaceTask } from "../live-check/checks/shared.ts";
 import type { CheckContext } from "../live-check/types.ts";
 
@@ -81,11 +83,11 @@ function domContext(path: string, body: unknown, html: string): CheckContext {
   const session = {
     goto: async () => 200,
     page: {
-      evaluate: async (fn: () => unknown) => {
+      evaluate: async (fn: (arg: unknown) => unknown, arg?: unknown) => {
         const global = globalThis as { document?: Document };
         global.document = document;
         try {
-          return fn();
+          return fn(arg);
         } finally {
           delete global.document;
         }
@@ -122,6 +124,48 @@ describe("stale-badge", () => {
     const ctx = domContext("/api/v1/workspace", { tasks }, rows);
     const outcome = await checkById("stale-badge").run(ctx);
     assert.equal(outcome.status, "PASS", outcome.reason);
+  });
+
+  test("a reworded badge tooltip still counts as the stale badge", async () => {
+    const reworded = rows.replace(staleTitle, "Commit is behind its repository head.");
+    const tasks = [{ id: "OPEN-1", repository: "r", stale: true, attention: ["stale"] }];
+    const outcome = await checkById("stale-badge").run(
+      domContext("/api/v1/workspace", { tasks }, reworded),
+    );
+    assert.equal(outcome.status, "PASS", outcome.reason);
+  });
+});
+
+describe("TasksPage", () => {
+  function pageWith(buttons: number) {
+    const visited: string[] = [];
+    const session = {
+      goto: async (path: string) => {
+        visited.push(path);
+        return 200;
+      },
+      page: {
+        locator: () => ({
+          count: async () => buttons,
+          click: async () => {
+            throw new Error("locator.click: Timeout 30000ms exceeded");
+          },
+        }),
+      },
+    } as unknown as ReadOnlySession;
+    return { page: new TasksPage(session), visited };
+  }
+
+  test("open takes the query and the fragment in one convention, neither with its prefix", async () => {
+    const { page, visited } = pageWith(0);
+    await page.open({ task: "T 1" }, "updates");
+    await page.open();
+    assert.deepEqual(visited, ["/tasks?task=T+1#updates", "/tasks"]);
+  });
+
+  test("Show more without its button fails with a diagnostic, not a click timeout", async () => {
+    const { page } = pageWith(0);
+    await assert.rejects(page.showMore(), { message: "the update log has no Show more button" });
   });
 });
 

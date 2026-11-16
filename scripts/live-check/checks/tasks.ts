@@ -13,7 +13,7 @@ async function labelsAndKanban(ctx: CheckContext): Promise<CheckOutcome> {
   const page = new TasksPage(ctx.session);
   await page.open();
   const labels = await page.statusLabels();
-  await page.open("view=kanban");
+  await page.open({ view: "kanban" });
   const kanban = await page.kanbanGroups();
   const screenshot = await ctx.screenshot("tasks-labels-kanban");
   const ok = labels.length > 0 && kanban.heads.length > 0 && kanban.cards > 0;
@@ -29,7 +29,7 @@ async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   const taskId = items.find((item) => item.task_id)?.task_id;
   if (!taskId) return verdict([noData("the API has no updates")], { items: items.length });
   const page = new TasksPage(ctx.session);
-  await page.open(new URLSearchParams({ task: taskId }).toString(), "#updates");
+  await page.open({ task: taskId }, "updates");
   const feed = await page.feedItems();
   const screenshot = await ctx.screenshot("task-feed-badges");
   const agentRows = feed.filter((item) => !item.system);
@@ -61,7 +61,7 @@ async function filterNarrows(ctx: CheckContext): Promise<CheckOutcome> {
   if (!pick) return verdict([noData("no repository narrows the tasks")], { tasks: tasks.length });
   const [repo, expected] = pick;
   const page = new TasksPage(ctx.session);
-  await page.open(new URLSearchParams({ repo }).toString());
+  await page.open({ repo });
   const rows = await page.rowCount();
   const reread = await ctx.api.getJson<Workspace>("/api/v1/workspace");
   const settled = repoCounts(reread.tasks).get(repo) ?? 0;

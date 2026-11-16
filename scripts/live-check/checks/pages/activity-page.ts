@@ -24,24 +24,27 @@ export class ActivityPage {
     return this.#session.goto(PAGE_ROUTES.activity);
   }
 
-  /** The first row on the page that shows at least one changed field. */
-  async firstChangedRow(): Promise<ActivityRow | null> {
-    const rows = await this.#rows();
-    return rows.find((row) => row.changes.length > 0) ?? null;
-  }
-
-  #rows(): Promise<ActivityRow[]> {
-    return this.#session.page.evaluate(() =>
-      [...document.querySelectorAll("ul.activity-log > li article.activity-row")].map((row) => ({
-        actorName:
-          row.querySelector(".activity-head .agent-person-name")?.textContent?.trim() ?? "",
-        createdAt: row.querySelector(".activity-side time")?.getAttribute("datetime") ?? null,
-        changes: [...row.querySelectorAll("ul.change-list > li")].map((li) => ({
-          field: li.querySelector(".change-field")?.textContent?.trim() ?? "",
-          from: li.querySelector(".change-from")?.textContent?.trim() ?? null,
-          to: li.querySelector(".change-to")?.textContent?.trim() ?? null,
-        })),
-      })),
-    );
+  /**
+   * The rows the activity list shows. An empty array means the page shows its empty state, which the route renders
+   * in place of the list when no entry exists. Null means the page shows neither a row nor that state, so its
+   * structure is not what this checker reads.
+   */
+  rows(): Promise<ActivityRow[] | null> {
+    return this.#session.page.evaluate(() => {
+      const rows = [...document.querySelectorAll("ul.activity-log > li article.activity-row")].map(
+        (row) => ({
+          actorName:
+            row.querySelector(".activity-head .agent-person-name")?.textContent?.trim() ?? "",
+          createdAt: row.querySelector(".activity-side time")?.getAttribute("datetime") ?? null,
+          changes: [...row.querySelectorAll("ul.change-list > li")].map((li) => ({
+            field: li.querySelector(".change-field")?.textContent?.trim() ?? "",
+            from: li.querySelector(".change-from")?.textContent?.trim() ?? null,
+            to: li.querySelector(".change-to")?.textContent?.trim() ?? null,
+          })),
+        }),
+      );
+      if (rows.length > 0) return rows;
+      return document.querySelector(".list-empty") ? [] : null;
+    });
   }
 }

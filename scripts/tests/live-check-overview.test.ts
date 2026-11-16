@@ -324,6 +324,14 @@ describe("activity-row-changes", () => {
     );
     assert.equal((await run("activity-row-changes", gap)).status, "FAIL");
   });
+
+  test("a page that shows neither rows nor its empty state fails, and the empty state has no data", async () => {
+    const api = { "/api/v1/activity": { items: [] }, "/api/v1/workspace": WORKSPACE };
+    const unrecognized = await run("activity-row-changes", fakeContext(api, null));
+    assert.equal(unrecognized.status, "FAIL");
+    const empty = await run("activity-row-changes", fakeContext(api, []));
+    assert.equal(empty.status, "LIVE_NOT_EXECUTED");
+  });
 });
 
 /** Each route answers 200 with the chrome's h1; `failing` renders the route's error state, as RouteError does. */
