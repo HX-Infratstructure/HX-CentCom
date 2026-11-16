@@ -1,8 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type { Agent, GithubPrsPage, StatusLabel, Task, UpdatesPage } from "./server-types";
 
@@ -62,22 +60,15 @@ const workspace = (tasks: readonly Task[]) =>
   workspaceWith({ tasks, agents: AGENTS, statusLabels: STATUSES });
 
 async function renderPage(url: string, page: string, tasks: readonly Task[] = TASKS) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  queryClient.setQueryData(["task-workspace"], workspace(tasks));
-  queryClient.setQueryData(["updates", {}], { pages: [NO_UPDATES], pageParams: [undefined] });
-  queryClient.setQueryData(["prs", "list", { state: "open" }], {
-    pages: [NO_PRS],
-    pageParams: [undefined],
+  await renderApp(url, {
+    heading: page,
+    seed: [
+      [["task-workspace"], workspace(tasks)],
+      [["updates", {}], { pages: [NO_UPDATES], pageParams: [undefined] }],
+      [["prs", "list", { state: "open" }], { pages: [NO_PRS], pageParams: [undefined] }],
+    ],
+    onDocument: true,
   });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  // The root route renders the whole document, so it mounts on `document` as the app does; a sheet needs that.
-  render(<RouterProvider router={router} />, { container: document as unknown as HTMLElement });
-  await screen.findByRole("heading", { level: 1, name: page, hidden: true });
 }
 
 /** The rendered task (a card, a list row, or a main-table row) whose link names `title`. */

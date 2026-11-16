@@ -1,8 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type {
   Agent,
@@ -125,21 +123,13 @@ async function renderOverview(
   updates: UpdatesPage = NO_UPDATES,
 ) {
   server.listUpdates.mockResolvedValue(updates);
-  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  queryClient.setQueryData(["task-workspace"], raw);
-  queryClient.setQueryData(["prs", "list", { state: "open" }], {
-    pages: [openPrs],
-    pageParams: [undefined],
+  return renderApp(url, {
+    heading: "Overview",
+    seed: [
+      [["task-workspace"], raw],
+      [["prs", "list", { state: "open" }], { pages: [openPrs], pageParams: [undefined] }],
+    ],
   });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  render(<RouterProvider router={router} />);
-  await screen.findByRole("heading", { level: 1, name: "Overview" });
-  return router;
 }
 
 afterEach(() => {

@@ -1,8 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, fireEvent, isInaccessible, render, screen, within } from "@testing-library/react";
+import { fireEvent, isInaccessible, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type { Agent, StatusLabel, Task, UpdatesPage } from "./server-types";
 
@@ -56,20 +54,13 @@ const workspace = (tasks: readonly Task[]) =>
  * The route's own loader and `select: adaptWorkspace` run against the stored snapshot.
  */
 async function renderTasks(url: string, tasks: readonly Task[], updateDeps: object = {}) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  queryClient.setQueryData(["task-workspace"], workspace(tasks));
-  queryClient.setQueryData(["updates", updateDeps], {
-    pages: [NO_UPDATES],
-    pageParams: [undefined],
+  await renderApp(url, {
+    heading: "Tasks",
+    seed: [
+      [["task-workspace"], workspace(tasks)],
+      [["updates", updateDeps], { pages: [NO_UPDATES], pageParams: [undefined] }],
+    ],
   });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  render(<RouterProvider router={router} />);
-  await screen.findByRole("heading", { level: 1, name: "Tasks" });
 }
 
 /** The task names in the main table, top to bottom. */
