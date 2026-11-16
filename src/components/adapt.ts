@@ -1,4 +1,4 @@
-import { FIELD_LABELS, labelIn } from "@/lib/field-labels";
+import { isShort, valueAt, valueText } from "@/lib/field-labels";
 import type * as S from "./server-types";
 import {
   PR_STATE_LABELS,
@@ -299,14 +299,12 @@ const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
   "revoked_at",
 ]);
 
-/** Longer text, or text on several lines, is named as edited instead of printed. */
-const SHORT_TEXT = 40;
-
 /** Only an update has both snapshots; a create has no before, so it shows no change. */
 function changesOf(entry: S.ActivityEntry, dir: Directory): readonly ActivityChange[] {
   const { before, after } = entry;
   if (!isRecord(before) || !isRecord(after)) return [];
   const keys = new Set([...Object.keys(after), ...Object.keys(before)]);
+  const statusLabel = (id: string) => statusRef(id, dir.statuses).label;
   return [...keys].flatMap((key): ActivityChange[] => {
     const from = valueAt(before, key);
     const to = valueAt(after, key);
@@ -317,32 +315,11 @@ function changesOf(entry: S.ActivityEntry, dir: Directory): readonly ActivityCha
       {
         kind: "value",
         field,
-        from: valueText(entry.entity, key, from, dir),
-        to: valueText(entry.entity, key, to, dir),
+        from: valueText(entry.entity, key, from, statusLabel),
+        to: valueText(entry.entity, key, to, statusLabel),
       },
     ];
   });
-}
-
-/** A missing key and an empty string both read as no value, so neither shows as a change from the other. */
-function valueAt(snapshot: Readonly<Record<string, unknown>>, key: string): unknown {
-  const value = snapshot[key];
-  return value === undefined || value === "" ? null : value;
-}
-
-type Scalar = string | number | boolean | null;
-
-function isShort(value: unknown): value is Scalar {
-  if (typeof value === "string") return value.length <= SHORT_TEXT && !value.includes("\n");
-  return value === null || typeof value === "number" || typeof value === "boolean";
-}
-
-function valueText(entity: S.ActivityEntity, key: string, value: Scalar, dir: Directory): string {
-  if (value === null) return "none";
-  if (typeof value !== "string") return String(value);
-  if (entity === "task" && key === "status") return statusRef(value, dir.statuses).label;
-  if (key === "commit_sha") return value.slice(0, 7);
-  return labelIn(labelIn(FIELD_LABELS[entity], key), value) ?? value;
 }
 
 /** A requirement opens its task's sheet; `after` names it, and `before` too when the write changed a requirement. */

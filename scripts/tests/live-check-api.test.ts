@@ -33,3 +33,20 @@ test("getJson keeps the status error for a non-OK response", async () => {
   const api = new LiveApi(BASE, async () => new Response("{}", { status: 503 }));
   await assert.rejects(api.getJson("/api/v1/tasks"), { message: "GET /api/v1/tasks -> 503" });
 });
+
+test(
+  "getJson keeps its deadline when the fetch ignores the signal",
+  { timeout: 2_000 },
+  async () => {
+    let signal: AbortSignal | undefined;
+    const fetchFn: FetchFn = (_url, init) => {
+      signal = init.signal;
+      return new Promise<Response>(() => {});
+    };
+    const api = new LiveApi(BASE, fetchFn, 50);
+    await assert.rejects(api.getJson("/api/v1/tasks"), {
+      message: "GET /api/v1/tasks timed out after 50 ms",
+    });
+    assert.equal(signal?.aborted, true);
+  },
+);

@@ -10,6 +10,7 @@ export interface TaskRow {
 
 export interface FeedItem {
   readonly kind: string | null;
+  readonly system: boolean;
   readonly badges: number;
 }
 
@@ -55,7 +56,8 @@ export class TasksPage {
     return this.#session.page.evaluate(() =>
       [...document.querySelectorAll("#updates .update-item")].map((item) => ({
         kind: item.getAttribute("data-kind"),
-        badges: item.querySelectorAll(".update-head .agent-person").length,
+        system: item.querySelector(".update-head .system-person") !== null,
+        badges: item.querySelectorAll(".update-head .agent-person:not(.system-person)").length,
       })),
     );
   }

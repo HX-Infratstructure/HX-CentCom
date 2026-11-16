@@ -13,10 +13,6 @@ export {
   LESSON_STATUS_LABELS,
 } from "@/lib/field-labels";
 
-/*
- * Vocabulary. Display order is key order. `satisfies Record<Union, string>` turns a value the server adds, or a key
- * the server drops, into a build error here, so a label map never drifts from the enum it describes.
- */
 /**
  * The six board colors of monday.com's status palette. `[data-hue]` in styles.css maps each to a bright edge for
  * group rows and bars, and to a darker ink that white text reads on at 4.5:1.

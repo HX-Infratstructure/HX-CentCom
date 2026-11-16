@@ -20,10 +20,11 @@ function listPage(
   return { items, counts, nextCursor };
 }
 
-/** What the fake server answers: list endpoints by path and query, and the row IDs each page path shows. */
+/** What the fake server answers: list endpoints by path and query, the row IDs each page path shows, and the open sheet's description text. */
 interface Site {
   readonly api: Map<string, ListPage>;
   readonly pages: Map<string, readonly string[]>;
+  sheetDescription?: string;
 }
 
 function healthySite(): Site {
@@ -49,14 +50,34 @@ function healthySite(): Site {
 
 function fakeContext(site: Site): CheckContext {
   let current = "";
+  let item: string | null = null;
   const shown = () => site.pages.get(current) ?? [];
+  const at = () => (item === null ? current : `${current}?item=${item}`);
+  const element = (selector: string): Record<string, unknown> => ({
+    count: async () => shown().length,
+    allTextContents: async () => (selector.includes("thead") ? ["ID", "Summary"] : [...shown()]),
+    first: () => element(selector),
+    nth: () => element(selector),
+    locator: (inner: string) => element(inner),
+    textContent: async () =>
+      selector.includes("sheet-description")
+        ? (site.sheetDescription ?? null)
+        : (shown()[0] ?? null),
+    click: async () => {
+      item = shown()[0] ?? null;
+    },
+    waitFor: async () => undefined,
+  });
   const page = {
-    url: () => BASE + current,
+    url: () => BASE + at(),
     waitForSelector: async () => null,
-    locator: () => ({
-      count: async () => shown().length,
-      allTextContents: async () => [...shown()],
-    }),
+    waitForURL: async () => undefined,
+    keyboard: {
+      press: async () => {
+        item = null;
+      },
+    },
+    locator: (selector: string) => element(selector),
   };
   const session = {
     page,
@@ -109,5 +130,84 @@ describe("board-filters", () => {
     const outcome = await boardFilters.run(fakeContext(site));
     assert.equal(outcome.status, "FAIL");
     assert.match(outcome.reason ?? "", /\/raid/);
+  });
+});
+
+const raidLessonsRows = checks.find((check) => check.id === "raid-lessons-rows");
+assert.ok(raidLessonsRows, "boards.ts exports the raid-lessons-rows check");
+
+function registerSite(raidShown: readonly string[]): Site {
+  const raid = [...rows("R", 1, 1, "type", "risk"), ...rows("P", 1, 1, "type", "dependency")];
+  const lessons = rows("L", 1, 1, "status", "proposed");
+  return {
+    api: new Map([
+      ["/api/v1/raid", listPage(raid, { total: 2 })],
+      ["/api/v1/lessons", listPage(lessons, { total: 1 })],
+    ]),
+    pages: new Map([
+      ["/raid", raidShown],
+      ["/lessons", ["L-1"]],
+    ]),
+  };
+}
+
+describe("raid-lessons-rows", () => {
+  test("passes when each register shows its groups in the fixed group order", async () => {
+    const outcome = await raidLessonsRows.run(fakeContext(registerSite(["R-1", "P-1"])));
+    assert.equal(outcome.status, "PASS", outcome.reason);
+  });
+
+  test("fails when the page shows the groups out of their fixed order", async () => {
+    const outcome = await raidLessonsRows.run(fakeContext(registerSite(["P-1", "R-1"])));
+    assert.equal(outcome.status, "FAIL");
+    assert.match(outcome.reason ?? "", /\/raid/);
+  });
+});
+
+const decisionSummaryClick = checks.find((check) => check.id === "decision-summary-click");
+assert.ok(decisionSummaryClick, "boards.ts exports the decision-summary-click check");
+
+const DESCRIPTION = "Ship **release 1.2** now.\n\n- run `verify.sh`\n- record the result";
+const RENDERED = "Ship release 1.2 now.run verify.shrecord the result";
+
+function decisionSite(description: string | null, sheetDescription: string): Site {
+  const decision = { id: "D-1", status: "Pending", description };
+  return {
+    api: new Map([["/api/v1/decisions", listPage([decision], { total: 1 })]]),
+    pages: new Map([["/decisions", ["D-1"]]]),
+    sheetDescription,
+  };
+}
+
+describe("decision-summary-click", () => {
+  test("passes when the sheet shows the clicked decision's description as rendered text", async () => {
+    const outcome = await decisionSummaryClick.run(
+      fakeContext(decisionSite(DESCRIPTION, RENDERED)),
+    );
+    assert.equal(outcome.status, "PASS", outcome.reason);
+  });
+
+  test("fails when the sheet shows less than the full description", async () => {
+    const site = decisionSite(DESCRIPTION, "Ship release 1.2 now.");
+    const outcome = await decisionSummaryClick.run(fakeContext(site));
+    assert.equal(outcome.status, "FAIL");
+    assert.match(outcome.reason ?? "", /description/);
+  });
+
+  test("finds the clicked decision on a later page of the list", async () => {
+    const site = decisionSite(DESCRIPTION, "Ship release 1.2 now.");
+    const later = site.api.get("/api/v1/decisions");
+    assert.ok(later);
+    site.api.set("/api/v1/decisions", listPage([{ id: "D-9" }], { total: 2 }, "c2"));
+    site.api.set("/api/v1/decisions?cursor=c2", later);
+    const outcome = await decisionSummaryClick.run(fakeContext(site));
+    assert.equal(outcome.status, "FAIL");
+    assert.match(outcome.reason ?? "", /description/);
+  });
+
+  test("records a decision without a description and does not fail on it", async () => {
+    const outcome = await decisionSummaryClick.run(fakeContext(decisionSite(null, "")));
+    assert.equal(outcome.status, "PASS", outcome.reason);
+    assert.deepEqual(outcome.evidence["description"], { expected: null, shown: null });
   });
 });

@@ -24,6 +24,8 @@ export interface WorkspaceTask {
   readonly id: string;
   readonly repository: string;
   readonly stale: boolean | null;
+  /** Holds `stale` only for an open task whose `stale` is true; the UI's Stale commit badge follows it. */
+  readonly attention: readonly ("blocked" | "owner" | "stale")[];
 }
 
 export interface Workspace {

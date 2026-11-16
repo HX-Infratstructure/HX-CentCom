@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { checks } from "../live-check/checks/contrast-check.ts";
+import { checks, displayRatio } from "../live-check/checks/contrast-check.ts";
 import type { CheckContext, CheckOutcome } from "../live-check/types.ts";
 
 const WHITE = { bg: [255, 255, 255, 1], opacity: 1 };
@@ -103,5 +103,19 @@ describe("contrast check", () => {
     assert.equal(outcome.status, "FAIL");
     assert.equal(page["failingCount"], 12);
     assert.equal((page["failing"] as unknown[]).length, 10);
+  });
+});
+
+describe("displayRatio", () => {
+  test("keeps a ratio that is exactly two decimals, such as 4.35", () => {
+    assert.equal(displayRatio(4.35), 4.35);
+    assert.equal(displayRatio(2.29), 2.29);
+    assert.equal(displayRatio(5.57), 5.57);
+  });
+
+  test("truncates and never shows more than the ratio", () => {
+    assert.equal(displayRatio(4.496), 4.49);
+    assert.equal(displayRatio(4.4999999), 4.49);
+    assert.equal(displayRatio(21), 21);
   });
 });

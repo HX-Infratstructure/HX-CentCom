@@ -6,6 +6,8 @@ const VISIBLE_ROWS = `${TABLE} tbody tr:visible`;
 const ROW_ID = "th code.record-id";
 const SHEET = "[role=dialog]";
 const SHEET_ID = ".detail-head code.record-id";
+/** The rendered description in a record's sheet (`src/components/decision.tsx:195-197`), without its heading. */
+const SHEET_DESCRIPTION = ".sheet-description .rich-text";
 const WAIT_MS = 10_000;
 
 export interface SheetVisit {
@@ -67,6 +69,11 @@ export class BoardPage {
       .locator("thead th")
       .allTextContents();
     return names.map((name) => name.trim());
+  }
+
+  /** The open sheet's description text, as the DOM's `textContent` reads it. Call it while the sheet is open. */
+  sheetDescription(): Promise<string | null> {
+    return trimmedText(this.#session.page.locator(SHEET).locator(SHEET_DESCRIPTION));
   }
 
   async openRow(

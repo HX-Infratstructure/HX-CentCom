@@ -32,32 +32,39 @@ async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   await page.open(new URLSearchParams({ task: taskId }).toString(), "#updates");
   const feed = await page.feedItems();
   const screenshot = await ctx.screenshot("task-feed-badges");
-  const ok = feed.length > 0 && feed.every((item) => item.badges > 0);
-  return verdict([checked(ok, "feed is empty or an update has no agent badge")], {
+  const agentRows = feed.filter((item) => !item.system);
+  const part =
+    feed.length > 0 && agentRows.length === 0
+      ? noData(`task ${taskId} has only system updates`)
+      : checked(
+          agentRows.length > 0 && agentRows.every((item) => item.badges > 0),
+          "feed is empty or an agent update has no agent badge",
+        );
+  return verdict([part], {
     taskId,
     feed,
     screenshot,
   });
 }
 
-function narrowingRepo(tasks: readonly WorkspaceTask[]) {
+function repoCounts(tasks: readonly WorkspaceTask[]): Map<string, number> {
   const tally = new Map<string, number>();
   for (const task of tasks) {
     if (task.repository) tally.set(task.repository, (tally.get(task.repository) ?? 0) + 1);
   }
-  return pickNarrowingValue(tally, tasks.length);
+  return tally;
 }
 
 async function filterNarrows(ctx: CheckContext): Promise<CheckOutcome> {
   const { tasks } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
-  const pick = narrowingRepo(tasks);
+  const pick = pickNarrowingValue(repoCounts(tasks), tasks.length);
   if (!pick) return verdict([noData("no repository narrows the tasks")], { tasks: tasks.length });
   const [repo, expected] = pick;
   const page = new TasksPage(ctx.session);
   await page.open(new URLSearchParams({ repo }).toString());
   const rows = await page.rowCount();
   const reread = await ctx.api.getJson<Workspace>("/api/v1/workspace");
-  const settled = reread.tasks.filter((task) => task.repository === repo).length;
+  const settled = repoCounts(reread.tasks).get(repo) ?? 0;
   const screenshot = await ctx.screenshot("tasks-filter");
   const part =
     settled === expected
@@ -88,7 +95,7 @@ async function staleBadge(ctx: CheckContext): Promise<CheckOutcome> {
   const rows = await page.rows();
   const screenshot = await ctx.screenshot("stale-badge");
   const expected = tasks
-    .filter((task) => task.stale)
+    .filter((task) => task.attention.includes("stale"))
     .map((task) => task.id)
     .sort();
   const shown = rows

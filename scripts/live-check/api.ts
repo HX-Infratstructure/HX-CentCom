@@ -17,27 +17,32 @@ export class LiveApi {
   }
 
   async getJson<T>(path: string): Promise<T> {
-    const url = this.#base + path;
-    // One signal spans the request and the body read, so a body that never ends still stops.
-    // A ref'd timer, unlike AbortSignal.timeout, fires even when nothing else holds the event loop.
+    // The abort stops a fetch that honours its signal, request and body alike. The race keeps the
+    // deadline for one that does not. A ref'd timer, unlike AbortSignal.timeout, fires even when
+    // nothing else holds the event loop.
     const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), this.#timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`GET ${path} timed out after ${this.#timeoutMs} ms`));
+        deadline.abort();
+      }, this.#timeoutMs);
+    });
     try {
-      const response = await this.#fetchFn(url, { method: "GET", signal: deadline.signal });
-      if (!response.ok) throw new Error(`GET ${path} -> ${response.status}`);
-      const body = await response.text();
-      try {
-        return JSON.parse(body) as T;
-      } catch (error) {
-        throw new Error(`GET ${path} returned a body that is not JSON`, { cause: error });
-      }
-    } catch (error) {
-      if (deadline.signal.aborted) {
-        throw new Error(`GET ${path} timed out after ${this.#timeoutMs} ms`, { cause: error });
-      }
-      throw error;
+      return await Promise.race([this.#read<T>(path, deadline.signal), timedOut]);
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  async #read<T>(path: string, signal: AbortSignal): Promise<T> {
+    const response = await this.#fetchFn(this.#base + path, { method: "GET", signal });
+    if (!response.ok) throw new Error(`GET ${path} -> ${response.status}`);
+    const body = await response.text();
+    try {
+      return JSON.parse(body) as T;
+    } catch (error) {
+      throw new Error(`GET ${path} returned a body that is not JSON`, { cause: error });
     }
   }
 }

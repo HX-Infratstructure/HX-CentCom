@@ -143,6 +143,8 @@ function collectTextSamples(limit: number): {
   };
   const backdrop = (el: Element) => {
     const levels: Level[] = [];
+    // True once the levels walked so far hide everything above: one paints a solid colour and no
+    // level from there up is translucent, so an ancestor's background can no longer show through.
     let opaque = false;
     for (let e: Element | null = el; e; e = e.parentElement) {
       const cs = getComputedStyle(e);

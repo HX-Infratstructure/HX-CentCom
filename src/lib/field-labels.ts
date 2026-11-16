@@ -91,3 +91,36 @@ export function labelIn<T>(
 ): T | undefined {
   return table !== undefined && Object.hasOwn(table, key) ? table[key] : undefined;
 }
+
+/** Longer text, or text on several lines, the Activity page names as edited instead of printing it. */
+const SHORT_TEXT = 40;
+
+export type ChangeValue = string | number | boolean | null;
+
+/** A missing key and an empty string both read as no value, so neither shows as a change from the other. */
+export function valueAt(snapshot: Readonly<Record<string, unknown>>, key: string): unknown {
+  const value = snapshot[key];
+  return value === undefined || value === "" ? null : value;
+}
+
+export function isShort(value: unknown): value is ChangeValue {
+  if (typeof value === "string") return value.length <= SHORT_TEXT && !value.includes("\n");
+  return value === null || typeof value === "number" || typeof value === "boolean";
+}
+
+/**
+ * What the Activity page prints for one side of a change. A task's status is a status label id, which only the
+ * workspace directory resolves, so the caller passes `statusLabel`.
+ */
+export function valueText(
+  entity: string,
+  key: string,
+  value: ChangeValue,
+  statusLabel: (id: string) => string,
+): string {
+  if (value === null) return "none";
+  if (typeof value !== "string") return String(value);
+  if (entity === "task" && key === "status") return statusLabel(value);
+  if (key === "commit_sha") return value.slice(0, 7);
+  return labelIn(labelIn(labelIn(FIELD_LABELS, entity), key), value) ?? value;
+}

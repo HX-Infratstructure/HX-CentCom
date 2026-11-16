@@ -7,11 +7,19 @@ const CONTRAST_PAGES: readonly PageName[] = ["tasks", "decisions", "home"];
 const SCOPE =
   "R7 measures text nodes only; text drawn by ::before/::after content is not measured.";
 
+// The largest two-decimal value not above the ratio. Flooring ratio * 100 alone can lose a step to
+// binary error, since 4.35 * 100 is 434.99999999999994.
+export function displayRatio(ratio: number): number {
+  const hundredths = Math.floor(ratio * 100);
+  const candidates = [hundredths + 1, hundredths, hundredths - 1].map((n) => n / 100);
+  return candidates.find((value) => value <= ratio) ?? ratio;
+}
+
 function describePair(pair: ContrastPair) {
   const { text, ratio, required, fg, bg, fontSize, fontWeight, selector } = pair;
   return {
     text: text.slice(0, 60),
-    ratio: Math.floor(ratio * 100) / 100,
+    ratio: displayRatio(ratio),
     required,
     fg,
     bg,

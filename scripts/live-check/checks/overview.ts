@@ -1,4 +1,4 @@
-import { FIELD_LABELS, labelIn } from "../../../src/lib/field-labels.ts";
+import { isShort, valueAt, valueText } from "../../../src/lib/field-labels.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
 import { checked, noData, verdict } from "../verdict.ts";
 import { ActivityPage } from "./pages/activity-page.ts";
@@ -16,7 +16,6 @@ import {
 
 const PAGE_PATHS = Object.values(PAGE_ROUTES);
 const OVERVIEW_PR_LIMIT = 8;
-const PR_PAGE_SIZE = 20;
 
 async function pagesLoad(ctx: CheckContext): Promise<CheckOutcome> {
   const page = new OverviewPage(ctx.session);
@@ -24,19 +23,30 @@ async function pagesLoad(ctx: CheckContext): Promise<CheckOutcome> {
   ctx.session.takeConsoleErrors();
   for (const path of PAGE_PATHS) {
     const status = await page.open(path);
+    const { heading, error } = await page.shown();
     pages.push({
       path,
       status,
-      h1: await page.heading(),
+      h1: heading,
+      error,
       consoleErrors: ctx.session.takeConsoleErrors(),
     });
   }
   const screenshot = await ctx.screenshot("pages-load");
   const ok = pages.every(
-    (entry) => entry.status === 200 && entry.h1 !== "" && entry.consoleErrors.length === 0,
+    (entry) =>
+      entry.status === 200 &&
+      entry.h1 !== "" &&
+      entry.error === null &&
+      entry.consoleErrors.length === 0,
   );
   return verdict(
-    [checked(ok, "a page did not answer 200, showed no h1 or logged a console error")],
+    [
+      checked(
+        ok,
+        "a page did not answer 200, showed no h1, showed its error state or logged a console error",
+      ),
+    ],
     { pages, screenshot },
   );
 }
@@ -58,18 +68,25 @@ async function overviewOpenPrs(ctx: CheckContext): Promise<CheckOutcome> {
   );
 }
 
+/** The board asks for the server's default page, as this read does, so its Open group holds this read's items. */
 async function pullRequestsOpenFirst(ctx: CheckContext): Promise<CheckOutcome> {
-  const api = await ctx.api.getJson<PrList>("/api/v1/github/prs?state=open&limit=100");
+  const api = await ctx.api.getJson<PrList>("/api/v1/github/prs?state=open");
   const page = new PullRequestsPage(ctx.session);
   await page.open();
   const groups = await page.groups();
-  const expectedRows = Math.min(api.counts.total, PR_PAGE_SIZE);
+  const expectedRows = api.items.length;
   const screenshot = await ctx.screenshot("pull-requests-open-first");
-  const ok =
+  const part =
     expectedRows === 0
-      ? groups.every((group) => group.title !== "Open")
-      : groups[0]?.title === "Open" && groups[0].rows === expectedRows;
-  return verdict([checked(ok, "Open group is not first or its row count differs")], {
+      ? checked(
+          groups.every((group) => group.title !== "Open"),
+          "an Open group shows although the API has no open pull request",
+        )
+      : checked(
+          groups[0]?.title === "Open" && groups[0].rows === expectedRows,
+          "Open group is not first or its row count differs",
+        );
+  return verdict([part], {
     groups,
     openTotal: api.counts.total,
     expectedRows,
@@ -82,29 +99,20 @@ function toMillis(iso: string): string {
   return iso.replace(/(\.\d{3})\d+/, "$1");
 }
 
-const SHORT_TEXT = 40;
-
-/** What the page prints for a change, mirroring src/components/adapt.ts:306-350. */
+/** What the page prints for a change, by the page's own rules. */
 function expectedChange(
-  entity: string,
+  item: ActivityItem,
   key: string,
-  rawValues: readonly [unknown, unknown],
   statuses: ReadonlyMap<string, string>,
 ): { readonly from: string | null; readonly to: string } {
-  const [before, after] = rawValues.map((v) => (v === undefined || v === "" ? null : v));
-  const isShort = (v: unknown) =>
-    typeof v === "string"
-      ? v.length <= SHORT_TEXT && !v.includes("\n")
-      : v === null || typeof v === "number" || typeof v === "boolean";
+  const before = valueAt(item.before ?? {}, key);
+  const after = valueAt(item.after ?? {}, key);
   if (!isShort(before) || !isShort(after)) return { from: null, to: "edited" };
-  const text = (v: unknown): string => {
-    if (v === null) return "none";
-    if (typeof v !== "string") return String(v);
-    if (entity === "task" && key === "status") return statuses.get(v) ?? v;
-    if (key === "commit_sha") return v.slice(0, 7);
-    return labelIn(labelIn(labelIn(FIELD_LABELS, entity), key), v) ?? v;
+  const statusLabel = (id: string) => statuses.get(id) ?? id;
+  return {
+    from: valueText(item.entity, key, before, statusLabel),
+    to: valueText(item.entity, key, after, statusLabel),
   };
-  return { from: text(before), to: text(after) };
 }
 
 /** The page labels a field by its key with spaces for underscores, and shows only a field whose value changed. */
@@ -118,7 +126,7 @@ function checkChange(
   const after = item.after?.[key];
   const inSnapshots = key in (item.before ?? {}) || key in (item.after ?? {});
   const changed = JSON.stringify(before) !== JSON.stringify(after);
-  const expected = expectedChange(item.entity, key, [before, after], statuses);
+  const expected = expectedChange(item, key, statuses);
   const shownAgrees = change.from === expected.from && change.to === expected.to;
   return { ...change, before, after, expected, agrees: inSnapshots && changed && shownAgrees };
 }

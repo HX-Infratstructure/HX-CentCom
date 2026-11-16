@@ -32,9 +32,16 @@ function run(id: string, ctx: CheckContext): Promise<CheckOutcome> {
   return check.run(ctx);
 }
 
-const OPEN_PRS = "/api/v1/github/prs?state=open&limit=100";
+const OPEN_PRS = "/api/v1/github/prs?state=open";
 
 describe("pull-requests-open-first", () => {
+  test("expects as many Open rows as the server's default page holds, not the open total", async () => {
+    const page = Array.from({ length: 20 }, (_, i) => ({ title: `PR ${i}` }));
+    const api = { [OPEN_PRS]: { items: page, counts: { total: 45 } } };
+    const ctx = fakeContext(api, [{ title: "Open", rows: 20 }]);
+    assert.equal((await run("pull-requests-open-first", ctx)).status, "PASS");
+  });
+
   test("passes with no Open group when no pull request is open", async () => {
     const ctx = fakeContext({ [OPEN_PRS]: { items: [], counts: { total: 0 } } }, [
       { title: "Merged", rows: 3 },
@@ -47,18 +54,22 @@ describe("pull-requests-open-first", () => {
       { title: "Merged", rows: 3 },
       { title: "Open", rows: 1 },
     ]);
-    assert.equal((await run("pull-requests-open-first", ctx)).status, "FAIL");
+    const outcome = await run("pull-requests-open-first", ctx);
+    assert.equal(outcome.status, "FAIL");
+    assert.equal(outcome.reason, "an Open group shows although the API has no open pull request");
   });
 
   test("still needs the Open group first with the API's row count", async () => {
-    const api = { [OPEN_PRS]: { items: [], counts: { total: 2 } } };
+    const api = { [OPEN_PRS]: { items: [{ title: "a" }, { title: "b" }], counts: { total: 2 } } };
     const first = fakeContext(api, [
       { title: "Open", rows: 2 },
       { title: "Merged", rows: 3 },
     ]);
     assert.equal((await run("pull-requests-open-first", first)).status, "PASS");
     const missing = fakeContext(api, [{ title: "Merged", rows: 3 }]);
-    assert.equal((await run("pull-requests-open-first", missing)).status, "FAIL");
+    const outcome = await run("pull-requests-open-first", missing);
+    assert.equal(outcome.status, "FAIL");
+    assert.equal(outcome.reason, "Open group is not first or its row count differs");
     const wrongCount = fakeContext(api, [{ title: "Open", rows: 1 }]);
     assert.equal((await run("pull-requests-open-first", wrongCount)).status, "FAIL");
   });
@@ -312,5 +323,33 @@ describe("activity-row-changes", () => {
       titleRow,
     );
     assert.equal((await run("activity-row-changes", gap)).status, "FAIL");
+  });
+});
+
+/** Each route answers 200 with the chrome's h1; `failing` renders the route's error state, as RouteError does. */
+function pagesContext(failing: string | null): CheckContext {
+  let path = "";
+  const shown = () => ({
+    heading: "Workspace",
+    error: path === failing ? "Could not load the page" : null,
+  });
+  const session = {
+    goto: async (to: string) => {
+      path = to;
+      return 200;
+    },
+    takeConsoleErrors: () => [],
+    page: { evaluate: async () => shown() },
+  };
+  return { session, screenshot: async (name: string) => name } as unknown as CheckContext;
+}
+
+describe("pages-load", () => {
+  test("passes when every route shows its page", async () => {
+    assert.equal((await run("pages-load", pagesContext(null))).status, "PASS");
+  });
+
+  test("fails when a route shows its error state inside the chrome", async () => {
+    assert.equal((await run("pages-load", pagesContext("/tasks"))).status, "FAIL");
   });
 });
