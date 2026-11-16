@@ -74,6 +74,16 @@ describe("contrast check", () => {
     assert.equal(firstPage(outcome)["status"], 404);
   });
 
+  test("records a route that does not answer 200 with the keys of a measured route", async () => {
+    const measured = firstPage(await run(200, [BLACK_TEXT], 1));
+    const unmeasured = firstPage(await run(404, [BLACK_TEXT], 1));
+    assert.deepEqual(Object.keys(unmeasured).sort(), Object.keys(measured).sort());
+    assert.deepEqual(
+      [unmeasured["checked"], unmeasured["sampled"], unmeasured["failing"], unmeasured["lowest"]],
+      [0, 0, [], null],
+    );
+  });
+
   test("names each route's worst failing pair in the failure reason", async () => {
     const grey = textSample([150, 150, 150, 1], "span.grey");
     const pale = textSample([200, 200, 200, 1], "span.pale");

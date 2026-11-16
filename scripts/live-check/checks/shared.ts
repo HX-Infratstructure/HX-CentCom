@@ -1,5 +1,7 @@
 /** Response shapes of the `/api/v1` endpoints the checks read, and the helpers every check module shares. */
 
+import type { ActivityEntity } from "../../../src/components/server-types.ts";
+
 export const PAGE_ROUTES = {
   home: "/",
   tasks: "/tasks",
@@ -45,7 +47,7 @@ export interface PrList {
 }
 
 export interface ActivityItem {
-  readonly entity: string;
+  readonly entity: ActivityEntity;
   readonly actor: string;
   readonly created_at: string;
   readonly before: Readonly<Record<string, unknown>> | null;

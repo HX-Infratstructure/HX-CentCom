@@ -26,7 +26,7 @@ async function labelsAndKanban(ctx: CheckContext): Promise<CheckOutcome> {
 
 async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   const { items } = await ctx.api.getJson<UpdateList>("/api/v1/updates");
-  const taskId = items.find((item) => item.task_id)?.task_id;
+  const taskId = items[0]?.task_id;
   if (!taskId) return verdict([noData("the API has no updates")], { items: items.length });
   const page = new TasksPage(ctx.session);
   await page.open({ task: taskId }, "updates");
@@ -50,7 +50,8 @@ async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
 function repoCounts(tasks: readonly WorkspaceTask[]): Map<string, number> {
   const tally = new Map<string, number>();
   for (const task of tasks) {
-    if (task.repository) tally.set(task.repository, (tally.get(task.repository) ?? 0) + 1);
+    // The API stores an omitted repository as "" (docs/API.md), and "" is no repository to filter by.
+    if (task.repository !== "") tally.set(task.repository, (tally.get(task.repository) ?? 0) + 1);
   }
   return tally;
 }

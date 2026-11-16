@@ -1,9 +1,10 @@
-import { describe, test } from "node:test";
+import { describe, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { format } from "node:util";
 import { fileURLToPath } from "node:url";
 import { isReadOnlyMethod } from "../live-check/session.ts";
 import { contrastRatio, isLargeText } from "../live-check/contrast.ts";
@@ -324,6 +325,118 @@ describe("main", () => {
       assert.equal(written.results[0].status, "PASS");
       assert.deepEqual(written.results[0].consoleErrors, []);
       assert.deepEqual(written.summary, { PASS: 1, FAIL: 0, LIVE_NOT_EXECUTED: 0 });
+    });
+  });
+});
+
+function captureStderr(): { text: () => string; restore: () => void } {
+  const spy = mock.method(console, "error", () => {});
+  return {
+    text: () => spy.mock.calls.map((call) => format(...call.arguments)).join("\n"),
+    restore: () => spy.mock.restore(),
+  };
+}
+
+function crashAfterSecondCheck(session: ReadOnlySession): LiveCheck {
+  let crashed = false;
+  session.takeConsoleErrors = () => {
+    if (crashed) throw new Error("page crashed");
+    return [];
+  };
+  return fakeCheck("second", async () => {
+    crashed = true;
+    return { status: "PASS", evidence: {} };
+  });
+}
+
+function turnIntoFile(path: string): void {
+  rmSync(path, { recursive: true, force: true });
+  writeFileSync(path, "");
+}
+
+const STACK_LINE = /\n\s+at /;
+
+describe("main after setup", () => {
+  test("reports a crash with its stack on stderr and exits 2", async () => {
+    await inTempDir(async (dir) => {
+      const session = fakeSession();
+      const stderr = captureStderr();
+      try {
+        const code = await main(
+          ["--base", BASE, "--out", join(dir, "out")],
+          fakeDeps(session, [passing, crashAfterSecondCheck(session)]),
+        );
+        assert.equal(code, 2);
+        assert.match(stderr.text(), /page crashed/);
+        assert.match(stderr.text(), STACK_LINE);
+      } finally {
+        stderr.restore();
+      }
+    });
+  });
+
+  test("a close() failure does not replace the crash, and is still reported", async () => {
+    await inTempDir(async (dir) => {
+      const session = fakeSession();
+      session.close = async () => {
+        throw new Error("close failed");
+      };
+      const stderr = captureStderr();
+      try {
+        const code = await main(
+          ["--base", BASE, "--out", join(dir, "out")],
+          fakeDeps(session, [passing, crashAfterSecondCheck(session)]),
+        );
+        assert.equal(code, 2);
+        assert.match(stderr.text(), /page crashed/);
+        assert.match(stderr.text(), /close failed/);
+      } finally {
+        stderr.restore();
+      }
+    });
+  });
+
+  test("a record write failure does not replace the crash, and is still reported", async () => {
+    await inTempDir(async (dir) => {
+      const out = join(dir, "out");
+      const session = fakeSession();
+      const crashing = crashAfterSecondCheck(session);
+      const sabotage = fakeCheck("sabotage", async (ctx) => {
+        turnIntoFile(out);
+        return crashing.run(ctx);
+      });
+      const stderr = captureStderr();
+      try {
+        const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [sabotage]));
+        assert.equal(code, 2);
+        assert.match(stderr.text(), /page crashed/);
+        assert.match(stderr.text(), /live-check\.json/);
+        assert.match(stderr.text(), /EEXIST|ENOTDIR/);
+        assert.equal(session.closed, true);
+      } finally {
+        stderr.restore();
+      }
+    });
+  });
+
+  test("a passing run whose record cannot be written exits 2 with the write error and its stack", async () => {
+    await inTempDir(async (dir) => {
+      const out = join(dir, "out");
+      const session = fakeSession();
+      const sabotage = fakeCheck("sabotage", async () => {
+        turnIntoFile(out);
+        return { status: "PASS", evidence: {} };
+      });
+      const stderr = captureStderr();
+      try {
+        const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [sabotage]));
+        assert.equal(code, 2);
+        assert.match(stderr.text(), /EEXIST|ENOTDIR/);
+        assert.match(stderr.text(), STACK_LINE);
+        assert.equal(session.closed, true);
+      } finally {
+        stderr.restore();
+      }
     });
   });
 });

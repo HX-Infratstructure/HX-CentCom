@@ -13,7 +13,7 @@ export interface CheckResult extends CheckOutcome {
 
 export type CheckSummary = Readonly<Record<CheckStatus, number>>;
 
-interface RunEvidence {
+export interface RunEvidence {
   readonly base: string;
   readonly blockedRequests: readonly string[];
   /** Logged after the last check returned. Kept as evidence; they never change a status or the exit code. */

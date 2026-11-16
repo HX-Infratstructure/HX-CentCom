@@ -6,6 +6,8 @@ import type { ListPage } from "../live-check/checks/shared.ts";
 import type { CheckContext } from "../live-check/types.ts";
 
 const BASE = "http://h";
+/** More reads than any check here needs, so a walk that never ends fails the test instead of starving its timeout. */
+const API_READ_LIMIT = 50;
 
 type Item = ListPage["items"][number];
 
@@ -105,8 +107,10 @@ function fakeContext(site: Site): CheckContext {
       return 200;
     },
   };
+  let reads = 0;
   const api = {
     getJson: async (path: string) => {
+      if (++reads > API_READ_LIMIT) throw new Error(`more than ${API_READ_LIMIT} API reads`);
       const answer = site.api.get(path);
       if (!answer) throw new Error(`unexpected API read ${path}`);
       return answer;
@@ -223,6 +227,19 @@ describe("decision-summary-click", () => {
     assert.equal(outcome.status, "FAIL");
     assert.match(outcome.reason ?? "", /description/);
   });
+
+  test(
+    "fails, naming the cursor, when the decisions API repeats a cursor",
+    { timeout: 5_000 },
+    async () => {
+      const site = decisionSite(DESCRIPTION, RENDERED);
+      site.api.set("/api/v1/decisions", listPage([{ id: "D-9" }], { total: 3 }, "c2"));
+      site.api.set("/api/v1/decisions?cursor=c2", listPage([{ id: "D-8" }], { total: 3 }, "c2"));
+      const outcome = await decisionSummaryClick.run(fakeContext(site));
+      assert.equal(outcome.status, "FAIL");
+      assert.match(outcome.reason ?? "", /repeated cursor c2/);
+    },
+  );
 
   test("opens the row against its own table's columns when the first table's differ", async () => {
     const site = { ...decisionSite(DESCRIPTION, RENDERED), firstTableColumns: ["ID", "Age"] };

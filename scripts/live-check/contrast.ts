@@ -160,6 +160,8 @@ function collectTextSamples(limit: number): {
   const texts = [...document.body.querySelectorAll("*")].filter(
     (el) => !skipTags.has(el.tagName.toUpperCase()) && ownText(el) && visible(el),
   );
+  // Spread the sample over the whole page, not its first `limit` elements: index i falls in bucket
+  // floor(i * limit / length), and the first element of each bucket is kept, so at most `limit`.
   const bucket = (i: number) => Math.floor((i * limit) / texts.length);
   const considered = texts.filter((_, i) => i === 0 || bucket(i) !== bucket(i - 1));
   const samples = considered.flatMap((el) => {

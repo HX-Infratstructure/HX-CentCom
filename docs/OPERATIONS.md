@@ -117,7 +117,7 @@ The exit code tells the result:
 
 - `0`: no check failed, and the checker blocked no request. LIVE_NOT_EXECUTED checks do not change the exit code.
 - `1`: a check failed, or the checker blocked a request. Nothing else exits with code 1.
-- `2`: a usage or setup error, such as a missing argument or a browser that does not start, or a run that crashed after setup and stopped early. After an early stop, `live-check.json` still holds the checks that finished.
+- `2`: a usage or setup error, such as a missing argument or a browser that does not start, or a run that stopped after setup. A crash stops the run, and so does a failure to write `live-check.json` or to close the browser, even when every check passed. After a crash, `live-check.json` still holds the checks that finished, if the checker could write it. When the write fails, stderr names the write error with its stack, and the folder holds no complete record of this run.
 
 ### Deploy a later commit
 

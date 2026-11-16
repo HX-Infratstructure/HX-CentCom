@@ -113,7 +113,7 @@ export function isShort(value: unknown): value is ChangeValue {
  * workspace directory resolves, so the caller passes `statusLabel`.
  */
 export function valueText(
-  entity: string,
+  entity: S.ActivityEntity,
   key: string,
   value: ChangeValue,
   statusLabel: (id: string) => string,

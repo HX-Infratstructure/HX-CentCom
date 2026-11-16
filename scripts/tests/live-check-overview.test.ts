@@ -272,6 +272,50 @@ describe("activity-row-changes", () => {
     }
   });
 
+  test("the page's display rules print these literal strings", async () => {
+    const cases = [
+      { entity: "task", key: "title", from: "a", to: "y".repeat(40), shown: ["a", "y".repeat(40)] },
+      { entity: "task", key: "title", from: "a", to: "y".repeat(41), shown: [null, "edited"] },
+      { entity: "task", key: "priority", from: null, to: 2, shown: ["none", "2"] },
+      {
+        entity: "task",
+        key: "commit_sha",
+        from: "abcdef0123",
+        to: "1234567890",
+        shown: ["abcdef0", "1234567"],
+      },
+      {
+        entity: "decision",
+        key: "gate_type",
+        from: "merge",
+        to: "live_run",
+        shown: ["Merge", "Live run"],
+      },
+      {
+        entity: "requirement",
+        key: "state",
+        from: "NOT_RUN",
+        to: "PASS",
+        shown: ["Not run", "Proven"],
+      },
+      { entity: "task", key: "status", from: "todo", to: "done", shown: ["To do", "Done"] },
+    ] as const;
+    for (const c of cases) {
+      const [from, to] = c.shown;
+      const ctx = activityContext(
+        { [c.key]: c.from },
+        { [c.key]: c.to },
+        { field: c.key.replace(/_/g, " "), from, to },
+        c.entity,
+      );
+      assert.equal(
+        (await run("activity-row-changes", ctx)).status,
+        "PASS",
+        `${c.entity} ${c.key} ${to}`,
+      );
+    }
+  });
+
   const titleItem = (actor: string, createdAt: string, from: string, to: string) => ({
     entity: "task",
     actor,

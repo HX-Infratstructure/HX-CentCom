@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LiveApi, type FetchFn } from "./api.ts";
 import { allChecks } from "./checks/index.ts";
-import { CheckRecorder } from "./recorder.ts";
+import { CheckRecorder, type RunEvidence } from "./recorder.ts";
 import { PlaywrightSession, type ReadOnlySession } from "./session.ts";
 import type { CheckContext, LiveCheck } from "./types.ts";
 
@@ -80,7 +80,7 @@ async function setUp(
 function writeRecord(
   recorder: CheckRecorder,
   session: ReadOnlySession,
-  run: { readonly base: string; readonly trailingConsoleErrors: readonly string[] },
+  run: Omit<RunEvidence, "blockedRequests">,
 ): number {
   const blocked = session.blockedRequests();
   for (const request of blocked) console.log(`BLOCKED ${request}`);
@@ -99,22 +99,41 @@ async function runChecks({ args, session }: Run, deps: ResolvedDeps): Promise<0 
     api: new LiveApi(args.base, deps.fetch),
     screenshot: screenshotter(session, args.out),
   };
-  let blockedCount = 0;
-  let trailingConsoleErrors: readonly string[] = [];
+  let trailingConsoleErrors: readonly string[];
   try {
     for (const check of deps.checks) {
       const result = await recorder.run(check, ctx);
       console.log(`${result.status} ${check.id}${result.reason ? ` (${result.reason})` : ""}`);
     }
     trailingConsoleErrors = session.takeConsoleErrors();
-  } finally {
-    blockedCount = writeRecord(recorder, session, { base: args.base, trailingConsoleErrors });
+  } catch (error) {
+    await alsoTry("writing live-check.json", () =>
+      writeRecord(recorder, session, { base: args.base, trailingConsoleErrors: [] }),
+    );
+    throw error;
   }
-  return recorder.exitCode(blockedCount);
+  return recorder.exitCode(
+    writeRecord(recorder, session, { base: args.base, trailingConsoleErrors }),
+  );
 }
 
-function setupError(error: unknown, hint = ""): 2 {
-  console.error(`live-check: ${error instanceof Error ? error.message : String(error)}${hint}`);
+/** Runs a cleanup step while an earlier error propagates: its own failure is logged, never thrown. */
+async function alsoTry(step: string, cleanup: () => unknown): Promise<void> {
+  try {
+    await cleanup();
+  } catch (error) {
+    console.error(`live-check: ${step} also failed:`, error);
+  }
+}
+
+function setupError(error: unknown): 2 {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`live-check: ${message}\n${USAGE}`);
+  return 2;
+}
+
+function crashed(error: unknown): 2 {
+  console.error("live-check: the run stopped after setup:", error);
   return 2;
 }
 
@@ -124,17 +143,21 @@ export async function main(argv: readonly string[], deps: CliDeps = {}): Promise
   try {
     run = await setUp(argv, resolved.openSession);
   } catch (error) {
-    return setupError(error, `\n${USAGE}`);
-  }
-  try {
-    try {
-      return await runChecks(run, resolved);
-    } finally {
-      await run.session.close();
-    }
-  } catch (error) {
     return setupError(error);
   }
+  let code: 0 | 1;
+  try {
+    code = await runChecks(run, resolved);
+  } catch (error) {
+    await alsoTry("closing the browser", () => run.session.close());
+    return crashed(error);
+  }
+  try {
+    await run.session.close();
+  } catch (error) {
+    return crashed(error);
+  }
+  return code;
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

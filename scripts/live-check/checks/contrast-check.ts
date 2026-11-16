@@ -55,13 +55,15 @@ function contrastPart(
   return noData(`${route}: no text element was found`);
 }
 
+// A route that does not answer 200 is not measured. Its record keeps a measured route's keys, empty.
+const UNMEASURED: ContrastSample = { pairs: [], skipped: 0, sampled: 0, found: 0, limit: 0 };
+
 async function contrastOn(ctx: CheckContext, name: PageName) {
   const route = PAGE_ROUTES[name];
   const status = await ctx.session.goto(route);
   const screenshot = await ctx.screenshot(`contrast-${name}`);
-  if (status !== 200)
-    return { route, status, screenshot, part: checked(false, `${route}: answered ${status}`) };
-  const sample = await sampleContrast(ctx.session.page);
+  const answered = status === 200;
+  const sample = answered ? await sampleContrast(ctx.session.page) : UNMEASURED;
   const { pairs, skipped, sampled, found, limit } = sample;
   const lowest = lowestRatio(pairs);
   const failing = pairs.filter((pair) => !pair.pass);
@@ -69,7 +71,9 @@ async function contrastOn(ctx: CheckContext, name: PageName) {
     route,
     status,
     screenshot,
-    part: contrastPart(route, sample, failing),
+    part: answered
+      ? contrastPart(route, sample, failing)
+      : checked(false, `${route}: answered ${status}`),
     checked: pairs.length,
     found,
     sampled,
