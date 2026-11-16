@@ -9,16 +9,22 @@ import {
 import { act, render, screen } from "@testing-library/react";
 import { routeTree } from "@/routeTree.gen";
 
+export type Seed = readonly (readonly [QueryKey, unknown])[];
+
 export async function renderApp(
   url: string,
   {
     heading,
     seed = [],
     onDocument = false,
+    hidden = false,
   }: {
     readonly heading: string;
-    readonly seed?: readonly (readonly [QueryKey, unknown])[];
+    readonly seed?: Seed;
     readonly onDocument?: boolean;
+    // An open sheet is modal, so the page behind it, h1 included, is hidden from the accessibility tree, and the wait
+    // must count hidden elements.
+    readonly hidden?: boolean;
   },
 ): Promise<Router<typeof routeTree>> {
   const queryClient = new QueryClient({
@@ -38,6 +44,6 @@ export async function renderApp(
   } else {
     render(<RouterProvider router={router} />);
   }
-  await screen.findByRole("heading", { level: 1, name: heading, hidden: onDocument });
+  await screen.findByRole("heading", { level: 1, name: heading, hidden });
   return router;
 }

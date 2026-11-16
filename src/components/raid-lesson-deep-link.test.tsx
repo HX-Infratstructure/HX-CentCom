@@ -100,6 +100,7 @@ async function renderPage(url: string, page: string, list: readonly [QueryKey, u
       [list[0], { pages: [list[1]], pageParams: [undefined] }],
     ],
     onDocument: true,
+    hidden: true,
   });
 }
 

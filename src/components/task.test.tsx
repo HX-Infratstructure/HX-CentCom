@@ -68,6 +68,7 @@ async function renderPage(url: string, page: string, tasks: readonly Task[] = TA
       [["prs", "list", { state: "open" }], { pages: [NO_PRS], pageParams: [undefined] }],
     ],
     onDocument: true,
+    hidden: true,
   });
 }
 

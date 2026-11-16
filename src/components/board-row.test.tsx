@@ -1,7 +1,6 @@
-import type { QueryKey } from "@tanstack/react-query";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderApp } from "@/test/render-app";
+import { renderApp, type Seed } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type { Agent, Decision, DecisionsPage, RaidItem, RaidPage, Task } from "./server-types";
 
@@ -121,7 +120,7 @@ function pages(page: unknown) {
   return { pages: [page], pageParams: [undefined] };
 }
 
-const SEED: readonly (readonly [QueryKey, unknown])[] = [
+const SEED: Seed = [
   [["task-workspace"], WORKSPACE],
   [["updates", {}], pages(NO_UPDATES)],
   [["decisions", "counts", {}], DECISIONS],
@@ -130,7 +129,7 @@ const SEED: readonly (readonly [QueryKey, unknown])[] = [
 ];
 
 function renderPage(url: string, page: string) {
-  return renderApp(url, { heading: page, seed: SEED, onDocument: true });
+  return renderApp(url, { heading: page, seed: SEED, onDocument: true, hidden: true });
 }
 
 /** The cell in `column` of the board row headed by `row`. */

@@ -1,7 +1,6 @@
-import type { QueryKey } from "@tanstack/react-query";
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { renderApp } from "@/test/render-app";
+import { renderApp, type Seed } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type {
   ActivityEntry,
@@ -349,8 +348,6 @@ function prs(items: readonly PullRequest[], total: number): GithubPrsPage {
     },
   };
 }
-
-type Seed = readonly (readonly [QueryKey, unknown])[];
 
 function renderList(url: string, page: string, seed: Seed) {
   return renderApp(url, {

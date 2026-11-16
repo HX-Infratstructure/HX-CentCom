@@ -60,7 +60,7 @@ const workspace = (decisions: readonly Decision[]) => workspaceWith({ decisions,
 async function renderDecisions(url: string, { owner = false } = {}) {
   if (owner) window.sessionStorage.setItem("hx-centcom.owner-key", OWNER_KEY);
   server.listDecisions.mockResolvedValue(NO_DECISIONS);
-  await renderApp(url, { heading: "Decisions", onDocument: true });
+  await renderApp(url, { heading: "Decisions", onDocument: true, hidden: true });
 }
 
 beforeEach(() => {
