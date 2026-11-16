@@ -1,11 +1,13 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isReadOnlyMethod } from "../live-check/session.ts";
 import { contrastRatio, isLargeText } from "../live-check/contrast.ts";
-import { parseArgs } from "../live-check/cli.ts";
+import { main, parseArgs } from "../live-check/cli.ts";
+import type { CliDeps } from "../live-check/cli.ts";
+import type { ReadOnlySession } from "../live-check/session.ts";
 import { CheckRecorder } from "../live-check/recorder.ts";
 import { checked, noData, verdict } from "../live-check/verdict.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../live-check/types.ts";
@@ -55,7 +57,7 @@ describe("parseArgs", () => {
   });
 });
 
-function fakeCheck(id: string, run: () => Promise<CheckOutcome>): LiveCheck {
+function fakeCheck(id: string, run: (ctx: CheckContext) => Promise<CheckOutcome>): LiveCheck {
   return { id, requirement: `req ${id}`, run };
 }
 
@@ -155,5 +157,105 @@ describe("verdict", () => {
   });
   test("no parts gives LIVE_NOT_EXECUTED", () => {
     assert.equal(verdict([], evidence).status, "LIVE_NOT_EXECUTED");
+  });
+});
+
+function fakeSession(blocked: readonly string[] = []): ReadOnlySession & { closed: boolean } {
+  const page = {
+    screenshot: async ({ path }: { path: string }) => writeFileSync(path, "png"),
+  };
+  return {
+    closed: false,
+    page: page as unknown as ReadOnlySession["page"],
+    goto: async () => 200,
+    blockedRequests: () => blocked,
+    takeConsoleErrors: () => [],
+    async close() {
+      this.closed = true;
+    },
+  };
+}
+
+function fakeDeps(session: ReadOnlySession, checks: readonly LiveCheck[]): CliDeps {
+  return {
+    clock: () => NOW,
+    fetch: async () => new Response("{}"),
+    openSession: async () => session,
+    checks,
+  };
+}
+
+async function inTempDir(body: (dir: string) => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "live-check-main-"));
+  try {
+    await body(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const BASE = "http://live-check.invalid";
+const passing = fakeCheck("ok", async () => ({ status: "PASS", evidence: {} }));
+
+describe("main", () => {
+  test("exits 2 when --out cannot be created", async () => {
+    await inTempDir(async (dir) => {
+      const file = join(dir, "file");
+      writeFileSync(file, "");
+      const session = fakeSession();
+      const code = await main(
+        ["--base", BASE, "--out", join(file, "out")],
+        fakeDeps(session, [passing]),
+      );
+      assert.equal(code, 2);
+    });
+  });
+
+  test("records a check that throws as FAIL with its error and a screenshot, and exits 1", async () => {
+    await inTempDir(async (out) => {
+      const throwing = fakeCheck("throws", async () => {
+        throw new Error("boom");
+      });
+      const session = fakeSession();
+      const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [throwing]));
+      assert.equal(code, 1);
+      const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+      const [result] = written.results;
+      assert.equal(result.status, "FAIL");
+      assert.equal(result.evidence.error, "boom");
+      assert.equal(result.evidence.screenshot, join(out, "throws.png"));
+      assert.equal(existsSync(join(out, "throws.png")), true);
+      assert.equal(session.closed, true);
+    });
+  });
+
+  test("exits 1 when the session blocked a request", async () => {
+    await inTempDir(async (out) => {
+      const session = fakeSession([`POST ${BASE}/api/v1/tasks`]);
+      const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [passing]));
+      assert.equal(code, 1);
+      const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+      assert.deepEqual(written.blockedRequests, [`POST ${BASE}/api/v1/tasks`]);
+    });
+  });
+
+  test("exits 0 and writes live-check.json when every check is PASS or LIVE_NOT_EXECUTED", async () => {
+    await inTempDir(async (out) => {
+      const lne = fakeCheck("lne", async () => ({ status: "LIVE_NOT_EXECUTED", evidence: {} }));
+      const api = fakeCheck("api", async (ctx) => {
+        const body = await ctx.api.getJson<object>("/api/v1/health");
+        return { status: "PASS", evidence: { body } };
+      });
+      const session = fakeSession();
+      const code = await main(
+        ["--base", BASE, "--out", out],
+        fakeDeps(session, [passing, lne, api]),
+      );
+      assert.equal(code, 0);
+      const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+      assert.deepEqual(written.summary, { PASS: 2, FAIL: 0, LIVE_NOT_EXECUTED: 1 });
+      assert.equal(written.writtenAt, NOW.toISOString());
+      assert.equal(session.closed, true);
+    });
   });
 });

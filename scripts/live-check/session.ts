@@ -9,7 +9,15 @@ export function isReadOnlyMethod(method: string): boolean {
   return READ_ONLY_METHODS.has(method.toUpperCase());
 }
 
-export class ReadOnlySession {
+export interface ReadOnlySession {
+  readonly page: Page;
+  goto(path: string): Promise<number>;
+  blockedRequests(): readonly string[];
+  takeConsoleErrors(): readonly string[];
+  close(): Promise<void>;
+}
+
+export class PlaywrightSession implements ReadOnlySession {
   readonly page: Page;
   readonly #browser: Browser;
   readonly #base: string;
@@ -26,7 +34,7 @@ export class ReadOnlySession {
     const browser = await chromium.launch();
     try {
       const page = await browser.newPage({ viewport: VIEWPORT });
-      const session = new ReadOnlySession(browser, page, base);
+      const session = new PlaywrightSession(browser, page, base);
       await session.#watch();
       return session;
     } catch (error) {

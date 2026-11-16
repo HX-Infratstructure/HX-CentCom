@@ -4,7 +4,7 @@ export class LiveApi {
   readonly #base: string;
   readonly #fetchFn: FetchFn;
 
-  constructor(base: string, fetchFn: FetchFn = fetch) {
+  constructor(base: string, fetchFn: FetchFn) {
     this.#base = base;
     this.#fetchFn = fetchFn;
   }

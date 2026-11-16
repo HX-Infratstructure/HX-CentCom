@@ -1,15 +1,38 @@
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { LiveApi } from "./api.ts";
+import { LiveApi, type FetchFn } from "./api.ts";
 import { allChecks } from "./checks/index.ts";
 import { CheckRecorder } from "./recorder.ts";
-import { ReadOnlySession } from "./session.ts";
-import type { CheckContext } from "./types.ts";
+import { PlaywrightSession, type ReadOnlySession } from "./session.ts";
+import type { CheckContext, LiveCheck } from "./types.ts";
 
 export interface CliArgs {
   readonly base: string;
   readonly out: string;
+}
+
+export interface CliDeps {
+  readonly clock?: () => Date;
+  readonly fetch?: FetchFn;
+  readonly openSession?: (base: string) => Promise<ReadOnlySession>;
+  readonly checks?: readonly LiveCheck[];
+}
+
+type ResolvedDeps = Required<CliDeps>;
+
+interface Run {
+  readonly args: CliArgs;
+  readonly session: ReadOnlySession;
+}
+
+function resolveDeps(deps: CliDeps): ResolvedDeps {
+  return {
+    clock: deps.clock ?? (() => new Date()),
+    fetch: deps.fetch ?? fetch,
+    openSession: deps.openSession ?? PlaywrightSession.open,
+    checks: deps.checks ?? allChecks,
+  };
 }
 
 const USAGE = "usage: npm run live-check -- --base <http(s)://host:port> --out <folder>";
@@ -45,20 +68,24 @@ function screenshotter(session: ReadOnlySession, out: string): CheckContext["scr
   };
 }
 
-async function runChecks(
-  args: CliArgs,
-  session: ReadOnlySession,
-  clock: () => Date,
-): Promise<0 | 1> {
+async function setUp(
+  argv: readonly string[],
+  openSession: ResolvedDeps["openSession"],
+): Promise<Run> {
+  const args = parseArgs(argv);
   mkdirSync(args.out, { recursive: true });
-  const recorder = new CheckRecorder(args.out, clock);
+  return { args, session: await openSession(args.base) };
+}
+
+async function runChecks({ args, session }: Run, deps: ResolvedDeps): Promise<0 | 1> {
+  const recorder = new CheckRecorder(args.out, deps.clock);
   const ctx: CheckContext = {
     base: args.base,
     session,
-    api: new LiveApi(args.base),
+    api: new LiveApi(args.base, deps.fetch),
     screenshot: screenshotter(session, args.out),
   };
-  for (const check of allChecks) {
+  for (const check of deps.checks) {
     await recorder.run(check, ctx);
     const result = recorder.results().at(-1);
     console.log(`${result?.status} ${check.id}${result?.reason ? ` (${result.reason})` : ""}`);
@@ -73,15 +100,11 @@ async function runChecks(
   return recorder.exitCode(blocked.length);
 }
 
-export async function main(
-  argv: readonly string[],
-  clock: () => Date = () => new Date(),
-): Promise<number> {
-  let args: CliArgs;
-  let session: ReadOnlySession;
+export async function main(argv: readonly string[], deps: CliDeps = {}): Promise<number> {
+  const resolved = resolveDeps(deps);
+  let run: Run;
   try {
-    args = parseArgs(argv);
-    session = await ReadOnlySession.open(args.base);
+    run = await setUp(argv, resolved.openSession);
   } catch (error) {
     console.error(
       `live-check: ${error instanceof Error ? error.message : String(error)}\n${USAGE}`,
@@ -89,9 +112,9 @@ export async function main(
     return 2;
   }
   try {
-    return await runChecks(args, session, clock);
+    return await runChecks(run, resolved);
   } finally {
-    await session.close();
+    await run.session.close();
   }
 }
 

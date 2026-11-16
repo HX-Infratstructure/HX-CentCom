@@ -18,6 +18,13 @@ export interface ContrastPair {
   readonly pass: boolean;
 }
 
+export interface ContrastSample {
+  readonly pairs: readonly ContrastPair[];
+  readonly skipped: number;
+  readonly sampled: number;
+  readonly limit: number;
+}
+
 interface RawSample {
   readonly selector: string;
   readonly text: string;
@@ -75,12 +82,17 @@ function toPair(sample: RawSample): ContrastPair {
   };
 }
 
-export async function sampleContrast(page: Page): Promise<readonly ContrastPair[]> {
-  const samples = await page.evaluate(collectTextSamples, SAMPLE_LIMIT);
-  return samples.map(toPair);
+export async function sampleContrast(page: Page): Promise<ContrastSample> {
+  const { samples, sampled } = await page.evaluate(collectTextSamples, SAMPLE_LIMIT);
+  return {
+    pairs: samples.map(toPair),
+    skipped: sampled - samples.length,
+    sampled,
+    limit: SAMPLE_LIMIT,
+  };
 }
 
-function collectTextSamples(limit: number): RawSample[] {
+function collectTextSamples(limit: number): { samples: RawSample[]; sampled: number } {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -129,7 +141,8 @@ function collectTextSamples(limit: number): RawSample[] {
   const texts = [...document.body.querySelectorAll("*")].filter(
     (el) => !skipTags.has(el.tagName.toUpperCase()) && ownText(el) && visible(el),
   );
-  return texts.slice(0, limit).flatMap((el) => {
+  const considered = texts.slice(0, limit);
+  const samples = considered.flatMap((el) => {
     const back = backdrop(el);
     if (!back) return [];
     const cs = getComputedStyle(el);
@@ -144,4 +157,5 @@ function collectTextSamples(limit: number): RawSample[] {
     };
     return [sample];
   });
+  return { samples, sampled: considered.length };
 }

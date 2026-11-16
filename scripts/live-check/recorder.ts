@@ -15,11 +15,25 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function screenshotOrNull(ctx: CheckContext, name: string): Promise<string | null> {
+  try {
+    return await ctx.screenshot(name);
+  } catch {
+    return null;
+  }
+}
+
 async function outcomeOf(check: LiveCheck, ctx: CheckContext): Promise<CheckOutcome> {
   try {
     return await check.run(ctx);
   } catch (error) {
-    return { status: "FAIL", evidence: {}, reason: `threw: ${errorMessage(error)}` };
+    const message = errorMessage(error);
+    const screenshot = await screenshotOrNull(ctx, check.id);
+    return {
+      status: "FAIL",
+      evidence: { error: message, screenshot },
+      reason: `threw: ${message}`,
+    };
   }
 }
 
