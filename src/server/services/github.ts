@@ -5,6 +5,7 @@
  */
 import { and, asc, desc, eq, getTableColumns, gt, lt, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
+import { PR_STATES } from "@/lib/pr-states";
 import type { Db } from "@/server/db/client";
 import { githubPrs, githubRepos } from "@/server/db/schema";
 import { parse } from "./inputs";
@@ -21,7 +22,7 @@ import {
 } from "./raid";
 import type { Page, PullRequest } from "./types";
 
-export const GITHUB_PR_STATES = ["open", "closed", "merged", "gone"] as const;
+export const GITHUB_PR_STATES = PR_STATES;
 export type GithubPrState = (typeof GITHUB_PR_STATES)[number];
 
 export type GithubRepoInput = {
@@ -132,26 +133,18 @@ export type GithubPrCounts = {
 };
 export type GithubPrsPage = Page<PullRequest> & { readonly counts: GithubPrCounts };
 
-/** The board's order (`PR_GROUPS` in src/components/pull-request.tsx): still moving, landed, ended, left GitHub. */
-const PR_STATE_ORDER = [
-  "open",
-  "merged",
-  "closed",
-  "gone",
-] as const satisfies readonly GithubPrState[];
-
-/** A state's index in PR_STATE_ORDER. The column is text, so any other state ranks after them and still lists. */
+/** A state's index in GITHUB_PR_STATES. The column is text, so any other state ranks after them and still lists. */
 const prStateRank = sql<number>`(case ${githubPrs.state} ${sql.join(
-  PR_STATE_ORDER.map((state, rank) => sql`when ${state} then ${sql.raw(String(rank))}`),
+  GITHUB_PR_STATES.map((state, rank) => sql`when ${state} then ${sql.raw(String(rank))}`),
   sql` `,
-)} else ${sql.raw(String(PR_STATE_ORDER.length))} end)`.mapWith(Number);
+)} else ${sql.raw(String(GITHUB_PR_STATES.length))} end)`.mapWith(Number);
 
 /**
  * Rank first, then the highest id. GitHub fixes a PR's id at creation, while fetched_at moves on every sync, so
  * [rank, id] orders and pages. With a state filter every row has one rank, so the id alone orders.
  */
 const prCursor = z.tuple([
-  z.number().int().min(0).max(PR_STATE_ORDER.length),
+  z.number().int().min(0).max(GITHUB_PR_STATES.length),
   z.number().int().positive(),
 ]);
 
@@ -171,7 +164,7 @@ function prFilters(query: z.output<typeof githubPrQueryInput>, except?: PrFacet)
   return filters.filter((f): f is SQL => f !== undefined);
 }
 
-/** R12: the mirrored PRs in PR_STATE_ORDER, newest id first in a state, in one REPEATABLE READ, READ ONLY snapshot. */
+/** R12: the mirrored PRs by GITHUB_PR_STATES order, then newest id, in one REPEATABLE READ, READ ONLY snapshot. */
 export async function listGithubPrs(db: Db, raw: unknown): Promise<GithubPrsPage> {
   const query = parse(githubPrQueryInput, raw);
   return db.transaction(async (tx) => {

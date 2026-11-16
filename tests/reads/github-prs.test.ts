@@ -1,4 +1,4 @@
-// R12 (CC1's design H1) and F-PR-OPEN-FIRST: pull requests page through listGithubPrs and REST GET /api/v1/github/prs
+// R12 (CC1's design H1): pull requests page through listGithubPrs and REST GET /api/v1/github/prs
 // in the board's state order (open, merged, closed, gone), newest GitHub id first within a state, with chip counts in
 // the listUpdates and listRaid pattern: each facet applies every filter but its own. The order and the cursor use the
 // state and the PR id, so a sync between two pages that changes no state repeats and skips nothing.
@@ -18,7 +18,7 @@ beforeEach(async () => {
 afterEach(() => h.close());
 
 const STATES: readonly GithubPrState[] = ["open", "closed", "merged", "gone"];
-const BOARD_ORDER: readonly GithubPrState[] = ["open", "merged", "closed", "gone"];
+const EXPECTED_STATE_ORDER: readonly GithubPrState[] = ["open", "merged", "closed", "gone"];
 
 const prInput = (
   id: number,
@@ -41,9 +41,9 @@ const FIXTURE: readonly GithubPrInput[] = Array.from({ length: 25 }, (_, i) =>
   prInput(i + 1, STATES[i % 4] ?? "open"),
 );
 
-/** The ids in board order: each state of BOARD_ORDER in turn, newest id first within it. */
-const boardOrder = (prs: readonly GithubPrInput[]) =>
-  BOARD_ORDER.flatMap((state) =>
+/** The ids in board order: each state of EXPECTED_STATE_ORDER in turn, newest id first within it. */
+const stateOrderOf = (prs: readonly GithubPrInput[]) =>
+  EXPECTED_STATE_ORDER.flatMap((state) =>
     prs
       .filter((p) => p.state === state)
       .map((p) => p.id)
@@ -90,7 +90,7 @@ describe("listGithubPrs", () => {
     expect(first.items.map((p) => p.id)).toEqual([25, 21, 17, 13, 9, 5, 1, 23, 19, 15]);
     expect(first.counts.total).toBe(25);
     const ids = (await allPages({ limit: 10 })).flat().map((p) => p.id);
-    expect(ids).toEqual(boardOrder(FIXTURE));
+    expect(ids).toEqual(stateOrderOf(FIXTURE));
   });
 
   it("lists open PRs first, then merged, closed and gone, newest id first in each, an unknown state last", async () => {
@@ -126,7 +126,7 @@ describe("listGithubPrs", () => {
       rest.push(...page.items.map((p) => p.id));
       cursor = page.nextCursor;
     }
-    expect([...first.items.map((p) => p.id), ...rest]).toEqual(boardOrder(FIXTURE));
+    expect([...first.items.map((p) => p.id), ...rest]).toEqual(stateOrderOf(FIXTURE));
   });
 
   it("filters by repo and state, and counts each facet without its own filter", async () => {
@@ -145,6 +145,19 @@ describe("listGithubPrs", () => {
         FIXTURE.filter((p) => p.repo === "alpha"),
         "state",
       ),
+    });
+  });
+
+  it("lists a repo filter open first, newest id first in each state, with unchanged counts", async () => {
+    await sync(FIXTURE, "2026-11-14T12:00:00Z");
+    const page = await h.svc.listGithubPrs({ repo: "beta", limit: 100 });
+    const expected = FIXTURE.filter((p) => p.repo === "beta");
+    expect(page.items.map((p) => p.id)).toEqual(stateOrderOf(expected));
+    expect(page.nextCursor).toBeNull();
+    expect(page.counts).toEqual({
+      total: expected.length,
+      byRepo: tally(FIXTURE, "repo"),
+      byState: tally(expected, "state"),
     });
   });
 

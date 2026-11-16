@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PR_STATES } from "@/lib/pr-states";
 import { BoardGroup, BoardTable, StatusCell, type BoardColumn } from "./board";
 import {
   PR_STATE_HUES,
@@ -12,8 +13,7 @@ import { SourceLink, Time } from "./record-parts";
 
 type PrGroup = PrState | "other";
 
-/** Board order: what is still moving, then what landed, then what ended without landing. */
-const PR_GROUPS: readonly PrGroup[] = ["open", "merged", "closed", "gone", "other"];
+const PR_GROUPS: readonly PrGroup[] = [...PR_STATES, "other"];
 
 const COLUMNS: readonly BoardColumn[] = [
   { name: "Title", width: "auto" },
