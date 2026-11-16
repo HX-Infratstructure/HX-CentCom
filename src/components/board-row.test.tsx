@@ -1,8 +1,6 @@
-import { QueryClient, type QueryKey } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp, type Seed } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type { Agent, Decision, DecisionsPage, RaidItem, RaidPage, Task } from "./server-types";
 
@@ -122,7 +120,7 @@ function pages(page: unknown) {
   return { pages: [page], pageParams: [undefined] };
 }
 
-const SEED: readonly (readonly [QueryKey, unknown])[] = [
+const SEED: Seed = [
   [["task-workspace"], WORKSPACE],
   [["updates", {}], pages(NO_UPDATES)],
   [["decisions", "counts", {}], DECISIONS],
@@ -130,21 +128,8 @@ const SEED: readonly (readonly [QueryKey, unknown])[] = [
   [["raid", "list", {}], pages(RAID)],
 ];
 
-async function renderPage(url: string, page: string) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
-  });
-  for (const [key, data] of SEED) queryClient.setQueryData(key, data);
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  // As in decision-sheet.test.tsx: the root route renders the whole document, and the open sheet is modal.
-  render(<RouterProvider router={router} />, { container: document as unknown as HTMLElement });
-  await screen.findByRole("heading", { level: 1, name: page, hidden: true });
-  return router;
+function renderPage(url: string, page: string) {
+  return renderApp(url, { heading: page, seed: SEED, onDocument: true, hidden: true });
 }
 
 /** The cell in `column` of the board row headed by `row`. */

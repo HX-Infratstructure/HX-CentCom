@@ -1,8 +1,6 @@
-import { QueryClient, type QueryKey } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp, type Seed } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type {
   ActivityEntry,
@@ -351,24 +349,15 @@ function prs(items: readonly PullRequest[], total: number): GithubPrsPage {
   };
 }
 
-type Seed = readonly (readonly [QueryKey, unknown])[];
-
-async function renderList(url: string, page: string, seed: Seed) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+function renderList(url: string, page: string, seed: Seed) {
+  return renderApp(url, {
+    heading: page,
+    seed: [
+      [["task-workspace"], WORKSPACE],
+      [["prs", "list", { state: "open" }], firstPage(NO_PRS)],
+      ...seed,
+    ],
   });
-  queryClient.setQueryData(["task-workspace"], WORKSPACE);
-  queryClient.setQueryData(["prs", "list", { state: "open" }], firstPage(NO_PRS));
-  for (const [key, data] of seed) queryClient.setQueryData(key, data);
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  render(<RouterProvider router={router} />);
-  await screen.findByRole("heading", { level: 1, name: page });
-  return router;
 }
 
 function region(name: RegExp): HTMLElement {

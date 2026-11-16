@@ -1,8 +1,6 @@
-import { QueryClient } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type { GithubPrsPage, UpdatesPage } from "./server-types";
 
@@ -39,17 +37,7 @@ async function renderPage(url: string, h1: string) {
   server.listWorkspace.mockResolvedValue(WORKSPACE);
   server.listUpdates.mockResolvedValue(NO_UPDATES);
   server.listGithubPrs.mockResolvedValue(NO_PRS);
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
-  });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  render(<RouterProvider router={router} />);
-  await screen.findByRole("heading", { level: 1, name: h1 });
+  await renderApp(url, { heading: h1 });
 }
 
 function currentRailItems(): readonly (string | null)[] {
