@@ -110,28 +110,28 @@ Every 401 response, from REST or from `/mcp`, carries the header `WWW-Authentica
 
 ## Routes
 
-| Method and path                      | Key                                   | Purpose                                                         |
-| ------------------------------------ | ------------------------------------- | --------------------------------------------------------------- |
-| `GET /api/v1/workspace`              | None                                  | The whole workspace in one snapshot                             |
-| `POST /api/v1/tasks`                 | Any (an agent only for itself)        | Register a task                                                 |
-| `GET /api/v1/tasks/:id`              | None                                  | One task with its requirements and blocking decisions           |
-| `POST /api/v1/tasks/:id/updates`     | Task's agent or owner                 | Post an update to a task                                        |
-| `PUT /api/v1/tasks/:id/requirements` | Task's agent or owner                 | Add or set a requirement                                        |
-| `GET /api/v1/updates`                | None                                  | Updates, newest first, filtered and paged                       |
-| `GET /api/v1/activity`               | None                                  | Activity log rows, newest first, filtered and paged             |
-| `POST /api/v1/activity/:id/revert`   | Owner                                 | Revert one logged change                                        |
-| `GET /api/v1/decisions`              | None                                  | Owner decisions, filtered and paged                             |
-| `POST /api/v1/decisions`             | Any                                   | Request an owner decision                                       |
-| `POST /api/v1/decisions/:id/decide`  | Owner                                 | Decide a decision                                               |
-| `POST /api/v1/keys`                  | Owner                                 | Issue a key                                                     |
-| `DELETE /api/v1/keys/:id`            | Owner                                 | Revoke a key                                                    |
-| `GET /api/v1/raid`                   | None                                  | RAID items, newest first, filtered and paged                    |
-| `POST /api/v1/raid`                  | Any                                   | Add a RAID item                                                 |
-| `PUT /api/v1/raid/:id`               | Item's owner or creator, or the owner | Change a RAID item                                              |
-| `GET /api/v1/lessons`                | None                                  | Lessons, newest first, filtered and paged                       |
-| `POST /api/v1/lessons`               | Any                                   | Add a lesson                                                    |
-| `PUT /api/v1/lessons/:id`            | Lesson's creator or the owner         | Change a lesson                                                 |
-| `GET /api/v1/github/prs`             | None                                  | Mirrored GitHub pull requests, newest first, filtered and paged |
+| Method and path                      | Key                                   | Purpose                                                       |
+| ------------------------------------ | ------------------------------------- | ------------------------------------------------------------- |
+| `GET /api/v1/workspace`              | None                                  | The whole workspace in one snapshot                           |
+| `POST /api/v1/tasks`                 | Any (an agent only for itself)        | Register a task                                               |
+| `GET /api/v1/tasks/:id`              | None                                  | One task with its requirements and blocking decisions         |
+| `POST /api/v1/tasks/:id/updates`     | Task's agent or owner                 | Post an update to a task                                      |
+| `PUT /api/v1/tasks/:id/requirements` | Task's agent or owner                 | Add or set a requirement                                      |
+| `GET /api/v1/updates`                | None                                  | Updates, newest first, filtered and paged                     |
+| `GET /api/v1/activity`               | None                                  | Activity log rows, newest first, filtered and paged           |
+| `POST /api/v1/activity/:id/revert`   | Owner                                 | Revert one logged change                                      |
+| `GET /api/v1/decisions`              | None                                  | Owner decisions, filtered and paged                           |
+| `POST /api/v1/decisions`             | Any                                   | Request an owner decision                                     |
+| `POST /api/v1/decisions/:id/decide`  | Owner                                 | Decide a decision                                             |
+| `POST /api/v1/keys`                  | Owner                                 | Issue a key                                                   |
+| `DELETE /api/v1/keys/:id`            | Owner                                 | Revoke a key                                                  |
+| `GET /api/v1/raid`                   | None                                  | RAID items, newest first, filtered and paged                  |
+| `POST /api/v1/raid`                  | Any                                   | Add a RAID item                                               |
+| `PUT /api/v1/raid/:id`               | Item's owner or creator, or the owner | Change a RAID item                                            |
+| `GET /api/v1/lessons`                | None                                  | Lessons, newest first, filtered and paged                     |
+| `POST /api/v1/lessons`               | Any                                   | Add a lesson                                                  |
+| `PUT /api/v1/lessons/:id`            | Lesson's creator or the owner         | Change a lesson                                               |
+| `GET /api/v1/github/prs`             | None                                  | Mirrored GitHub pull requests, open first, filtered and paged |
 
 Each GET route also answers HEAD. A method that a route does not list fails with 405. Any other path under `/api/v1` fails with `not_found` (404) for every method.
 
@@ -463,7 +463,7 @@ Returns 200 with `{reverted, entity, entityId, version, systemUpdates}`: the rev
 | `state`           | `open`, `closed`, `merged`, or `gone`             |
 | `limit`, `cursor` | See [Lists and pagination](#lists-and-pagination) |
 
-Returns `{items, nextCursor, counts}`. `items` are pull requests, the highest GitHub id first. Each item has `id`, `repo`, `number`, `title`, `state`, `draft`, `head_sha`, `merge_commit_sha`, `url`, and `fetched_at`. `counts` is `{total, byRepo, byState}`. The GitHub sync writes these rows ([ARCHITECTURE.md](ARCHITECTURE.md#automations)).
+Returns `{items, nextCursor, counts}`. Without a `state` filter, `items` lists open pull requests first, then merged, closed, and gone ones. Within each state, and with a `state` filter, the highest GitHub id comes first. A state change between two page requests moves a pull request in the order, so a later page can repeat or skip it. Each item has `id`, `repo`, `number`, `title`, `state`, `draft`, `head_sha`, `merge_commit_sha`, `url`, and `fetched_at`. `counts` is `{total, byRepo, byState}`. The GitHub sync writes these rows ([ARCHITECTURE.md](ARCHITECTURE.md#automations)).
 
 ## Decision webhook
 
