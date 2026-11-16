@@ -22,6 +22,13 @@ test("getJson names the path when the body outlasts the deadline", { timeout: 2_
   });
 });
 
+test("getJson names the path when a 2xx body is not JSON", async () => {
+  const api = new LiveApi(BASE, async () => new Response("<!doctype html><title>app</title>"));
+  await assert.rejects(api.getJson("/api/v1/tasks"), {
+    message: "GET /api/v1/tasks returned a body that is not JSON",
+  });
+});
+
 test("getJson keeps the status error for a non-OK response", async () => {
   const api = new LiveApi(BASE, async () => new Response("{}", { status: 503 }));
   await assert.rejects(api.getJson("/api/v1/tasks"), { message: "GET /api/v1/tasks -> 503" });

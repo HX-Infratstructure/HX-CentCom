@@ -1,4 +1,5 @@
 import type { ReadOnlySession } from "../../session.ts";
+import { PAGE_ROUTES } from "../shared.ts";
 
 export class OverviewPage {
   readonly #session: ReadOnlySession;
@@ -7,7 +8,7 @@ export class OverviewPage {
     this.#session = session;
   }
 
-  open(path = "/"): Promise<number> {
+  open(path: string = PAGE_ROUTES.home): Promise<number> {
     return this.#session.goto(path);
   }
 

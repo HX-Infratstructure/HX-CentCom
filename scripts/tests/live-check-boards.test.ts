@@ -73,7 +73,6 @@ function fakeContext(site: Site): CheckContext {
     },
   };
   return {
-    base: BASE,
     session,
     api,
     screenshot: async (name: string) => name,

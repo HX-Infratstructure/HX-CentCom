@@ -1,4 +1,5 @@
 import type { ReadOnlySession } from "../../session.ts";
+import { PAGE_ROUTES } from "../shared.ts";
 
 export interface BoardGroup {
   readonly title: string;
@@ -13,7 +14,7 @@ export class PullRequestsPage {
   }
 
   open(): Promise<number> {
-    return this.#session.goto("/pull-requests");
+    return this.#session.goto(PAGE_ROUTES.pullRequests);
   }
 
   groups(): Promise<BoardGroup[]> {

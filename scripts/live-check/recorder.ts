@@ -6,10 +6,19 @@ export interface CheckResult extends CheckOutcome {
   readonly id: string;
   readonly requirement: string;
   readonly consoleErrors: readonly string[];
+  /** Logged after the previous check returned. Kept as evidence; they never change the status. */
+  readonly lateConsoleErrors: readonly string[];
   readonly at: string;
 }
 
 export type CheckSummary = Readonly<Record<CheckStatus, number>>;
+
+interface RunEvidence {
+  readonly base: string;
+  readonly blockedRequests: readonly string[];
+  /** Logged after the last check returned. Kept as evidence; they never change a status or the exit code. */
+  readonly trailingConsoleErrors: readonly string[];
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -42,7 +51,7 @@ function withConsoleErrors(outcome: CheckOutcome, consoleErrors: readonly string
   const reason = [outcome.reason, `${consoleErrors.length} console error(s)`]
     .filter(Boolean)
     .join("; ");
-  return { ...outcome, status: "FAIL", reason };
+  return { ...outcome, status: outcome.status === "PASS" ? "FAIL" : outcome.status, reason };
 }
 
 export class CheckRecorder {
@@ -55,18 +64,21 @@ export class CheckRecorder {
     this.#clock = clock;
   }
 
-  async run(check: LiveCheck, ctx: CheckContext): Promise<void> {
+  async run(check: LiveCheck, ctx: CheckContext): Promise<CheckResult> {
     const at = this.#clock().toISOString();
+    const lateConsoleErrors = ctx.session.takeConsoleErrors();
     const outcome = await outcomeOf(check, ctx);
     const consoleErrors = ctx.session.takeConsoleErrors();
-    const final = withConsoleErrors(outcome, consoleErrors);
-    this.#results.push({
-      ...final,
+    const result: CheckResult = {
+      ...withConsoleErrors(outcome, consoleErrors),
       id: check.id,
       requirement: check.requirement,
       consoleErrors,
+      lateConsoleErrors,
       at,
-    });
+    };
+    this.#results.push(result);
+    return result;
   }
 
   results(): readonly CheckResult[] {
@@ -83,13 +95,15 @@ export class CheckRecorder {
     return this.summary().FAIL === 0 && blockedCount === 0 ? 0 : 1;
   }
 
-  write(blockedRequests: readonly string[] = []): string {
+  write(run: RunEvidence): string {
     mkdirSync(this.#outDir, { recursive: true });
     const path = join(this.#outDir, "live-check.json");
     const record = {
+      base: run.base,
       writtenAt: this.#clock().toISOString(),
       summary: this.summary(),
-      blockedRequests,
+      blockedRequests: run.blockedRequests,
+      trailingConsoleErrors: run.trailingConsoleErrors,
       results: this.#results,
     };
     writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`);

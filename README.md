@@ -21,6 +21,8 @@ You need Node 22 and npm. Install the dependencies from the committed lockfile:
 npm ci
 ```
 
+Install Playwright's Chromium once. Two of the tests start it, and [docs/OPERATIONS.md](docs/OPERATIONS.md#run-one-test-file) gives the command.
+
 Run the tests. They need no database server, because the service and API tests run against PGlite, an in-process PostgreSQL, with the same migrations and seed as production:
 
 ```sh

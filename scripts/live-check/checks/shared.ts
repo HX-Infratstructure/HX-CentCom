@@ -1,5 +1,17 @@
 /** Response shapes of the `/api/v1` endpoints the checks read, and the helpers every check module shares. */
 
+export const PAGE_ROUTES = {
+  home: "/",
+  tasks: "/tasks",
+  decisions: "/decisions",
+  raid: "/raid",
+  lessons: "/lessons",
+  pullRequests: "/pull-requests",
+  activity: "/activity",
+} as const;
+
+export type PageName = keyof typeof PAGE_ROUTES;
+
 export type Facet = Readonly<Record<string, number>>;
 
 export interface ListPage {
@@ -10,8 +22,8 @@ export interface ListPage {
 
 export interface WorkspaceTask {
   readonly id: string;
-  readonly repository: string | null;
-  readonly stale: boolean;
+  readonly repository: string;
+  readonly stale: boolean | null;
 }
 
 export interface Workspace {
@@ -22,7 +34,7 @@ export interface Workspace {
 }
 
 export interface UpdateList {
-  readonly items: readonly { readonly task_id: string | null }[];
+  readonly items: readonly { readonly task_id: string }[];
 }
 
 export interface PrList {

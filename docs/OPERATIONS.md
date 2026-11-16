@@ -6,6 +6,8 @@ This page covers local development, the deploy to the HX hosts, and troubleshoot
 
 ### Run one test file
 
+On a fresh checkout, run `npx playwright install chromium` once before the tests. `scripts/tests/live-check-contrast.test.ts` and `scripts/tests/live-check-session.test.ts` start Playwright's Chromium, and `npm test` runs both. `npm ci` does not download the browser. The command installs it in `~/.cache/ms-playwright`.
+
 `npm test` runs every suite. To run one file, call its runner directly:
 
 ```sh
@@ -103,15 +105,19 @@ cat RELEASE
 npm run live-check -- --base <url> --out <folder>
 ```
 
-`<url>` is the app's URL, such as `http://192.168.50.207:8420`. Give `--out` a folder outside the clone and outside `~/.local/share/hx-centcom`. `install.sh` refuses a clone with untracked files, and the results would be untracked files. `install.sh` also deletes old releases with everything in them. The checker uses Playwright's Chromium in `~/.cache/ms-playwright`. If that browser is missing, run `npx playwright install chromium` from the release.
+`<url>` is the app's URL, such as `http://192.168.50.207:8420`. Give `--out` a folder outside the clone and outside `~/.local/share/hx-centcom`. `install.sh` refuses a clone with untracked files, and the results would be untracked files. `install.sh` also deletes old releases with everything in them. The checker starts Playwright's Chromium, as two of the tests do. If that browser is missing, install it from the release with the command in [Run one test file](#run-one-test-file).
 
-The checker writes `<folder>/live-check.json`, which holds each check's status, evidence, and UTC time, and one screenshot per check in the same folder. Each check ends PASS, FAIL, or LIVE_NOT_EXECUTED. LIVE_NOT_EXECUTED means that the live data gave the check nothing to test.
+The checker writes `<folder>/live-check.json`. Its top level holds `writtenAt`, `base`, `summary`, `blockedRequests`, and `trailingConsoleErrors`. `base` is the `--base` URL that the run checked. Each entry in `results` holds a check's status, evidence, UTC time, `consoleErrors`, and `lateConsoleErrors`. Each check ends PASS, FAIL, or LIVE_NOT_EXECUTED. LIVE_NOT_EXECUTED means that the live data gave the check nothing to test.
+
+A console error logged while a check runs turns its PASS into FAIL. `lateConsoleErrors` holds the errors logged after the previous check returned and before this one started. `trailingConsoleErrors` holds the errors logged after the last check returned. Neither list changes a status or the exit code.
+
+The screenshots go in the same folder, and the evidence of each check names the ones it took. The contrast check takes one per page it visits: `contrast-tasks.png`, `contrast-decisions.png`, and `contrast-home.png`.
 
 The exit code tells the result:
 
 - `0`: no check failed, and the checker blocked no request. LIVE_NOT_EXECUTED checks do not change the exit code.
-- `1`: a check failed, or the checker blocked a request.
-- `2`: a usage or setup error, such as a missing argument or a browser that does not start.
+- `1`: a check failed, or the checker blocked a request. Nothing else exits with code 1.
+- `2`: a usage or setup error, such as a missing argument or a browser that does not start, or a run that crashed after setup and stopped early. After an early stop, `live-check.json` still holds the checks that finished.
 
 ### Deploy a later commit
 

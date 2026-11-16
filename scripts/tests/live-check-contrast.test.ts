@@ -78,6 +78,26 @@ describe("sampleContrast", () => {
     );
     assert.deepEqual([result.pairs.length, result.skipped], [0, 1]);
   });
+
+  test("a page longer than the limit is sampled across its length", async () => {
+    const spans = (text: string) => `<span style="color:#000">${text}</span>`.repeat(400);
+    const result = await sample(spans("head") + spans("tail"));
+    assert.deepEqual([result.found, result.sampled, result.limit], [800, 400, 400]);
+    assert.ok(
+      result.pairs.some((p) => p.text === "tail"),
+      "text past the first 400 elements was measured",
+    );
+  });
+
+  test("an element without an id is named by its first two classes", async () => {
+    const { pairs } = await sample(
+      `<span class="text-sm hover:underline extra" style="color:#000">x</span>`,
+    );
+    assert.deepEqual(
+      pairs.map((p) => p.selector),
+      ["span.text-sm.hover\\:underline"],
+    );
+  });
 });
 
 describe("contrast check evidence", () => {

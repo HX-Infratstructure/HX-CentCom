@@ -2,10 +2,11 @@ import { FIELD_LABELS, labelIn } from "../../../src/lib/field-labels.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
 import { checked, noData, verdict } from "../verdict.ts";
 import { ActivityPage } from "./pages/activity-page.ts";
-import type { ActivityChange } from "./pages/activity-page.ts";
+import type { ActivityChange, ActivityRow } from "./pages/activity-page.ts";
 import { OverviewPage } from "./pages/overview-page.ts";
 import { PullRequestsPage } from "./pages/pull-requests-page.ts";
 import {
+  PAGE_ROUTES,
   sameOrder,
   type ActivityItem,
   type ActivityList,
@@ -13,15 +14,7 @@ import {
   type Workspace,
 } from "./shared.ts";
 
-const PAGE_PATHS = [
-  "/",
-  "/tasks",
-  "/decisions",
-  "/raid",
-  "/lessons",
-  "/pull-requests",
-  "/activity",
-];
+const PAGE_PATHS = Object.values(PAGE_ROUTES);
 const OVERVIEW_PR_LIMIT = 8;
 const PR_PAGE_SIZE = 20;
 
@@ -130,34 +123,65 @@ function checkChange(
   return { ...change, before, after, expected, agrees: inSnapshots && changed && shownAgrees };
 }
 
+/** Compares the row with one API item: the actor's name and every shown change. */
+function compareRow(
+  row: ActivityRow,
+  item: ActivityItem,
+  agents: Workspace["agents"],
+  statuses: ReadonlyMap<string, string>,
+) {
+  const expectedActor = agents.find((agent) => agent.id === item.actor)?.display_name ?? item.actor;
+  const changes = row.changes.map((change) => checkChange(change, item, statuses));
+  return {
+    item,
+    expectedActor,
+    changes,
+    actorAgrees: row.actorName === expectedActor,
+    changesAgree: changes.every((change) => change.agrees),
+  };
+}
+
 /**
- * Checks the first activity row that shows a changed field, not the first row, and matches it to the API item
- * with the same time. That is intended: rows without a change have nothing to compare.
+ * Checks the first activity row that shows a changed field, not the first row, and matches it to the API items
+ * with the same time. That is intended: rows without a change have nothing to compare. The API is read after the
+ * page, so it holds every item the page showed, and the row passes when any item in its millisecond agrees,
+ * because two writes can share one.
  */
 async function activityRowChanges(ctx: CheckContext): Promise<CheckOutcome> {
-  const { items } = await ctx.api.getJson<ActivityList>("/api/v1/activity");
-  const { agents, statusLabels } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
   const page = new ActivityPage(ctx.session);
   await page.open();
   const row = await page.firstChangedRow();
   const screenshot = await ctx.screenshot("activity-row-changes");
   if (!row)
     return verdict([noData("no row on the first page shows a changed field")], { screenshot });
-  const item = items.find((entry) => toMillis(entry.created_at) === row.createdAt);
-  if (!item)
-    return verdict([checked(false, "no API item has the row's time")], { row, screenshot });
-  const expectedActor = agents.find((agent) => agent.id === item.actor)?.display_name ?? item.actor;
+  const { items } = await ctx.api.getJson<ActivityList>("/api/v1/activity");
+  const { agents, statusLabels } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
   const statuses = new Map(statusLabels.map((status) => [status.id, status.label]));
-  const changes = row.changes.map((change) => checkChange(change, item, statuses));
+  const comparisons = items
+    .filter((entry) => toMillis(entry.created_at) === row.createdAt)
+    .map((item) => compareRow(row, item, agents, statuses));
+  const best =
+    comparisons.find((comparison) => comparison.actorAgrees && comparison.changesAgree) ??
+    comparisons[0];
+  if (!best) {
+    const oldest = Math.min(...items.map((entry) => Date.parse(toMillis(entry.created_at))));
+    const scrolledOff =
+      items.length > 0 && row.createdAt !== null && Date.parse(row.createdAt) < oldest;
+    return verdict(
+      [
+        scrolledOff
+          ? noData("the row is older than the API page the check read; newer writes pushed it off")
+          : checked(false, "no API item has the row's time"),
+      ],
+      { row, apiItems: items.length, screenshot },
+    );
+  }
   return verdict(
     [
-      checked(row.actorName === expectedActor, "the row's actor differs from the API item's"),
-      checked(
-        changes.every((change) => change.agrees),
-        "a shown change disagrees with the API item's before and after",
-      ),
+      checked(best.actorAgrees, "the row's actor differs from the API item's"),
+      checked(best.changesAgree, "a shown change disagrees with the API item's before and after"),
     ],
-    { row, item, expectedActor, changes, screenshot },
+    { row, ...best, sameTime: comparisons.length, screenshot },
   );
 }
 

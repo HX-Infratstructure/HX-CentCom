@@ -27,7 +27,7 @@ async function labelsAndKanban(ctx: CheckContext): Promise<CheckOutcome> {
 async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   const { items } = await ctx.api.getJson<UpdateList>("/api/v1/updates");
   const taskId = items.find((item) => item.task_id)?.task_id;
-  if (!taskId) return verdict([noData("no update names a task")], { items: items.length });
+  if (!taskId) return verdict([noData("the API has no updates")], { items: items.length });
   const page = new TasksPage(ctx.session);
   await page.open(new URLSearchParams({ task: taskId }).toString(), "#updates");
   const feed = await page.feedItems();

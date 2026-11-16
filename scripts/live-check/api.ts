@@ -25,7 +25,12 @@ export class LiveApi {
     try {
       const response = await this.#fetchFn(url, { method: "GET", signal: deadline.signal });
       if (!response.ok) throw new Error(`GET ${path} -> ${response.status}`);
-      return (await response.json()) as T;
+      const body = await response.text();
+      try {
+        return JSON.parse(body) as T;
+      } catch (error) {
+        throw new Error(`GET ${path} returned a body that is not JSON`, { cause: error });
+      }
     } catch (error) {
       if (deadline.signal.aborted) {
         throw new Error(`GET ${path} timed out after ${this.#timeoutMs} ms`, { cause: error });

@@ -1,4 +1,5 @@
 import type { ReadOnlySession } from "../../session.ts";
+import { PAGE_ROUTES } from "../shared.ts";
 
 export interface ActivityChange {
   readonly field: string;
@@ -20,7 +21,7 @@ export class ActivityPage {
   }
 
   open(): Promise<number> {
-    return this.#session.goto("/activity");
+    return this.#session.goto(PAGE_ROUTES.activity);
   }
 
   /** The first row on the page that shows at least one changed field. */

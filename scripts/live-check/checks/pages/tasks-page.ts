@@ -1,4 +1,5 @@
 import type { ReadOnlySession } from "../../session.ts";
+import { PAGE_ROUTES } from "../shared.ts";
 
 const SHOW_MORE_TIMEOUT_MS = 20_000;
 
@@ -20,7 +21,7 @@ export class TasksPage {
   }
 
   open(query = "", hash = ""): Promise<number> {
-    return this.#session.goto(`/tasks${query ? `?${query}` : ""}${hash}`);
+    return this.#session.goto(`${PAGE_ROUTES.tasks}${query ? `?${query}` : ""}${hash}`);
   }
 
   rowCount(): Promise<number> {

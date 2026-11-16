@@ -10,7 +10,6 @@ export interface CheckOutcome {
 }
 
 export interface CheckContext {
-  readonly base: string;
   readonly session: ReadOnlySession;
   readonly api: LiveApi;
   readonly screenshot: (name: string) => Promise<string>;

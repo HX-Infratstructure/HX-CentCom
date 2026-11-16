@@ -1,6 +1,6 @@
-import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { mkdirSync, realpathSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { LiveApi, type FetchFn } from "./api.ts";
 import { allChecks } from "./checks/index.ts";
 import { CheckRecorder } from "./recorder.ts";
@@ -77,27 +77,45 @@ async function setUp(
   return { args, session: await openSession(args.base) };
 }
 
-async function runChecks({ args, session }: Run, deps: ResolvedDeps): Promise<0 | 1> {
-  const recorder = new CheckRecorder(args.out, deps.clock);
-  const ctx: CheckContext = {
-    base: args.base,
-    session,
-    api: new LiveApi(args.base, deps.fetch),
-    screenshot: screenshotter(session, args.out),
-  };
-  for (const check of deps.checks) {
-    await recorder.run(check, ctx);
-    const result = recorder.results().at(-1);
-    console.log(`${result?.status} ${check.id}${result?.reason ? ` (${result.reason})` : ""}`);
-  }
+function writeRecord(
+  recorder: CheckRecorder,
+  session: ReadOnlySession,
+  run: { readonly base: string; readonly trailingConsoleErrors: readonly string[] },
+): number {
   const blocked = session.blockedRequests();
   for (const request of blocked) console.log(`BLOCKED ${request}`);
-  const path = recorder.write(blocked);
+  const path = recorder.write({ ...run, blockedRequests: blocked });
   const s = recorder.summary();
   console.log(
     `summary: PASS=${s.PASS} FAIL=${s.FAIL} LIVE_NOT_EXECUTED=${s.LIVE_NOT_EXECUTED} blocked=${blocked.length} -> ${path}`,
   );
-  return recorder.exitCode(blocked.length);
+  return blocked.length;
+}
+
+async function runChecks({ args, session }: Run, deps: ResolvedDeps): Promise<0 | 1> {
+  const recorder = new CheckRecorder(args.out, deps.clock);
+  const ctx: CheckContext = {
+    session,
+    api: new LiveApi(args.base, deps.fetch),
+    screenshot: screenshotter(session, args.out),
+  };
+  let blockedCount = 0;
+  let trailingConsoleErrors: readonly string[] = [];
+  try {
+    for (const check of deps.checks) {
+      const result = await recorder.run(check, ctx);
+      console.log(`${result.status} ${check.id}${result.reason ? ` (${result.reason})` : ""}`);
+    }
+    trailingConsoleErrors = session.takeConsoleErrors();
+  } finally {
+    blockedCount = writeRecord(recorder, session, { base: args.base, trailingConsoleErrors });
+  }
+  return recorder.exitCode(blockedCount);
+}
+
+function setupError(error: unknown, hint = ""): 2 {
+  console.error(`live-check: ${error instanceof Error ? error.message : String(error)}${hint}`);
+  return 2;
 }
 
 export async function main(argv: readonly string[], deps: CliDeps = {}): Promise<number> {
@@ -106,18 +124,19 @@ export async function main(argv: readonly string[], deps: CliDeps = {}): Promise
   try {
     run = await setUp(argv, resolved.openSession);
   } catch (error) {
-    console.error(
-      `live-check: ${error instanceof Error ? error.message : String(error)}\n${USAGE}`,
-    );
-    return 2;
+    return setupError(error, `\n${USAGE}`);
   }
   try {
-    return await runChecks(run, resolved);
-  } finally {
-    await run.session.close();
+    try {
+      return await runChecks(run, resolved);
+    } finally {
+      await run.session.close();
+    }
+  } catch (error) {
+    return setupError(error);
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2));
 }

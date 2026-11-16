@@ -1,7 +1,7 @@
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
 import { checked, noData, verdict } from "../verdict.ts";
 import { BoardPage, sheetMatchesRow, type SheetVisit } from "./pages/board-page.ts";
-import { pickNarrowingValue, sameOrder, type ListPage } from "./shared.ts";
+import { PAGE_ROUTES, pickNarrowingValue, sameOrder, type ListPage } from "./shared.ts";
 
 /** A board route, its list endpoint, and the filter whose values come from the endpoint's facet counts. */
 interface Board {
@@ -14,21 +14,21 @@ interface Board {
 }
 
 const DECISIONS: Board = {
-  route: "/decisions",
+  route: PAGE_ROUTES.decisions,
   api: "/api/v1/decisions",
   param: "status",
   facet: "byStatus",
   defaultValue: "Pending",
 };
 const RAID: Board = {
-  route: "/raid",
+  route: PAGE_ROUTES.raid,
   api: "/api/v1/raid",
   param: "type",
   facet: "byType",
   defaultValue: null,
 };
 const LESSONS: Board = {
-  route: "/lessons",
+  route: PAGE_ROUTES.lessons,
   api: "/api/v1/lessons",
   param: "status",
   facet: "byStatus",

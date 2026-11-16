@@ -23,6 +23,7 @@ export interface ContrastSample {
   readonly pairs: readonly ContrastPair[];
   readonly skipped: number;
   readonly sampled: number;
+  readonly found: number;
   readonly limit: number;
 }
 
@@ -94,16 +95,21 @@ function toPair(sample: RawSample): ContrastPair {
 }
 
 export async function sampleContrast(page: Page): Promise<ContrastSample> {
-  const { samples, sampled } = await page.evaluate(collectTextSamples, SAMPLE_LIMIT);
+  const { samples, sampled, found } = await page.evaluate(collectTextSamples, SAMPLE_LIMIT);
   return {
     pairs: samples.map(toPair),
     skipped: sampled - samples.length,
     sampled,
+    found,
     limit: SAMPLE_LIMIT,
   };
 }
 
-function collectTextSamples(limit: number): { samples: RawSample[]; sampled: number } {
+function collectTextSamples(limit: number): {
+  samples: RawSample[];
+  sampled: number;
+  found: number;
+} {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -152,12 +158,15 @@ function collectTextSamples(limit: number): { samples: RawSample[]; sampled: num
   const texts = [...document.body.querySelectorAll("*")].filter(
     (el) => !skipTags.has(el.tagName.toUpperCase()) && ownText(el) && visible(el),
   );
-  const considered = texts.slice(0, limit);
+  const bucket = (i: number) => Math.floor((i * limit) / texts.length);
+  const considered = texts.filter((_, i) => i === 0 || bucket(i) !== bucket(i - 1));
   const samples = considered.flatMap((el) => {
     const back = backdrop(el);
     if (!back) return [];
     const cs = getComputedStyle(el);
-    const selector = el.tagName.toLowerCase() + (el.id ? `#${el.id}` : "");
+    const classes = [...el.classList].slice(0, 2).map((c) => `.${CSS.escape(c)}`);
+    const selector =
+      el.tagName.toLowerCase() + (el.id ? `#${CSS.escape(el.id)}` : classes.join(""));
     const sample: RawSample = {
       selector,
       text: ownText(el).slice(0, 60),
@@ -168,5 +177,5 @@ function collectTextSamples(limit: number): { samples: RawSample[]; sampled: num
     };
     return [sample];
   });
-  return { samples, sampled: considered.length };
+  return { samples, sampled: considered.length, found: texts.length };
 }

@@ -30,7 +30,6 @@ function fakeContext(snapshots: Workspace[], rows: number): CheckContext {
     },
   };
   return {
-    base: "http://h",
     session,
     api,
     screenshot: async (name: string) => name,

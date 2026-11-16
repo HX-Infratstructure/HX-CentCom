@@ -1,8 +1,10 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isReadOnlyMethod } from "../live-check/session.ts";
 import { contrastRatio, isLargeText } from "../live-check/contrast.ts";
 import { main, parseArgs } from "../live-check/cli.ts";
@@ -61,14 +63,21 @@ function fakeCheck(id: string, run: (ctx: CheckContext) => Promise<CheckOutcome>
   return { id, requirement: `req ${id}`, run };
 }
 
-function fakeContext(consoleErrors: string[][]): CheckContext {
-  const session = { takeConsoleErrors: () => consoleErrors.shift() ?? [] };
-  return {
-    base: "http://h",
+function fakeContext(): { ctx: CheckContext; logError: (message: string) => void } {
+  let buffer: string[] = [];
+  const session = {
+    takeConsoleErrors: () => {
+      const errors = buffer;
+      buffer = [];
+      return errors;
+    },
+  };
+  const ctx = {
     session,
     api: {},
     screenshot: async (n: string) => n,
   } as unknown as CheckContext;
+  return { ctx, logError: (message) => buffer.push(message) };
 }
 
 describe("CheckRecorder", () => {
@@ -76,7 +85,7 @@ describe("CheckRecorder", () => {
     const out = mkdtempSync(join(tmpdir(), "live-check-"));
     try {
       const rec = new CheckRecorder(out, () => NOW);
-      const ctx = fakeContext([[], [], ["Uncaught TypeError: x"], []]);
+      const { ctx, logError } = fakeContext();
       await rec.run(
         fakeCheck("pass", async () => ({ status: "PASS", evidence: { rows: 3 } })),
         ctx,
@@ -90,7 +99,10 @@ describe("CheckRecorder", () => {
         ctx,
       );
       await rec.run(
-        fakeCheck("console", async () => ({ status: "PASS", evidence: {} })),
+        fakeCheck("console", async () => {
+          logError("Uncaught TypeError: x");
+          return { status: "PASS", evidence: {} };
+        }),
         ctx,
       );
       await rec.run(
@@ -109,7 +121,7 @@ describe("CheckRecorder", () => {
       assert.match(byId["throws"]?.reason ?? "", /boom/);
       assert.deepEqual(rec.summary(), { PASS: 1, FAIL: 2, LIVE_NOT_EXECUTED: 1 });
       assert.equal(rec.exitCode(0), 1);
-      rec.write();
+      rec.write({ base: "http://h", blockedRequests: [], trailingConsoleErrors: [] });
       const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
       assert.equal(written.results.length, 4);
     } finally {
@@ -118,7 +130,7 @@ describe("CheckRecorder", () => {
   });
   test("exits 0 with no FAIL and no blocked request, 1 with a blocked request", async () => {
     const rec = new CheckRecorder("/nonexistent", () => NOW);
-    const ctx = fakeContext([]);
+    const { ctx } = fakeContext();
     await rec.run(
       fakeCheck("pass", async () => ({ status: "PASS", evidence: {} })),
       ctx,
@@ -256,6 +268,74 @@ describe("main", () => {
       assert.deepEqual(written.summary, { PASS: 2, FAIL: 0, LIVE_NOT_EXECUTED: 1 });
       assert.equal(written.writtenAt, NOW.toISOString());
       assert.equal(session.closed, true);
+    });
+  });
+
+  test("exits 2 and still writes the completed checks when a later step throws", async () => {
+    await inTempDir(async (out) => {
+      const session = fakeSession();
+      let crashed = false;
+      session.takeConsoleErrors = () => {
+        if (crashed) throw new Error("page crashed");
+        return [];
+      };
+      const second = fakeCheck("second", async () => {
+        crashed = true;
+        return { status: "PASS", evidence: {} };
+      });
+      const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [passing, second]));
+      assert.equal(code, 2);
+      const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+      assert.deepEqual(
+        written.results.map((result: { id: string }) => result.id),
+        ["ok"],
+      );
+      assert.equal(session.closed, true);
+    });
+  });
+
+  test("records the base URL the run checked", async () => {
+    await inTempDir(async (out) => {
+      await main(["--base", BASE, "--out", out], fakeDeps(fakeSession(), [passing]));
+      const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+      assert.equal(written.base, BASE);
+    });
+  });
+
+  test("records console errors logged after the last check without changing the verdict", async () => {
+    await inTempDir(async (out) => {
+      const session = fakeSession();
+      let buffer: string[] = [];
+      let arrivingAfterDrain: string[] = [];
+      session.takeConsoleErrors = () => {
+        const errors = buffer;
+        buffer = arrivingAfterDrain;
+        arrivingAfterDrain = [];
+        return errors;
+      };
+      const last = fakeCheck("last", async () => {
+        arrivingAfterDrain.push("Uncaught Error: after the last check");
+        return { status: "PASS", evidence: {} };
+      });
+      const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [last]));
+      assert.equal(code, 0, "trailing errors change no exit code");
+      const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+      assert.deepEqual(written.trailingConsoleErrors, ["Uncaught Error: after the last check"]);
+      assert.equal(written.results[0].status, "PASS");
+      assert.deepEqual(written.results[0].consoleErrors, []);
+      assert.deepEqual(written.summary, { PASS: 1, FAIL: 0, LIVE_NOT_EXECUTED: 0 });
+    });
+  });
+});
+
+describe("live-check executable", () => {
+  test("runs main when started through a symlink", async () => {
+    await inTempDir(async (dir) => {
+      const link = join(dir, "cli.ts");
+      symlinkSync(fileURLToPath(new URL("../live-check/cli.ts", import.meta.url)), link);
+      const child = spawnSync(process.execPath, [link], { encoding: "utf8", timeout: 30_000 });
+      assert.equal(child.status, 2, child.stderr);
+      assert.match(child.stderr, /--base is required/);
     });
   });
 });

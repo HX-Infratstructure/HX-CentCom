@@ -3,18 +3,23 @@ import assert from "node:assert/strict";
 import { checks } from "../live-check/checks/overview.ts";
 import type { CheckContext, CheckOutcome } from "../live-check/types.ts";
 
+/** An API answer may be a function of whether the page has loaded, to model a write between the two reads. */
 function fakeContext(api: Record<string, unknown>, pageData: unknown): CheckContext {
+  let pageLoaded = false;
   const session = {
-    goto: async () => 200,
+    goto: async () => {
+      pageLoaded = true;
+      return 200;
+    },
     page: { evaluate: async () => pageData },
   };
   return {
-    base: "http://h",
     session,
     api: {
       getJson: async (path: string) => {
         if (!(path in api)) throw new Error(`unexpected API path ${path}`);
-        return api[path];
+        const answer = api[path];
+        return typeof answer === "function" ? answer(pageLoaded) : answer;
       },
     },
     screenshot: async (name: string) => name,
@@ -60,6 +65,16 @@ describe("pull-requests-open-first", () => {
 });
 
 const CREATED = "2026-11-16T17:00:00.123Z";
+const WORKSPACE = {
+  agents: [
+    { id: "cc1", display_name: "CC1" },
+    { id: "cc2", display_name: "CC2" },
+  ],
+  statusLabels: [
+    { id: "todo", label: "To do" },
+    { id: "done", label: "Done" },
+  ],
+};
 
 function activityContext(
   before: Record<string, unknown>,
@@ -72,13 +87,7 @@ function activityContext(
       "/api/v1/activity": {
         items: [{ entity, actor: "cc1", created_at: "2026-11-16T17:00:00.123456Z", before, after }],
       },
-      "/api/v1/workspace": {
-        agents: [{ id: "cc1", display_name: "CC1" }],
-        statusLabels: [
-          { id: "todo", label: "To do" },
-          { id: "done", label: "Done" },
-        ],
-      },
+      "/api/v1/workspace": WORKSPACE,
     },
     [{ actorName: "CC1", createdAt: CREATED, changes: [change] }],
   );
@@ -250,5 +259,58 @@ describe("activity-row-changes", () => {
         `${c.entity} ${from} ${to}`,
       );
     }
+  });
+
+  const titleItem = (actor: string, createdAt: string, from: string, to: string) => ({
+    entity: "task",
+    actor,
+    created_at: createdAt,
+    before: { title: from },
+    after: { title: to },
+  });
+  const titleRow = [
+    { actorName: "CC1", createdAt: CREATED, changes: [{ field: "title", from: "Old", to: "New" }] },
+  ];
+
+  test("an item written between the API read and the page load still matches", async () => {
+    const item = titleItem("cc1", "2026-11-16T17:00:00.123456Z", "Old", "New");
+    const ctx = fakeContext(
+      {
+        "/api/v1/activity": (pageLoaded: boolean) => ({ items: pageLoaded ? [item] : [] }),
+        "/api/v1/workspace": WORKSPACE,
+      },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "PASS");
+  });
+
+  test("any API item in the row's millisecond can match the row", async () => {
+    const other = titleItem("cc2", "2026-11-16T17:00:00.123100Z", "A", "B");
+    const same = titleItem("cc1", "2026-11-16T17:00:00.123900Z", "Old", "New");
+    const both = fakeContext(
+      { "/api/v1/activity": { items: [other, same] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", both)).status, "PASS");
+    const neither = fakeContext(
+      { "/api/v1/activity": { items: [other] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", neither)).status, "FAIL");
+  });
+
+  test("a row older than the API page has no data, and a gap inside the page fails", async () => {
+    const newer = titleItem("cc1", "2026-11-16T17:00:05.000000Z", "Old", "New");
+    const older = titleItem("cc1", "2026-11-16T16:59:55.000000Z", "Old", "New");
+    const scrolledOff = fakeContext(
+      { "/api/v1/activity": { items: [newer] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", scrolledOff)).status, "LIVE_NOT_EXECUTED");
+    const gap = fakeContext(
+      { "/api/v1/activity": { items: [newer, older] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", gap)).status, "FAIL");
   });
 });
