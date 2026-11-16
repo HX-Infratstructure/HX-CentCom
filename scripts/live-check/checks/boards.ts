@@ -60,15 +60,20 @@ async function filterBoard(ctx: CheckContext, board: Board) {
   const page = new BoardPage(ctx.session, board.route);
   const url = await page.load({ [board.param]: value });
   const uiRows = await page.visibleRows();
-  const expected = filtered.nextCursor === null ? facetCount : filtered.items.length;
-  const ok = uiRows === expected && uiRows === filtered.items.length;
+  const shownIds = await page.rowIds();
+  const expectedIds = groupedApiOrder(filtered.items, shownIds, board.param);
+  const expected = filtered.nextCursor === null ? filtered.counts.total : filtered.items.length;
+  const ok =
+    uiRows === expected && uiRows === filtered.items.length && sameOrder(shownIds, expectedIds);
   return {
     route: board.route,
-    part: checked(ok, `${board.route}: filtered rows differ from the API count`),
+    part: checked(ok, `${board.route}: filtered row IDs or count differ from the filtered API`),
     url,
     facetCount,
     uiRows,
     expected,
+    shownIds,
+    expectedIds,
     total: all.counts.total,
   };
 }
@@ -102,7 +107,7 @@ async function decisionSummaryClick(ctx: CheckContext): Promise<CheckOutcome> {
 }
 
 /**
- * The register page groups its rows by `groupBy`, so the expected order is the API's first page with each group
+ * A board page groups its rows by `groupBy`, so the expected order is the API's first page with each group
  * kept together, in the order the page shows the groups, and the API's order inside each group.
  */
 function groupedApiOrder(items: ListPage["items"], shownIds: readonly string[], groupBy: string) {

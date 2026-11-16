@@ -4,6 +4,7 @@ export type Rgb = readonly [number, number, number];
 export type Rgba = readonly [number, number, number, number];
 
 const WHITE: Rgba = [255, 255, 255, 1];
+const CLEAR: Rgba = [0, 0, 0, 0];
 const SAMPLE_LIMIT = 400;
 
 export interface ContrastPair {
@@ -25,12 +26,16 @@ export interface ContrastSample {
   readonly limit: number;
 }
 
+interface Level {
+  readonly bg: Rgba;
+  readonly opacity: number;
+}
+
 interface RawSample {
   readonly selector: string;
   readonly text: string;
   readonly fg: Rgba;
-  readonly layers: readonly Rgba[];
-  readonly opacity: number;
+  readonly levels: readonly Level[];
   readonly fontSize: number;
   readonly fontWeight: number;
 }
@@ -60,13 +65,19 @@ export function composite(top: Rgba, bottom: Rgba): Rgba {
   return [mix(0), mix(1), mix(2), alpha];
 }
 
+// CSS opacity fades an element's whole rendered group, its background included.
+function render(levels: readonly Level[], content: Rgba): Rgba {
+  const group = levels.reduce<Rgba>((inner, { bg, opacity }) => {
+    const [r, g, b, a] = composite(inner, bg);
+    return [r, g, b, a * opacity];
+  }, content);
+  return composite(group, WHITE);
+}
+
 function toPair(sample: RawSample): ContrastPair {
-  const bg = [...sample.layers]
-    .reverse()
-    .reduce<Rgba>((under, layer) => composite(layer, under), WHITE);
-  const fgLayer: Rgba = [sample.fg[0], sample.fg[1], sample.fg[2], sample.fg[3] * sample.opacity];
-  const fg = composite(fgLayer, bg);
-  const ratio = Math.round(contrastRatio([fg[0], fg[1], fg[2]], [bg[0], bg[1], bg[2]]) * 100) / 100;
+  const bg = render(sample.levels, CLEAR);
+  const fg = render(sample.levels, sample.fg);
+  const ratio = contrastRatio([fg[0], fg[1], fg[2]], [bg[0], bg[1], bg[2]]);
   const required = isLargeText(sample.fontSize, sample.fontWeight) ? 3 : 4.5;
   const { selector, text, fontSize, fontWeight } = sample;
   return {
@@ -125,17 +136,17 @@ function collectTextSamples(limit: number): { samples: RawSample[]; sampled: num
     );
   };
   const backdrop = (el: Element) => {
-    const layers: Rgba[] = [];
-    let opacity = 1;
+    const levels: Level[] = [];
+    let opaque = false;
     for (let e: Element | null = el; e; e = e.parentElement) {
       const cs = getComputedStyle(e);
-      opacity *= parseFloat(cs.opacity);
-      if (cs.backgroundImage !== "none") return null;
+      if (cs.backgroundImage !== "none" && !opaque) return null;
       const bg = toRgba(cs.backgroundColor);
-      if (bg[3] > 0) layers.push(bg);
-      if (bg[3] >= 1) break;
+      const opacity = parseFloat(cs.opacity);
+      opaque = (opaque || bg[3] >= 1) && opacity >= 1;
+      levels.push({ bg, opacity });
     }
-    return { layers, opacity };
+    return levels.some((level) => level.opacity === 0) ? null : { levels };
   };
   const skipTags = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG"]);
   const texts = [...document.body.querySelectorAll("*")].filter(

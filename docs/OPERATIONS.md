@@ -95,14 +95,15 @@ Agents and the owner send their Bearer keys over plain HTTP on the HX LAN, which
 
 The checker only reads, so it is safe to run at any time. It lets only GET and HEAD requests through. It aborts any other request, records it in `live-check.json`, and exits with code 1.
 
-Run it from the clone on HX-15. If the clone has no `node_modules`, or `package-lock.json` changed since the last install, run `npm ci` there first.
+Run it on HX-15 from the `current` release, not from the clone. `install.sh` builds each release from `git archive <S>` and runs `npm ci --include=dev` in it, so the release holds the checker of that commit and its dev dependencies, Playwright among them. Neither the fetch nor `install.sh` moves the clone's `HEAD`, so the checker in the clone can be older than the deployed commit, or absent. `cat RELEASE` prints the full SHA of the release. Confirm that it is the SHA you deployed.
 
 ```sh
-cd ~/HX-CentCom
+cd ~/.local/share/hx-centcom/current
+cat RELEASE
 npm run live-check -- --base <url> --out <folder>
 ```
 
-`<url>` is the app's URL, such as `http://192.168.50.207:8420`. Give `--out` a folder outside the clone. `install.sh` refuses a clone with untracked files, and the results would be untracked files. The checker uses Playwright's Chromium in `~/.cache/ms-playwright`. If that browser is missing, install it with `npx playwright install chromium`.
+`<url>` is the app's URL, such as `http://192.168.50.207:8420`. Give `--out` a folder outside the clone and outside `~/.local/share/hx-centcom`. `install.sh` refuses a clone with untracked files, and the results would be untracked files. `install.sh` also deletes old releases with everything in them. The checker uses Playwright's Chromium in `~/.cache/ms-playwright`. If that browser is missing, run `npx playwright install chromium` from the release.
 
 The checker writes `<folder>/live-check.json`, which holds each check's status, evidence, and UTC time, and one screenshot per check in the same folder. Each check ends PASS, FAIL, or LIVE_NOT_EXECUTED. LIVE_NOT_EXECUTED means that the live data gave the check nothing to test.
 

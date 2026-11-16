@@ -17,6 +17,7 @@ export interface WorkspaceTask {
 export interface Workspace {
   readonly tasks: readonly WorkspaceTask[];
   readonly agents: readonly { readonly id: string; readonly display_name: string }[];
+  readonly statusLabels: readonly { readonly id: string; readonly label: string }[];
   readonly updatesCursor: string | null;
 }
 
@@ -30,6 +31,7 @@ export interface PrList {
 }
 
 export interface ActivityItem {
+  readonly entity: string;
   readonly actor: string;
   readonly created_at: string;
   readonly before: Readonly<Record<string, unknown>> | null;

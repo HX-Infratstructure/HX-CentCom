@@ -1,15 +1,7 @@
+import { FIELD_LABELS, labelIn } from "@/lib/field-labels";
 import type * as S from "./server-types";
 import {
-  DECISION_STATUS_LABELS,
-  GATE_TYPE_LABELS,
-  LESSON_STATUS_LABELS,
   PR_STATE_LABELS,
-  RAID_STATUS_LABELS,
-  RAID_TYPE_LABELS,
-  REQUIREMENT_STATE_LABELS,
-  SEVERITY_LABELS,
-  TASK_GROUP_LABELS,
-  VALIDATION_STATE_LABELS,
   assertNever,
   toInstant,
   type ActivityChange,
@@ -310,22 +302,6 @@ const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
 /** Longer text, or text on several lines, is named as edited instead of printed. */
 const SHORT_TEXT = 40;
 
-/** The page's labels for coded fields. A task's status is a status label id, so the directory resolves it instead. */
-const FIELD_LABELS: {
-  readonly [E in S.ActivityEntity]?: Readonly<Record<string, Readonly<Record<string, string>>>>;
-} = {
-  task: { group: TASK_GROUP_LABELS },
-  requirement: { state: REQUIREMENT_STATE_LABELS },
-  decision: { status: DECISION_STATUS_LABELS, gate_type: GATE_TYPE_LABELS },
-  raid_item: {
-    type: RAID_TYPE_LABELS,
-    status: RAID_STATUS_LABELS,
-    severity: SEVERITY_LABELS,
-    validation_state: VALIDATION_STATE_LABELS,
-  },
-  lesson: { status: LESSON_STATUS_LABELS },
-};
-
 /** Only an update has both snapshots; a create has no before, so it shows no change. */
 function changesOf(entry: S.ActivityEntry, dir: Directory): readonly ActivityChange[] {
   const { before, after } = entry;
@@ -367,10 +343,6 @@ function valueText(entity: S.ActivityEntity, key: string, value: Scalar, dir: Di
   if (entity === "task" && key === "status") return statusRef(value, dir.statuses).label;
   if (key === "commit_sha") return value.slice(0, 7);
   return labelIn(labelIn(FIELD_LABELS[entity], key), value) ?? value;
-}
-
-function labelIn<T>(table: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
-  return table !== undefined && Object.hasOwn(table, key) ? table[key] : undefined;
 }
 
 /** A requirement opens its task's sheet; `after` names it, and `before` too when the write changed a requirement. */

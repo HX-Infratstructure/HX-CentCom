@@ -56,13 +56,14 @@ async function filterNarrows(ctx: CheckContext): Promise<CheckOutcome> {
   const page = new TasksPage(ctx.session);
   await page.open(new URLSearchParams({ repo }).toString());
   const rows = await page.rowCount();
+  const reread = await ctx.api.getJson<Workspace>("/api/v1/workspace");
+  const settled = reread.tasks.filter((task) => task.repository === repo).length;
   const screenshot = await ctx.screenshot("tasks-filter");
-  return verdict([checked(rows === expected, "filtered rows differ from the API count")], {
-    repo,
-    expected,
-    rows,
-    screenshot,
-  });
+  const part =
+    settled === expected
+      ? checked(rows === expected, "filtered rows differ from the API count")
+      : noData(`the ${repo} task count moved from ${expected} to ${settled} during the check`);
+  return verdict([part], { repo, expected, settled, rows, screenshot });
 }
 
 async function updatesShowMore(ctx: CheckContext): Promise<CheckOutcome> {

@@ -66,11 +66,12 @@ export class PlaywrightSession implements ReadOnlySession {
   }
 
   async #watch(): Promise<void> {
-    await this.page.route("**/*", (route) => this.#guard(route));
-    this.page.on("console", (message) => {
+    const context = this.page.context();
+    await context.route("**/*", (route) => this.#guard(route));
+    context.on("console", (message) => {
       if (message.type() === "error") this.#consoleErrors.push(message.text());
     });
-    this.page.on("pageerror", (error) => this.#consoleErrors.push(error.message));
+    context.on("weberror", (webError) => this.#consoleErrors.push(webError.error().message));
   }
 
   async #guard(route: Route): Promise<void> {

@@ -8,7 +8,7 @@ function describePair(pair: ContrastPair) {
   const { text, ratio, required, fg, bg, fontSize, fontWeight, selector } = pair;
   return {
     text: text.slice(0, 60),
-    ratio: Number(ratio.toFixed(2)),
+    ratio: Math.floor(ratio * 100) / 100,
     required,
     fg,
     bg,

@@ -1,3 +1,4 @@
+import { FIELD_LABELS, labelIn } from "../../../src/lib/field-labels.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
 import { checked, noData, verdict } from "../verdict.ts";
 import { ActivityPage } from "./pages/activity-page.ts";
@@ -71,7 +72,10 @@ async function pullRequestsOpenFirst(ctx: CheckContext): Promise<CheckOutcome> {
   const groups = await page.groups();
   const expectedRows = Math.min(api.counts.total, PR_PAGE_SIZE);
   const screenshot = await ctx.screenshot("pull-requests-open-first");
-  const ok = groups[0]?.title === "Open" && groups[0].rows === expectedRows;
+  const ok =
+    expectedRows === 0
+      ? groups.every((group) => group.title !== "Open")
+      : groups[0]?.title === "Open" && groups[0].rows === expectedRows;
   return verdict([checked(ok, "Open group is not first or its row count differs")], {
     groups,
     openTotal: api.counts.total,
@@ -85,14 +89,45 @@ function toMillis(iso: string): string {
   return iso.replace(/(\.\d{3})\d+/, "$1");
 }
 
+const SHORT_TEXT = 40;
+
+/** What the page prints for a change, mirroring src/components/adapt.ts:306-350. */
+function expectedChange(
+  entity: string,
+  key: string,
+  rawValues: readonly [unknown, unknown],
+  statuses: ReadonlyMap<string, string>,
+): { readonly from: string | null; readonly to: string } {
+  const [before, after] = rawValues.map((v) => (v === undefined || v === "" ? null : v));
+  const isShort = (v: unknown) =>
+    typeof v === "string"
+      ? v.length <= SHORT_TEXT && !v.includes("\n")
+      : v === null || typeof v === "number" || typeof v === "boolean";
+  if (!isShort(before) || !isShort(after)) return { from: null, to: "edited" };
+  const text = (v: unknown): string => {
+    if (v === null) return "none";
+    if (typeof v !== "string") return String(v);
+    if (entity === "task" && key === "status") return statuses.get(v) ?? v;
+    if (key === "commit_sha") return v.slice(0, 7);
+    return labelIn(labelIn(labelIn(FIELD_LABELS, entity), key), v) ?? v;
+  };
+  return { from: text(before), to: text(after) };
+}
+
 /** The page labels a field by its key with spaces for underscores, and shows only a field whose value changed. */
-function checkChange(change: ActivityChange, item: ActivityItem) {
+function checkChange(
+  change: ActivityChange,
+  item: ActivityItem,
+  statuses: ReadonlyMap<string, string>,
+) {
   const key = change.field.replace(/ /g, "_");
   const before = item.before?.[key];
   const after = item.after?.[key];
   const inSnapshots = key in (item.before ?? {}) || key in (item.after ?? {});
   const changed = JSON.stringify(before) !== JSON.stringify(after);
-  return { ...change, before, after, agrees: inSnapshots && changed && change.from !== change.to };
+  const expected = expectedChange(item.entity, key, [before, after], statuses);
+  const shownAgrees = change.from === expected.from && change.to === expected.to;
+  return { ...change, before, after, expected, agrees: inSnapshots && changed && shownAgrees };
 }
 
 /**
@@ -101,7 +136,7 @@ function checkChange(change: ActivityChange, item: ActivityItem) {
  */
 async function activityRowChanges(ctx: CheckContext): Promise<CheckOutcome> {
   const { items } = await ctx.api.getJson<ActivityList>("/api/v1/activity");
-  const { agents } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
+  const { agents, statusLabels } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
   const page = new ActivityPage(ctx.session);
   await page.open();
   const row = await page.firstChangedRow();
@@ -112,7 +147,8 @@ async function activityRowChanges(ctx: CheckContext): Promise<CheckOutcome> {
   if (!item)
     return verdict([checked(false, "no API item has the row's time")], { row, screenshot });
   const expectedActor = agents.find((agent) => agent.id === item.actor)?.display_name ?? item.actor;
-  const changes = row.changes.map((change) => checkChange(change, item));
+  const statuses = new Map(statusLabels.map((status) => [status.id, status.label]));
+  const changes = row.changes.map((change) => checkChange(change, item, statuses));
   return verdict(
     [
       checked(row.actorName === expectedActor, "the row's actor differs from the API item's"),

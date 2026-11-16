@@ -1,34 +1,22 @@
 import type { RecordKind } from "./open-record";
 import type * as S from "./server-types";
 
+export {
+  GATE_TYPE_LABELS,
+  DECISION_STATUS_LABELS,
+  TASK_GROUP_LABELS,
+  REQUIREMENT_STATE_LABELS,
+  RAID_TYPE_LABELS,
+  SEVERITY_LABELS,
+  RAID_STATUS_LABELS,
+  VALIDATION_STATE_LABELS,
+  LESSON_STATUS_LABELS,
+} from "@/lib/field-labels";
+
 /*
  * Vocabulary. Display order is key order. `satisfies Record<Union, string>` turns a value the server adds, or a key
  * the server drops, into a build error here, so a label map never drifts from the enum it describes.
  */
-export const GATE_TYPE_LABELS = {
-  merge: "Merge",
-  deploy: "Deploy",
-  live_run: "Live run",
-  host: "Host",
-  scope: "Scope",
-  assignment: "Assignment",
-  policy: "Policy",
-} as const satisfies Record<S.GateType, string>;
-
-export const DECISION_STATUS_LABELS = {
-  Pending: "Pending",
-  Decided: "Decided",
-  Deferred: "Deferred",
-  Superseded: "Superseded",
-} as const satisfies Record<S.DecisionStatus, string>;
-
-export const TASK_GROUP_LABELS = {
-  backlog: "Backlog",
-  in_progress: "In progress",
-  ready_for_owner: "Ready for owner",
-  done: "Done",
-} as const satisfies Record<S.TaskGroup, string>;
-
 /**
  * The six board colors of monday.com's status palette. `[data-hue]` in styles.css maps each to a bright edge for
  * group rows and bars, and to a darker ink that white text reads on at 4.5:1.
@@ -179,13 +167,6 @@ export const PR_STATE_SHORT_LABELS = {
   gone: "Gone",
 } as const satisfies Record<PrState, string>;
 
-export const REQUIREMENT_STATE_LABELS = {
-  PASS: "Proven",
-  FAIL: "Failed",
-  BLOCKED: "Blocked",
-  NOT_RUN: "Not run",
-} as const satisfies Record<S.RequirementState, string>;
-
 export const ACTIVITY_ENTITY_LABELS = {
   task: "Task",
   requirement: "Requirement",
@@ -227,38 +208,6 @@ export const ACTIVITY_ACTION_HUES = {
   "lesson.update": "green",
   "activity.revert": "red",
 } as const satisfies Record<S.ActivityAction, BoardHue>;
-
-export const RAID_TYPE_LABELS = {
-  risk: "Risk",
-  assumption: "Assumption",
-  issue: "Issue",
-  dependency: "Dependency",
-} as const satisfies Record<S.RaidType, string>;
-
-export const SEVERITY_LABELS = {
-  critical: "Critical",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-} as const satisfies Record<S.Severity, string>;
-
-export const RAID_STATUS_LABELS = {
-  open: "Open",
-  monitoring: "Monitoring",
-  closed: "Closed",
-} as const satisfies Record<S.RaidStatus, string>;
-
-export const VALIDATION_STATE_LABELS = {
-  unverified: "Unverified",
-  validated: "Validated",
-  invalidated: "Invalidated",
-} as const satisfies Record<S.ValidationState, string>;
-
-export const LESSON_STATUS_LABELS = {
-  proposed: "Proposed",
-  adopted: "Adopted",
-  retired: "Retired",
-} as const satisfies Record<S.LessonStatus, string>;
 
 declare const instantBrand: unique symbol;
 /** ISO-8601 UTC text that every browser's Date parses. Only `toInstant` makes one. */
