@@ -7,6 +7,7 @@ import { isReadOnlyMethod } from "../live-check/session.ts";
 import { contrastRatio, isLargeText } from "../live-check/contrast.ts";
 import { parseArgs } from "../live-check/cli.ts";
 import { CheckRecorder } from "../live-check/recorder.ts";
+import { checked, noData, verdict } from "../live-check/verdict.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../live-check/types.ts";
 
 const NOW = new Date("2026-11-16T17:00:00.000Z");
@@ -126,5 +127,33 @@ describe("CheckRecorder", () => {
     );
     assert.equal(rec.exitCode(0), 0);
     assert.equal(rec.exitCode(1), 1);
+  });
+});
+
+describe("verdict", () => {
+  const evidence = { rows: 2 };
+  test("every part checked and ok gives PASS with no reason", () => {
+    assert.deepEqual(verdict([checked(true, "a"), checked(true, "b")], evidence), {
+      status: "PASS",
+      evidence,
+    });
+  });
+  test("a failed part gives FAIL with the failed parts' reasons, even beside a part without data", () => {
+    const outcome = verdict(
+      [checked(true, "fine"), noData("no rows"), checked(false, "rows differ")],
+      evidence,
+    );
+    assert.deepEqual(outcome, { status: "FAIL", evidence, reason: "rows differ" });
+  });
+  test("a part without data and none failed gives LIVE_NOT_EXECUTED with its reason", () => {
+    const outcome = verdict([checked(true, "fine"), noData("no rows"), noData("no PRs")], evidence);
+    assert.deepEqual(outcome, {
+      status: "LIVE_NOT_EXECUTED",
+      evidence,
+      reason: "no rows; no PRs",
+    });
+  });
+  test("no parts gives LIVE_NOT_EXECUTED", () => {
+    assert.equal(verdict([], evidence).status, "LIVE_NOT_EXECUTED");
   });
 });

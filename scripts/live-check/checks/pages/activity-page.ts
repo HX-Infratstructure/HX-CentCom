@@ -23,11 +23,15 @@ export class ActivityPage {
     return this.#session.goto("/activity");
   }
 
-  firstRow(): Promise<ActivityRow | null> {
-    return this.#session.page.evaluate(() => {
-      const row = document.querySelector("ul.activity-log > li article.activity-row");
-      if (!row) return null;
-      return {
+  /** The first row on the page that shows at least one changed field. */
+  async firstChangedRow(): Promise<ActivityRow | null> {
+    const rows = await this.#rows();
+    return rows.find((row) => row.changes.length > 0) ?? null;
+  }
+
+  #rows(): Promise<ActivityRow[]> {
+    return this.#session.page.evaluate(() =>
+      [...document.querySelectorAll("ul.activity-log > li article.activity-row")].map((row) => ({
         actorName:
           row.querySelector(".activity-head .agent-person-name")?.textContent?.trim() ?? "",
         createdAt: row.querySelector(".activity-side time")?.getAttribute("datetime") ?? null,
@@ -36,7 +40,7 @@ export class ActivityPage {
           from: li.querySelector(".change-from")?.textContent?.trim() ?? null,
           to: li.querySelector(".change-to")?.textContent?.trim() ?? null,
         })),
-      };
-    });
+      })),
+    );
   }
 }

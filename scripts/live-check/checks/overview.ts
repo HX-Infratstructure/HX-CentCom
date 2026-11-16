@@ -1,6 +1,7 @@
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
+import { checked, noData, verdict } from "../verdict.ts";
 import { ActivityPage } from "./pages/activity-page.ts";
-import type { ActivityRow } from "./pages/activity-page.ts";
+import type { ActivityChange } from "./pages/activity-page.ts";
 import { OverviewPage } from "./pages/overview-page.ts";
 import { PullRequestsPage } from "./pages/pull-requests-page.ts";
 
@@ -32,14 +33,6 @@ interface AgentList {
   readonly agents: readonly { readonly id: string; readonly display_name: string }[];
 }
 
-export function verdict(
-  ok: boolean,
-  evidence: Record<string, unknown>,
-  reason: string,
-): CheckOutcome {
-  return ok ? { status: "PASS", evidence } : { status: "FAIL", evidence, reason };
-}
-
 async function pagesLoad(ctx: CheckContext): Promise<CheckOutcome> {
   const page = new OverviewPage(ctx.session);
   const pages = [];
@@ -58,9 +51,8 @@ async function pagesLoad(ctx: CheckContext): Promise<CheckOutcome> {
     (entry) => entry.status === 200 && entry.h1 !== "" && entry.consoleErrors.length === 0,
   );
   return verdict(
-    ok,
+    [checked(ok, "a page did not answer 200, showed no h1 or logged a console error")],
     { pages, screenshot },
-    "a page did not answer 200, showed no h1 or logged a console error",
   );
 }
 
@@ -73,11 +65,11 @@ async function overviewOpenPrs(ctx: CheckContext): Promise<CheckOutcome> {
   const screenshot = await ctx.screenshot("overview-open-prs");
   const ok =
     shown.length === expected.length && shown.every((title, index) => title === expected[index]);
-  return verdict(
-    ok,
-    { shown, expected, screenshot },
-    "Overview open PRs differ from the API's first page",
-  );
+  return verdict([checked(ok, "Overview open PRs differ from the API's first page")], {
+    shown,
+    expected,
+    screenshot,
+  });
 }
 
 async function pullRequestsOpenFirst(ctx: CheckContext): Promise<CheckOutcome> {
@@ -88,62 +80,52 @@ async function pullRequestsOpenFirst(ctx: CheckContext): Promise<CheckOutcome> {
   const expectedRows = Math.min(api.counts.total, PR_PAGE_SIZE);
   const screenshot = await ctx.screenshot("pull-requests-open-first");
   const ok = groups[0]?.title === "Open" && groups[0].rows === expectedRows;
-  return verdict(
-    ok,
-    { groups, openTotal: api.counts.total, expectedRows, screenshot },
-    "Open group is not first or its row count differs",
-  );
+  return verdict([checked(ok, "Open group is not first or its row count differs")], {
+    groups,
+    openTotal: api.counts.total,
+    expectedRows,
+    screenshot,
+  });
 }
 
-// The activity page hides keys a write always sets (src/components/adapt.ts BOOKKEEPING_KEYS).
-const BOOKKEEPING_KEYS = new Set([
-  "id",
-  "version",
-  "created_by",
-  "updated_by",
-  "update_id",
-  "effects",
-  "reverts",
-  "created_at",
-  "updated_at",
-  "requested_at",
-  "decided_at",
-  "revoked_at",
-]);
-
-function changedFields(item: ActivityItem): string[] {
-  if (!item.before || !item.after) return [];
-  const { before, after } = item;
-  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
-  return [...keys]
-    .filter((key) => !BOOKKEEPING_KEYS.has(key))
-    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
-    .map((key) => key.replace(/_/g, " "))
-    .sort();
+/** The page prints a time to the millisecond; the API keeps microseconds. */
+function toMillis(iso: string): string {
+  return iso.replace(/(\.\d{3})\d+/, "$1");
 }
 
-function changesMatch(row: ActivityRow, item: ActivityItem): boolean {
-  const shown = row.changes.map((change) => change.field).sort();
-  return shown.join() === changedFields(item).join();
+/** The page labels a field by its key with spaces for underscores, and shows only a field whose value changed. */
+function checkChange(change: ActivityChange, item: ActivityItem) {
+  const key = change.field.replace(/ /g, "_");
+  const before = item.before?.[key];
+  const after = item.after?.[key];
+  const inSnapshots = key in (item.before ?? {}) || key in (item.after ?? {});
+  const changed = JSON.stringify(before) !== JSON.stringify(after);
+  return { ...change, before, after, agrees: inSnapshots && changed && change.from !== change.to };
 }
 
-async function activityFirstRow(ctx: CheckContext): Promise<CheckOutcome> {
+async function activityRowChanges(ctx: CheckContext): Promise<CheckOutcome> {
   const { items } = await ctx.api.getJson<{ items: readonly ActivityItem[] }>("/api/v1/activity");
   const { agents } = await ctx.api.getJson<AgentList>("/api/v1/workspace");
   const page = new ActivityPage(ctx.session);
   await page.open();
-  const row = await page.firstRow();
-  const screenshot = await ctx.screenshot("activity-first-row");
-  const item = items[0];
-  if (!item || !row)
-    return verdict(false, { row, item, screenshot }, "no activity row or API item");
-  const actor = agents.find((agent) => agent.id === item.actor)?.display_name ?? item.actor;
-  const sameTime = row.createdAt === item.created_at.replace(/(\.\d{3})\d+/, "$1");
-  const ok = row.actorName === actor && sameTime && changesMatch(row, item);
+  const row = await page.firstChangedRow();
+  const screenshot = await ctx.screenshot("activity-row-changes");
+  if (!row)
+    return verdict([noData("no row on the first page shows a changed field")], { screenshot });
+  const item = items.find((entry) => toMillis(entry.created_at) === row.createdAt);
+  if (!item)
+    return verdict([checked(false, "no API item has the row's time")], { row, screenshot });
+  const expectedActor = agents.find((agent) => agent.id === item.actor)?.display_name ?? item.actor;
+  const changes = row.changes.map((change) => checkChange(change, item));
   return verdict(
-    ok,
-    { row, item, expectedActor: actor, expectedFields: changedFields(item), sameTime, screenshot },
-    "first activity row differs from the API",
+    [
+      checked(row.actorName === expectedActor, "the row's actor differs from the API item's"),
+      checked(
+        changes.every((change) => change.agrees),
+        "a shown change disagrees with the API item's before and after",
+      ),
+    ],
+    { row, item, expectedActor, changes, screenshot },
   );
 }
 
@@ -151,5 +133,5 @@ export const checks: readonly LiveCheck[] = [
   { id: "pages-load", requirement: "R1", run: pagesLoad },
   { id: "overview-open-prs", requirement: "R8", run: overviewOpenPrs },
   { id: "pull-requests-open-first", requirement: "R8", run: pullRequestsOpenFirst },
-  { id: "activity-first-row", requirement: "R2", run: activityFirstRow },
+  { id: "activity-row-changes", requirement: "F5", run: activityRowChanges },
 ];
