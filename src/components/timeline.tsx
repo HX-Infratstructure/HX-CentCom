@@ -126,6 +126,8 @@ export function TaskTimeline({ tasks }: { tasks: readonly TaskView[] }): ReactNo
                     <span
                       className="gantt-bar"
                       data-hue={GROUP_HUES[t.group]}
+                      data-cut-before={bar.before || undefined}
+                      data-cut-after={bar.after || undefined}
                       style={{ gridColumn: `${bar.from + 1} / ${bar.to + 2}` }}
                     >
                       <span

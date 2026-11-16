@@ -338,12 +338,16 @@ describe("the task timeline", () => {
       .map((day) => day.textContent);
   }
 
-  /** The bar's grid placement, or null when the row draws no bar. */
-  function barOf(title: string): string | null {
+  /** The bar of the row whose title is `title`, or null when the row draws no bar. */
+  function barElementOf(title: string): HTMLElement | null {
     const row = screen.getByRole("link", { name: title }).closest("li");
     if (row === null) throw new Error(`No timeline row for ${title}`);
-    const label = within(row).queryByText(/ proven$|^No requirements$/);
-    return label?.parentElement?.style.gridColumn ?? null;
+    return within(row).queryByText(/ proven$|^No requirements$/)?.parentElement ?? null;
+  }
+
+  /** The bar's grid placement, or null when the row draws no bar. */
+  function barOf(title: string): string | null {
+    return barElementOf(title)?.style.gridColumn ?? null;
   }
 
   /** The planned-dates line of the row whose title is `title`. */
@@ -457,6 +461,44 @@ describe("the task timeline", () => {
       if (row === null) throw new Error(`No timeline row for ${title}`);
       return within(row).queryByText(`Continues ${side} this window`) !== null;
     }
+
+    /** The sides on which the window cuts the bar of the row whose title is `title`. */
+    function cutSides(title: string): readonly ("before" | "after")[] {
+      const bar = barElementOf(title);
+      if (bar === null) throw new Error(`No bar for ${title}`);
+      return (["before", "after"] as const).filter((side) => bar.hasAttribute(`data-cut-${side}`));
+    }
+
+    it("a bar marks each side the window cuts", async () => {
+      onTheFifteenth();
+      await renderTasks("/tasks?view=timeline", [
+        task({
+          id: "IRP-70",
+          title: "Run the three-year migration",
+          start_date: "2026-01-05",
+          due_date: "2028-12-29",
+        }),
+        task({
+          id: "IRP-71",
+          title: "Wire the eval dashboard",
+          start_date: "2026-11-16",
+          due_date: "2026-11-20",
+        }),
+        task({
+          id: "IRP-75",
+          title: "Rotate the agent keys",
+          start_date: "2026-09-01",
+          due_date: "2026-12-31",
+        }),
+      ]);
+
+      // The window opens on Monday 12 Oct 2026, so the key rotation is cut only at its start.
+      expect(cutSides("Run the three-year migration")).toEqual(["before", "after"]);
+      expect(cutSides("Rotate the agent keys")).toEqual(["before"]);
+      expect(cutSides("Wire the eval dashboard")).toEqual([]);
+      expect(continues("Rotate the agent keys", "before")).toBe(true);
+      expect(continues("Rotate the agent keys", "after")).toBe(false);
+    });
 
     it("draws at most a year of days from the week 30 days before today and clips longer bars", async () => {
       onTheFifteenth();
