@@ -91,7 +91,7 @@ Agents and the owner send their Bearer keys over plain HTTP on the HX LAN, which
 
 ### Check the live pages after a deploy
 
-`verify.sh` checks the units and the API. `npm run live-check` checks the pages, so run it after `verify.sh`. It opens each of the seven pages in Chromium and compares what they show with `/api/v1`, and it measures text contrast against WCAG AA. The checks take their filter values from the API's facet counts, so they need no fixed test data. `scripts/live-check/checks/index.ts` lists every check.
+`verify.sh` checks the units and the API. `npm run live-check` checks the pages, so run it after `verify.sh`. It opens each of the seven pages in Chromium and compares what they show with `/api/v1`, and it measures text contrast against WCAG AA. The checks take their filter values from the API's data and never hard-code them, so they need no fixed test data. The values come from the facet counts, or, for the Tasks repository filter, from the workspace's task list. `scripts/live-check/checks/index.ts` lists every check.
 
 The checker only reads, so it is safe to run at any time. It lets only GET and HEAD requests through. It aborts any other request, records it in `live-check.json`, and exits with code 1.
 
