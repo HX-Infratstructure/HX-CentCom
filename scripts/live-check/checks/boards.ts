@@ -77,13 +77,17 @@ async function filterBoard(ctx: CheckContext, board: Board) {
   const url = await page.load({ [board.param]: value });
   // The filter is on the field the page groups by, so the filtered page shows one group, in the API's order.
   const filteredIds = filtered.items.map((item) => item.id);
-  const { matches, ...rows } = await shownApiPage(page, filtered, filteredIds);
+  const reread = () => list(ctx, board, { [board.param]: value });
+  const { comparison, ...rows } = await shownApiPage(page, filtered, filteredIds, reread);
   return {
     route: board.route,
-    part: checked(
-      matches,
-      `${board.route}: filtered row IDs or count differ from the filtered API`,
-    ),
+    part:
+      comparison === "moved"
+        ? movedDuringLoad(board.route)
+        : checked(
+            comparison === "matches",
+            `${board.route}: filtered row IDs or count differ from the filtered API`,
+          ),
     url,
     facetCount,
     ...rows,
@@ -177,14 +181,31 @@ function groupedApiOrder(items: ListPage["items"], register: Register) {
   return [...items].sort((a, b) => rank(a) - rank(b)).map((item) => item.id);
 }
 
-/** The loaded page shows the API page: its row count (the total when it is the only page) and its row IDs as `expectedIds`. */
-async function shownApiPage(page: BoardPage, apiPage: ListPage, expectedIds: readonly string[]) {
+function movedDuringLoad(route: string) {
+  return noData(`${route}: the API rows changed between the API read and the page load`);
+}
+
+/**
+ * Whether the loaded page shows the API page: its row count (the total when it is the only page) and its row IDs as
+ * `expectedIds`. A record written between the API read and the page load makes a correct page differ, so a mismatch
+ * reads the API again: a read that differs from the first means the rows moved, and only two agreeing reads can fail.
+ */
+async function shownApiPage(
+  page: BoardPage,
+  apiPage: ListPage,
+  expectedIds: readonly string[],
+  reread: () => Promise<ListPage>,
+) {
   const uiRows = await page.visibleRows();
   const shownIds = await page.rowIds();
   const expected = apiPage.nextCursor === null ? apiPage.counts.total : apiPage.items.length;
-  const matches =
-    uiRows === expected && uiRows === apiPage.items.length && sameOrder(shownIds, expectedIds);
-  return { matches, uiRows, expected, shownIds, expectedIds };
+  const rows = { uiRows, expected, shownIds, expectedIds };
+  if (uiRows === expected && uiRows === apiPage.items.length && sameOrder(shownIds, expectedIds))
+    return { comparison: "matches" as const, ...rows };
+  const again = await reread();
+  const ids = (read: ListPage) => read.items.map((item) => item.id);
+  const moved = again.counts.total !== apiPage.counts.total || !sameOrder(ids(again), ids(apiPage));
+  return { comparison: moved ? ("moved" as const) : ("differs" as const), ...rows };
 }
 
 /** The page shows the API's first page: the same row IDs in the grouped API order, and the first row opens its own sheet. */
@@ -192,16 +213,22 @@ async function registerRows(ctx: CheckContext, board: Register) {
   const first = await list(ctx, board);
   const page = new BoardPage(ctx.session, board.route);
   await page.load();
-  const { matches, ...rows } = await shownApiPage(page, first, groupedApiOrder(first.items, board));
+  const expectedIds = groupedApiOrder(first.items, board);
+  const { comparison, ...rows } = await shownApiPage(page, first, expectedIds, () =>
+    list(ctx, board),
+  );
   const lastColumn = (await page.columns()).at(-1) ?? "";
   const visit: SheetVisit | null = rows.uiRows > 0 ? await page.openRow(0, lastColumn) : null;
-  const ok = matches && visit !== null && sheetMatchesRow(visit);
+  const ok = comparison === "matches" && visit !== null && sheetMatchesRow(visit);
+  const empty = rows.expected === 0 && rows.uiRows === 0;
   return {
     route: board.route,
     part:
-      rows.expected > 0
-        ? checked(ok, `${board.route}: row IDs or the first row's sheet differ from the API`)
-        : noData(`${board.route}: the API has no rows`),
+      comparison === "moved"
+        ? movedDuringLoad(board.route)
+        : empty
+          ? noData(`${board.route}: the API has no rows`)
+          : checked(ok, `${board.route}: row IDs or the first row's sheet differ from the API`),
     ...rows,
     apiTotal: first.counts.total,
     visit,

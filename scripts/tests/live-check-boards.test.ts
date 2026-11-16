@@ -34,6 +34,8 @@ interface Site {
   firstTableColumns?: readonly string[];
   /** A selector the page lacks, so reading its text times out. */
   missing?: string;
+  /** A record written while `page` loads, after the check's first read of `api`, so a later read of `api` gets `answer`. */
+  writeOnLoad?: { readonly page: string; readonly api: string; readonly answer: ListPage };
 }
 
 function healthySite(): Site {
@@ -104,6 +106,8 @@ function fakeContext(site: Site): CheckContext {
     page,
     goto: async (path: string) => {
       current = path;
+      if (site.writeOnLoad?.page === path)
+        site.api.set(site.writeOnLoad.api, site.writeOnLoad.answer);
       return 200;
     },
   };
@@ -154,6 +158,20 @@ describe("board-filters", () => {
     assert.equal(outcome.status, "FAIL");
     assert.match(outcome.reason ?? "", /\/raid/);
   });
+
+  test("reports no data, naming the route, when a filtered row is written during the page load", async () => {
+    const site = healthySite();
+    const grown = rows("R", 1, 2, "type", "risk");
+    site.pages.set("/raid?type=risk", ["R-1", "R-2"]);
+    site.writeOnLoad = {
+      page: "/raid?type=risk",
+      api: "/api/v1/raid?type=risk",
+      answer: listPage(grown, { total: 2 }),
+    };
+    const outcome = await boardFilters.run(fakeContext(site));
+    assert.equal(outcome.status, "LIVE_NOT_EXECUTED", outcome.reason);
+    assert.match(outcome.reason ?? "", /\/raid: .*changed/);
+  });
 });
 
 const raidLessonsRows = checks.find((check) => check.id === "raid-lessons-rows");
@@ -184,6 +202,35 @@ describe("raid-lessons-rows", () => {
     const outcome = await raidLessonsRows.run(fakeContext(registerSite(["P-1", "R-1"])));
     assert.equal(outcome.status, "FAIL");
     assert.match(outcome.reason ?? "", /\/raid/);
+  });
+
+  test("reports no data, naming the route, when a row is written during the page load", async () => {
+    const site = registerSite(["R-2", "R-1", "P-1"]);
+    const grown = [...rows("R", 2, 1, "type", "risk"), ...rows("R", 1, 1, "type", "risk")];
+    site.writeOnLoad = {
+      page: "/raid",
+      api: "/api/v1/raid",
+      answer: listPage([...grown, ...rows("P", 1, 1, "type", "dependency")], { total: 3 }),
+    };
+    const outcome = await raidLessonsRows.run(fakeContext(site));
+    assert.equal(outcome.status, "LIVE_NOT_EXECUTED", outcome.reason);
+    assert.match(outcome.reason ?? "", /\/raid: .*changed/);
+  });
+
+  test("fails when the API has no rows but the page shows one", async () => {
+    const site = registerSite(["R-1"]);
+    site.api.set("/api/v1/raid", listPage([], { total: 0 }));
+    const outcome = await raidLessonsRows.run(fakeContext(site));
+    assert.equal(outcome.status, "FAIL", outcome.reason);
+    assert.match(outcome.reason ?? "", /\/raid/);
+  });
+
+  test("reports no data only when both the API and the page are empty", async () => {
+    const site = registerSite([]);
+    site.api.set("/api/v1/raid", listPage([], { total: 0 }));
+    const outcome = await raidLessonsRows.run(fakeContext(site));
+    assert.equal(outcome.status, "LIVE_NOT_EXECUTED", outcome.reason);
+    assert.match(outcome.reason ?? "", /\/raid: the API has no rows/);
   });
 });
 

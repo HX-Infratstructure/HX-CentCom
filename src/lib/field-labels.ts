@@ -98,9 +98,55 @@ const SHORT_TEXT = 40;
 export type ChangeValue = string | number | boolean | null;
 
 /** A missing key and an empty string both read as no value, so neither shows as a change from the other. */
-export function valueAt(snapshot: Readonly<Record<string, unknown>>, key: string): unknown {
+function valueAt(snapshot: Readonly<Record<string, unknown>>, key: string): unknown {
   const value = snapshot[key];
   return value === undefined || value === "" ? null : value;
+}
+
+/**
+ * Keys a write sets whatever it changed, or that point at its side effects. None of them says what changed. The
+ * timestamps are the write's own clock, which the row's time already shows. An `_at` field a caller sets, such as a
+ * RAID item's `review_at`, is not listed, so a new value shows as a change.
+ */
+const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
+  "id",
+  "version",
+  "created_by",
+  "updated_by",
+  "update_id",
+  "effects",
+  "reverts",
+  "created_at",
+  "updated_at",
+  "requested_at",
+  "decided_at",
+  "revoked_at",
+]);
+
+/** One field the Activity page shows as changed, with both sides as `valueAt` reads them. */
+export interface FieldChange {
+  readonly key: string;
+  readonly from: unknown;
+  readonly to: unknown;
+}
+
+/**
+ * The fields the Activity page shows as changed by one write. Only an update has both snapshots; a create has no
+ * before, so it shows no change. A bookkeeping key never shows, and neither does a key whose read values are equal.
+ */
+export function shownChanges(before: unknown, after: unknown): readonly FieldChange[] {
+  if (!isRecord(before) || !isRecord(after)) return [];
+  const keys = new Set([...Object.keys(after), ...Object.keys(before)]);
+  return [...keys].flatMap((key): FieldChange[] => {
+    const from = valueAt(before, key);
+    const to = valueAt(after, key);
+    if (BOOKKEEPING_KEYS.has(key) || JSON.stringify(from) === JSON.stringify(to)) return [];
+    return [{ key, from, to }];
+  });
+}
+
+export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null;
 }
 
 export function isShort(value: unknown): value is ChangeValue {

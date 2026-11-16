@@ -1,4 +1,9 @@
-import { isShort, valueAt, valueText } from "../../../src/lib/field-labels.ts";
+import {
+  isShort,
+  shownChanges,
+  valueText,
+  type FieldChange,
+} from "../../../src/lib/field-labels.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
 import { checked, noData, verdict } from "../verdict.ts";
 import { ActivityPage } from "./pages/activity-page.ts";
@@ -102,33 +107,31 @@ function toMillis(iso: string): string {
 /** What the page prints for a change, by the page's own rules. */
 function expectedChange(
   item: ActivityItem,
-  key: string,
+  { key, from, to }: FieldChange,
   statuses: ReadonlyMap<string, string>,
 ): { readonly from: string | null; readonly to: string } {
-  const before = valueAt(item.before ?? {}, key);
-  const after = valueAt(item.after ?? {}, key);
-  if (!isShort(before) || !isShort(after)) return { from: null, to: "edited" };
+  if (!isShort(from) || !isShort(to)) return { from: null, to: "edited" };
   const statusLabel = (id: string) => statuses.get(id) ?? id;
   return {
-    from: valueText(item.entity, key, before, statusLabel),
-    to: valueText(item.entity, key, after, statusLabel),
+    from: valueText(item.entity, key, from, statusLabel),
+    to: valueText(item.entity, key, to, statusLabel),
   };
 }
 
-/** The page labels a field by its key with spaces for underscores, and shows only a field whose value changed. */
+/**
+ * The page labels a field by its key with spaces for underscores, and shows only the fields `shownChanges` names,
+ * so a shown change for any other field disagrees.
+ */
 function checkChange(
   change: ActivityChange,
   item: ActivityItem,
   statuses: ReadonlyMap<string, string>,
 ) {
   const key = change.field.replace(/ /g, "_");
-  const before = item.before?.[key];
-  const after = item.after?.[key];
-  const inSnapshots = key in (item.before ?? {}) || key in (item.after ?? {});
-  const changed = JSON.stringify(before) !== JSON.stringify(after);
-  const expected = expectedChange(item, key, statuses);
-  const shownAgrees = change.from === expected.from && change.to === expected.to;
-  return { ...change, before, after, expected, agrees: inSnapshots && changed && shownAgrees };
+  const shown = shownChanges(item.before, item.after).find((entry) => entry.key === key) ?? null;
+  const expected = shown && expectedChange(item, shown, statuses);
+  const agrees = expected !== null && change.from === expected.from && change.to === expected.to;
+  return { ...change, shown, expected, agrees };
 }
 
 /** Compares the row with one API item: the actor's name and every shown change. */

@@ -88,8 +88,8 @@ const WORKSPACE = {
 };
 
 function activityContext(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
   change: { field: string; from: string | null; to: string | null },
   entity = "task",
 ): CheckContext {
@@ -140,6 +140,40 @@ describe("activity-row-changes", () => {
       { title: "Old title" },
       { title: "New title" },
       { field: "title", from: "Old title", to: "wrong-b" },
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "FAIL");
+  });
+
+  test("a shown none to none fails, because an empty or missing value is no change", async () => {
+    const cases = [
+      { before: { title: "" }, after: { title: null } },
+      { before: {}, after: { title: "" } },
+    ];
+    for (const { before, after } of cases) {
+      const ctx = activityContext(before, after, { field: "title", from: "none", to: "none" });
+      assert.equal(
+        (await run("activity-row-changes", ctx)).status,
+        "FAIL",
+        JSON.stringify({ before, after }),
+      );
+    }
+  });
+
+  test("a create row showing a change fails, because the page shows no change for a create", async () => {
+    const ctx = activityContext(
+      null,
+      { title: "New" },
+      { field: "title", from: "none", to: "New" },
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "FAIL");
+  });
+
+  test("an updated at field shown as a change fails, because the page never shows a bookkeeping key", async () => {
+    const [from, to] = ["2026-11-16T16:00:00Z", "2026-11-16T17:00:00Z"];
+    const ctx = activityContext(
+      { title: "Same", updated_at: from },
+      { title: "Same", updated_at: to },
+      { field: "updated at", from, to },
     );
     assert.equal((await run("activity-row-changes", ctx)).status, "FAIL");
   });

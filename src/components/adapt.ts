@@ -1,4 +1,4 @@
-import { isShort, valueAt, valueText } from "@/lib/field-labels";
+import { isRecord, isShort, shownChanges, valueText } from "@/lib/field-labels";
 import type * as S from "./server-types";
 import {
   PR_STATE_LABELS,
@@ -279,46 +279,17 @@ function activityView(entry: S.ActivityEntry, dir: Directory): ActivityView {
   };
 }
 
-/**
- * Keys a write sets whatever it changed, or that point at its side effects. None of them says what changed. The
- * timestamps are the write's own clock, which the row's time already shows. An `_at` field a caller sets, such as a
- * RAID item's `review_at`, is not listed, so a new value shows as a change.
- */
-const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
-  "id",
-  "version",
-  "created_by",
-  "updated_by",
-  "update_id",
-  "effects",
-  "reverts",
-  "created_at",
-  "updated_at",
-  "requested_at",
-  "decided_at",
-  "revoked_at",
-]);
-
-/** Only an update has both snapshots; a create has no before, so it shows no change. */
 function changesOf(entry: S.ActivityEntry, dir: Directory): readonly ActivityChange[] {
-  const { before, after } = entry;
-  if (!isRecord(before) || !isRecord(after)) return [];
-  const keys = new Set([...Object.keys(after), ...Object.keys(before)]);
   const statusLabel = (id: string) => statusRef(id, dir.statuses).label;
-  return [...keys].flatMap((key): ActivityChange[] => {
-    const from = valueAt(before, key);
-    const to = valueAt(after, key);
-    if (BOOKKEEPING_KEYS.has(key) || JSON.stringify(from) === JSON.stringify(to)) return [];
+  return shownChanges(entry.before, entry.after).map(({ key, from, to }): ActivityChange => {
     const field = key.replace(/_/g, " ");
-    if (!isShort(from) || !isShort(to)) return [{ kind: "edited", field }];
-    return [
-      {
-        kind: "value",
-        field,
-        from: valueText(entry.entity, key, from, statusLabel),
-        to: valueText(entry.entity, key, to, statusLabel),
-      },
-    ];
+    if (!isShort(from) || !isShort(to)) return { kind: "edited", field };
+    return {
+      kind: "value",
+      field,
+      from: valueText(entry.entity, key, from, statusLabel),
+      to: valueText(entry.entity, key, to, statusLabel),
+    };
   });
 }
 
@@ -469,10 +440,6 @@ function parseIssues(raw: unknown): readonly S.Issue[] {
     const { path, message } = issue;
     return typeof path === "string" && typeof message === "string" ? [{ path, message }] : [];
   });
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null;
 }
 
 function isUrl(value: string): boolean {
