@@ -1,8 +1,7 @@
-import { QueryClient, type QueryKey } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { act, render, screen } from "@testing-library/react";
+import type { QueryKey } from "@tanstack/react-query";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { routeTree } from "@/routeTree.gen";
+import { renderApp } from "@/test/render-app";
 import { workspaceWith } from "@/test/ui-fixtures";
 import type { Agent, Lesson, LessonsPage, RaidItem, RaidPage } from "./server-types";
 
@@ -94,20 +93,14 @@ const LESSONS_PAGE: LessonsPage = {
 };
 
 async function renderPage(url: string, page: string, list: readonly [QueryKey, unknown]) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+  await renderApp(url, {
+    heading: page,
+    seed: [
+      [["task-workspace"], WORKSPACE],
+      [list[0], { pages: [list[1]], pageParams: [undefined] }],
+    ],
+    onDocument: true,
   });
-  queryClient.setQueryData(["task-workspace"], WORKSPACE);
-  queryClient.setQueryData(list[0], { pages: [list[1]], pageParams: [undefined] });
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
-    history: createMemoryHistory({ initialEntries: [url] }),
-  });
-  await act(() => router.load());
-  // As in decision-sheet.test.tsx: the root route renders the whole document, and the open sheet is modal.
-  render(<RouterProvider router={router} />, { container: document as unknown as HTMLElement });
-  await screen.findByRole("heading", { level: 1, name: page, hidden: true });
 }
 
 afterEach(() => {
