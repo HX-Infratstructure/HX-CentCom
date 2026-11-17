@@ -65,6 +65,8 @@ import type {
   UpdateCounts,
   UpdatesPage,
   Workspace,
+  WorkspaceShell,
+  WorkspaceTaskCounts,
 } from "./types";
 
 const SNAPSHOT = { isolationLevel: "repeatable read", accessMode: "read only" } as const;
@@ -155,7 +157,7 @@ type Attention = NonNullable<Parsed<typeof updateQueryInput>["attention"]>;
 
 /**
  * An open task is blocked or not done. The one definition behind `Task.open`, the attention reasons, the workspace's
- * decisions and myWork's tasks.
+ * decisions and task counts, and myWork's tasks.
  */
 const isOpen = sql<boolean>`(${task.blocked_on} <> 'none' or ${task.group} <> 'done')`;
 
@@ -225,8 +227,33 @@ const WORKSPACE_DECISION_ORDER = [
   ownerDecisions.id,
 ];
 
+async function workspaceShell(tx: Tx): Promise<WorkspaceShell> {
+  const agentRows = await tx.select().from(agents).orderBy(agents.id);
+  const labels = await tx.select().from(statusLabels).orderBy(statusLabels.id);
+  const repos = await tx.select().from(githubRepos).orderBy(githubRepos.name);
+  const feed = await queryUpdates(tx, parse(updateQueryInput, {}));
+  const decisionCounts = await countDecisions(tx, parse(decisionQueryInput, {}));
+  return {
+    updates: feed.items,
+    updatesCursor: feed.nextCursor,
+    agents: agentRows,
+    statusLabels: labels,
+    repos,
+    counts: {
+      updates: feed.counts,
+      decisions: decisionCounts,
+      tasks: await countWorkspaceTasks(tx),
+    },
+  };
+}
+
+export async function listWorkspaceShell(db: Db): Promise<WorkspaceShell> {
+  return db.transaction(workspaceShell, SNAPSHOT);
+}
+
 export async function listWorkspace(db: Db): Promise<Workspace> {
   return db.transaction(async (tx) => {
+    const shell = await workspaceShell(tx);
     const { tasks, requirements } = await tasksWith(tx);
     const blocksOpenTask = exists(
       tx
@@ -239,22 +266,7 @@ export async function listWorkspace(db: Db): Promise<Workspace> {
       .from(ownerDecisions)
       .where(or(eq(ownerDecisions.status, "Pending"), blocksOpenTask))
       .orderBy(...WORKSPACE_DECISION_ORDER);
-    const agentRows = await tx.select().from(agents).orderBy(agents.id);
-    const labels = await tx.select().from(statusLabels).orderBy(statusLabels.id);
-    const repos = await tx.select().from(githubRepos).orderBy(githubRepos.name);
-    const feed = await queryUpdates(tx, parse(updateQueryInput, {}));
-    const decisionCounts = await countDecisions(tx, parse(decisionQueryInput, {}));
-    return {
-      tasks,
-      updates: feed.items,
-      updatesCursor: feed.nextCursor,
-      requirements,
-      decisions,
-      agents: agentRows,
-      statusLabels: labels,
-      repos,
-      counts: { updates: feed.counts, decisions: decisionCounts },
-    };
+    return { ...shell, tasks, requirements, decisions };
   }, SNAPSHOT);
 }
 
@@ -631,8 +643,25 @@ function taskFilters(query: TaskQuery, except?: TaskFacet): SQL[] {
   return filters.filter((f): f is SQL => f !== undefined);
 }
 
-const tasksAttending = (reason: Attention) =>
-  sql<number>`(count(*) filter (where ${attends(reason)}))::int`.mapWith(Number);
+const tasksWhere = (where: SQL) =>
+  sql<number>`(count(*) filter (where ${where}))::int`.mapWith(Number);
+const tasksAttending = (reason: Attention) => tasksWhere(attends(reason));
+
+async function countWorkspaceTasks(tx: Tx): Promise<WorkspaceTaskCounts> {
+  const [totals] = await tx
+    .select({
+      total: count,
+      open: tasksWhere(isOpen),
+      blocked: tasksAttending("blocked"),
+      owner: tasksAttending("owner"),
+    })
+    .from(task);
+  const byStatus = await tx.select({ key: task.status, n: count }).from(task).groupBy(task.status);
+  return {
+    ...(totals ?? { total: 0, open: 0, blocked: 0, owner: 0 }),
+    byStatus: Object.fromEntries(byStatus.map((r) => [r.key, r.n])),
+  };
+}
 
 async function countTasks(tx: Tx, query: TaskQuery): Promise<TaskCounts> {
   const [total] = await tx

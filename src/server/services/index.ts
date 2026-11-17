@@ -13,6 +13,7 @@ import {
   listTasks,
   listUpdates,
   listWorkspace,
+  listWorkspaceShell,
   myWork,
 } from "./reads";
 import {
@@ -60,6 +61,7 @@ export function createServices(db: Db, deps: Partial<ServiceDeps> = {}): Service
   return {
     resolveActor: (authHeader) => resolveActor(db, authHeader),
     listWorkspace: () => listWorkspace(db),
+    listWorkspaceShell: () => listWorkspaceShell(db),
     listUpdates: (query) => listUpdates(db, query),
     listActivity: (query) => listActivity(db, query),
     listDecisions: (query) => listDecisions(db, query),
