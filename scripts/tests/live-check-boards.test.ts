@@ -70,12 +70,10 @@ function fakeContext(site: Site): CheckContext {
   const element = (selector: string, cell = -1, ownTable = false): Record<string, unknown> => ({
     count: async () => (selector.includes("a[href]") ? Number(holdsLink(cell)) : shown().length),
     and: () => ({ count: async () => Number(cell === 0) }),
-    allTextContents: async () =>
-      selector.includes("thead")
-        ? ownTable
-          ? columns
-          : (site.firstTableColumns ?? columns)
-        : [...shown()],
+    allTextContents: async () => {
+      if (!selector.includes("thead")) return [...shown()];
+      return ownTable ? columns : (site.firstTableColumns ?? columns);
+    },
     first: () => element(selector, cell, ownTable),
     nth: (n: number) => element(selector, selector === "th, td" ? n : cell, ownTable),
     locator: (inner: string) =>

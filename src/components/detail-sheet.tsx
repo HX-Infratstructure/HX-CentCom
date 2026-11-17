@@ -42,8 +42,7 @@ export function DetailSheet<T extends { readonly id: string }>({
 }): ReactNode {
   const opener = useRef<HTMLElement | null>(null);
   const lastId = useRef<string | null>(null);
-  const id =
-    detail.state === "closed" ? null : detail.state === "ready" ? detail.item.id : detail.id;
+  const id = recordId(detail);
   useEffect(() => {
     if (id !== null) lastId.current = id;
   }, [id]);
@@ -121,4 +120,11 @@ export function DetailSheet<T extends { readonly id: string }>({
       </SheetPortal>
     </Dialog.Root>
   );
+}
+
+/** The id of the open record, known before it loads; null while the sheet is closed. */
+function recordId<T extends { readonly id: string }>(detail: Detail<T>): string | null {
+  if (detail.state === "closed") return null;
+  if (detail.state === "ready") return detail.item.id;
+  return detail.id;
 }
