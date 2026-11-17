@@ -1,17 +1,19 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith, workspaceWith } from "@/test/ui-fixtures";
 import type { Agent, Decision, DecisionsPage } from "./server-types";
 
 const server = vi.hoisted(() => ({
   listWorkspace: vi.fn(),
+  listWorkspaceShell: vi.fn(),
   listDecisions: vi.fn(),
   getDecision: vi.fn(),
 }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   listWorkspace: server.listWorkspace,
+  listWorkspaceShell: server.listWorkspaceShell,
   listDecisions: server.listDecisions,
   getDecision: server.getDecision,
 }));
@@ -23,12 +25,6 @@ const OWNER_KEY = "owner-key-for-this-test";
 const AGENTS: readonly Agent[] = [
   { id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true },
 ];
-
-const NO_DECISIONS: DecisionsPage = {
-  items: [],
-  nextCursor: null,
-  counts: { total: 0, byGateType: {}, byStatus: {} },
-};
 
 function decision(fields: Pick<Decision, "id" | "question"> & Partial<Decision>): Decision {
   return {
@@ -55,22 +51,46 @@ function decision(fields: Pick<Decision, "id" | "question"> & Partial<Decision>)
   };
 }
 
-const workspace = (decisions: readonly Decision[]) => workspaceWith({ decisions, agents: AGENTS });
+/** The decision reads answer from `register()`, read at each call, so a test changes what a refetch returns. */
+function serve(register: () => readonly Decision[]) {
+  server.listDecisions.mockImplementation(
+    async ({ data }: { data: { status?: string } }): Promise<DecisionsPage> => {
+      const items = register().filter((d) =>
+        data.status === undefined
+          ? true
+          : data.status === "not_pending"
+            ? d.status !== "Pending"
+            : d.status === data.status,
+      );
+      return {
+        items,
+        nextCursor: null,
+        counts: { total: items.length, byGateType: {}, byStatus: {} },
+      };
+    },
+  );
+  server.getDecision.mockImplementation(
+    async ({ data }: { data: { id: string } }) => register().find((d) => d.id === data.id) ?? null,
+  );
+}
 
 async function renderDecisions(url: string, { owner = false } = {}) {
   if (owner) window.sessionStorage.setItem("hx-centcom.owner-key", OWNER_KEY);
-  server.listDecisions.mockResolvedValue(NO_DECISIONS);
   await renderApp(url, { heading: "Decisions", onDocument: true, hidden: true });
 }
 
 beforeEach(() => {
-  server.getDecision.mockResolvedValue(null);
+  server.listWorkspaceShell.mockResolvedValue(shellWith({ agents: AGENTS }));
+  // Answers only if the page asks for the whole workspace, which it must not.
+  server.listWorkspace.mockResolvedValue(workspaceWith({ agents: AGENTS }));
+  serve(() => []);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
   server.listWorkspace.mockReset();
+  server.listWorkspaceShell.mockReset();
   server.listDecisions.mockReset();
   server.getDecision.mockReset();
 });
@@ -85,10 +105,19 @@ const DECIDED = decision({
   decided_at: "2026-11-13T15:30:00.123456+00:00",
 });
 
-describe("the decision sheet for a decision outside the workspace", () => {
-  it("opens a decided decision that blocks no open task by asking the register for it", async () => {
-    server.listWorkspace.mockResolvedValue(workspace([]));
-    server.getDecision.mockResolvedValue(DECIDED);
+describe("the decision sheet's lookup: loaded pages first, then by id", () => {
+  it("shows a decision on the loaded Pending page at once, while its by-id read is still pending", async () => {
+    serve(() => [decision({ id: "D-15", question: "Merge the paging PR?" })]);
+    server.getDecision.mockImplementation(() => new Promise(() => {}));
+    await renderDecisions("/decisions?item=D-15");
+
+    expect(await screen.findByRole("dialog", { name: "Merge the paging PR?" })).toBeInTheDocument();
+    expect(screen.queryByText(/^Loading .* D-15\.$/)).toBeNull();
+    expect(server.getDecision).toHaveBeenCalledWith({ data: { id: "D-15" } });
+  });
+
+  it("opens a decided decision on no loaded page by asking the register for it", async () => {
+    serve(() => [DECIDED]);
     await renderDecisions("/decisions?item=D-14");
 
     const outcome = await screen.findByRole("region", { name: "Owner decision" });
@@ -100,12 +129,19 @@ describe("the decision sheet for a decision outside the workspace", () => {
   });
 
   it("says the decision is not in the register when the register does not hold it either", async () => {
-    server.listWorkspace.mockResolvedValue(workspace([]));
-    server.getDecision.mockResolvedValue(null);
     await renderDecisions("/decisions?item=D-99");
 
     expect(await screen.findByText("D-99 is not in the decision register.")).toBeInTheDocument();
     expect(server.getDecision).toHaveBeenCalledWith({ data: { id: "D-99" } });
+  });
+
+  it("reads the agents from the bounded shell and never the whole workspace", async () => {
+    serve(() => [decision({ id: "D-15", question: "Merge the paging PR?" })]);
+    await renderDecisions("/decisions?item=D-15");
+
+    await screen.findByRole("dialog", { name: "Merge the paging PR?" });
+    expect(server.listWorkspaceShell).toHaveBeenCalled();
+    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 });
 
@@ -117,9 +153,7 @@ describe("the decision detail", () => {
       "puts the owner's revert in front of real data; holding keeps HX-7 on 1.1 until the screenshot passes.";
     const summary =
       "Deploy release 1.2 to HX-15 now, or hold it until the phone-width screenshot passes on the new navigation.";
-    server.listWorkspace.mockResolvedValue(
-      workspace([decision({ id: "D-15", question: "Deploy release 1.2?", summary, description })]),
-    );
+    serve(() => [decision({ id: "D-15", question: "Deploy release 1.2?", summary, description })]);
     await renderDecisions("/decisions?item=D-15");
 
     const section = await screen.findByRole("region", { name: "Description" });
@@ -133,21 +167,19 @@ describe("recording a decision through the owner actions", () => {
     const pending = decision({ id: "D-15", question: "Merge the shadow hook PR?", version: 3 });
     const words = "Merge after CI passes.";
     const source = `https://github.com/${REPO}/issues/10#issuecomment-6875070701`;
-    server.listWorkspace.mockResolvedValueOnce(workspace([pending])).mockResolvedValue(
-      workspace([
-        {
-          ...pending,
-          status: "Decided",
-          decision_text: words,
-          decision_source_url: source,
-          decided_at: "2026-11-14T09:00:00.123456+00:00",
-          version: 4,
-        },
-      ]),
-    );
-    const fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ decision: {} }), { status: 200 }),
-    );
+    let current = pending;
+    serve(() => [current]);
+    const fetchMock = vi.fn(async () => {
+      current = {
+        ...pending,
+        status: "Decided",
+        decision_text: words,
+        decision_source_url: source,
+        decided_at: "2026-11-14T09:00:00.123456+00:00",
+        version: 4,
+      };
+      return new Response(JSON.stringify({ decision: {} }), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
     await renderDecisions("/decisions?item=D-15", { owner: true });
 
@@ -171,15 +203,14 @@ describe("recording a decision through the owner actions", () => {
       sourceUrl: source,
     });
     expect(await screen.findByRole("region", { name: "Owner decision" })).toHaveTextContent(words);
+    // Decided, it leaves the Pending page, so the sheet reads it by id.
+    expect(server.getDecision).toHaveBeenCalledWith({ data: { id: "D-15" } });
   });
 
   it("keeps the version the owner opened as If-Match when a refetch moves the decision on, and says it changed", async () => {
     const opened = decision({ id: "D-16", question: "Merge the refresh PR?", version: 3 });
-    server.listWorkspace
-      .mockResolvedValueOnce(workspace([opened]))
-      .mockResolvedValue(
-        workspace([{ ...opened, summary: "An agent changed the gate.", version: 4 }]),
-      );
+    let current = opened;
+    serve(() => [current]);
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -201,6 +232,7 @@ describe("recording a decision through the owner actions", () => {
       target: { value: `https://github.com/${REPO}/issues/10#issuecomment-6875070702` },
     });
 
+    current = { ...opened, summary: "An agent changed the gate.", version: 4 };
     fireEvent.click(screen.getByRole("button", { name: "Refresh", hidden: true }));
 
     expect(
@@ -234,11 +266,8 @@ describe("recording a decision through the owner actions", () => {
 
   it("keeps the latest version out of reach while a submit is in flight, so its conflict can still be adopted", async () => {
     const opened = decision({ id: "D-17", question: "Merge the adopt fix?", version: 3 });
-    server.listWorkspace
-      .mockResolvedValueOnce(workspace([opened]))
-      .mockResolvedValue(
-        workspace([{ ...opened, summary: "An agent changed the gate.", version: 4 }]),
-      );
+    let current = opened;
+    serve(() => [current]);
     let answer: (response: Response) => void = () => {};
     const fetchMock = vi.fn(
       () =>
@@ -258,6 +287,7 @@ describe("recording a decision through the owner actions", () => {
     });
     expect(screen.getByRole("button", { name: "Recording" })).toBeDisabled();
 
+    current = { ...opened, summary: "An agent changed the gate.", version: 4 };
     fireEvent.click(screen.getByRole("button", { name: "Refresh", hidden: true }));
     const adopt = await screen.findByRole("button", { name: "Use the latest version" });
     expect(adopt).toBeDisabled();
