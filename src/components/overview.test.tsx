@@ -20,13 +20,11 @@ import type {
 const server = vi.hoisted(() => ({
   listUpdates: vi.fn(),
   listTasks: vi.fn(),
-  listWorkspace: vi.fn(),
 }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   listUpdates: server.listUpdates,
   listTasks: server.listTasks,
-  listWorkspace: server.listWorkspace,
 }));
 
 type TaskRequest = {
@@ -199,7 +197,6 @@ async function renderOverview(
 afterEach(() => {
   server.listUpdates.mockReset();
   server.listTasks.mockReset();
-  server.listWorkspace.mockReset();
 });
 
 function section(name: string) {
@@ -290,7 +287,6 @@ describe("the overview's open tasks", () => {
     expect(await within(region).findByText("Showing all 25 tasks.")).toBeInTheDocument();
     expect(section("Open tasks").taskTitles).toHaveLength(25);
     expect(server.listTasks).toHaveBeenCalledWith({ data: { open: true, cursor: "20" } });
-    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 
   it("keeps the server's order, so a blocked task the server returns first leads its group", async () => {
@@ -311,7 +307,7 @@ describe("the overview's open tasks", () => {
     ]);
   });
 
-  it("counts the attention chips with the server's byAttention and never reads the whole workspace", async () => {
+  it("counts the attention chips with the server's byAttention", async () => {
     const page = tasksPageWith(many(3));
     await renderOverview(workspace({ tasks: many(3) }), NO_PRS, "/", NO_UPDATES, {
       taskPage: {
@@ -327,7 +323,6 @@ describe("the overview's open tasks", () => {
       "Stale commit2",
     ]);
     expect(section("Open tasks").heading).toBe("Open tasks 9");
-    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 });
 

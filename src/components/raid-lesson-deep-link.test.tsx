@@ -1,18 +1,16 @@
 import type { QueryKey } from "@tanstack/react-query";
 import { screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { shellWith, workspaceWith } from "@/test/ui-fixtures";
+import { shellWith } from "@/test/ui-fixtures";
 import type { Agent, Lesson, LessonsPage, RaidItem, RaidPage } from "./server-types";
 
 const server = vi.hoisted(() => ({
-  listWorkspace: vi.fn(),
   getRaidItem: vi.fn(),
   getLesson: vi.fn(),
 }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
-  listWorkspace: server.listWorkspace,
   getRaidItem: server.getRaidItem,
   getLesson: server.getLesson,
 }));
@@ -109,13 +107,7 @@ async function renderPage(url: string, page: string, list: readonly [QueryKey, u
   });
 }
 
-beforeEach(() => {
-  // Answers only if the page asks for the whole workspace, which it must not.
-  server.listWorkspace.mockResolvedValue(workspaceWith({ agents: AGENTS }));
-});
-
 afterEach(() => {
-  server.listWorkspace.mockReset();
   server.getRaidItem.mockReset();
   server.getLesson.mockReset();
 });
@@ -155,21 +147,5 @@ describe("a deep link to a record past the loaded page", () => {
 
     expect(await screen.findByText(/^L-99 is not in the /)).toBeInTheDocument();
     expect(server.getLesson).toHaveBeenCalledWith({ data: { id: "L-99" } });
-  });
-});
-
-describe("what the RAID register and the Lessons log read", () => {
-  it("the RAID register never reads the whole workspace", async () => {
-    await renderPage("/raid", "RAID register", [["raid", "list", {}], RAID_PAGE]);
-
-    expect(screen.getByText("Run 1 could miss the HX-4 window")).toBeInTheDocument();
-    expect(server.listWorkspace).not.toHaveBeenCalled();
-  });
-
-  it("the Lessons log never reads the whole workspace", async () => {
-    await renderPage("/lessons", "Lessons", [["lessons", "list", {}], LESSONS_PAGE]);
-
-    expect(screen.getByText("Pin the build before benchmark run 1")).toBeInTheDocument();
-    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 });

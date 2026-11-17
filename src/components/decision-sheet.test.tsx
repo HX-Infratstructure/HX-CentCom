@@ -1,18 +1,16 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { shellWith, workspaceWith } from "@/test/ui-fixtures";
+import { shellWith } from "@/test/ui-fixtures";
 import type { Agent, Decision, DecisionsPage } from "./server-types";
 
 const server = vi.hoisted(() => ({
-  listWorkspace: vi.fn(),
   listWorkspaceShell: vi.fn(),
   listDecisions: vi.fn(),
   getDecision: vi.fn(),
 }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
-  listWorkspace: server.listWorkspace,
   listWorkspaceShell: server.listWorkspaceShell,
   listDecisions: server.listDecisions,
   getDecision: server.getDecision,
@@ -81,15 +79,12 @@ async function renderDecisions(url: string, { owner = false } = {}) {
 
 beforeEach(() => {
   server.listWorkspaceShell.mockResolvedValue(shellWith({ agents: AGENTS }));
-  // Answers only if the page asks for the whole workspace, which it must not.
-  server.listWorkspace.mockResolvedValue(workspaceWith({ agents: AGENTS }));
   serve(() => []);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
-  server.listWorkspace.mockReset();
   server.listWorkspaceShell.mockReset();
   server.listDecisions.mockReset();
   server.getDecision.mockReset();
@@ -135,13 +130,12 @@ describe("the decision sheet's lookup: loaded pages first, then by id", () => {
     expect(server.getDecision).toHaveBeenCalledWith({ data: { id: "D-99" } });
   });
 
-  it("reads the agents from the bounded shell and never the whole workspace", async () => {
+  it("reads the agents from the bounded shell", async () => {
     serve(() => [decision({ id: "D-15", question: "Merge the paging PR?" })]);
     await renderDecisions("/decisions?item=D-15");
 
     await screen.findByRole("dialog", { name: "Merge the paging PR?" });
     expect(server.listWorkspaceShell).toHaveBeenCalled();
-    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 });
 

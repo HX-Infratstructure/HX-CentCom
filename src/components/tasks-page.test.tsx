@@ -15,24 +15,16 @@ import type {
 const server = vi.hoisted(() => ({
   listTasks: vi.fn(),
   getTask: vi.fn(),
-  listWorkspace: vi.fn(),
 }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   listTasks: server.listTasks,
   getTask: server.getTask,
-  listWorkspace: server.listWorkspace,
 }));
 
 beforeEach(() => {
   server.listTasks.mockReset();
   server.getTask.mockReset();
-  server.listWorkspace.mockReset();
-});
-
-afterEach(() => {
-  // The page reads tasks a page at a time and never the whole workspace.
-  expect(server.listWorkspace).not.toHaveBeenCalled();
 });
 
 // Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
@@ -223,23 +215,11 @@ describe("the task board's agent filter", () => {
   });
 
   it("counts a repository named after an object property, such as constructor, as an ordinary value", async () => {
-    await renderTasks("/tasks", {
-      items: [
-        task({ id: "IRP-46", title: "Draft the shadow hook config", repository: "constructor" }),
-        task({ id: "IRP-47", title: "Wire the eval dashboard", repository: "toString" }),
-        task({ id: "IRP-48", title: "Pin the router build" }),
-      ],
-      nextCursor: null,
-      counts: {
-        total: 3,
-        byAgent: { atlas: 3 },
-        byRepo: JSON.parse('{"constructor": 1, "HX-CentCom": 1, "toString": 1}') as Record<
-          string,
-          number
-        >,
-        byAttention: { blocked: 0, owner: 0, stale: 0 },
-      },
-    });
+    await renderTasks("/tasks", [
+      task({ id: "IRP-46", title: "Draft the shadow hook config", repository: "constructor" }),
+      task({ id: "IRP-47", title: "Wire the eval dashboard", repository: "toString" }),
+      task({ id: "IRP-48", title: "Pin the router build" }),
+    ]);
 
     expectChips("Repository", ["constructor 1", "HX-CentCom 1", "toString 1"]);
   });

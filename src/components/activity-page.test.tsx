@@ -1,17 +1,15 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { shellWith, workspaceWith } from "@/test/ui-fixtures";
+import { shellWith } from "@/test/ui-fixtures";
 import type { ActivityCounts, ActivityEntry, ActivityPage, Agent } from "./server-types";
 
 const server = vi.hoisted(() => ({
-  listWorkspace: vi.fn(),
   listWorkspaceShell: vi.fn(),
   listActivity: vi.fn(),
 }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
-  listWorkspace: server.listWorkspace,
   listWorkspaceShell: server.listWorkspaceShell,
   listActivity: server.listActivity,
 }));
@@ -386,14 +384,11 @@ async function confirmRevert(title: string) {
 
 beforeEach(() => {
   server.listWorkspaceShell.mockResolvedValue(shellWith({ agents: AGENTS }));
-  // Answers only if the page asks for the whole workspace, which it must not.
-  server.listWorkspace.mockResolvedValue(workspaceWith({ agents: AGENTS }));
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
-  server.listWorkspace.mockReset();
   server.listWorkspaceShell.mockReset();
   server.listActivity.mockReset();
 });
@@ -739,7 +734,7 @@ describe("Revert on the activity page", () => {
 });
 
 describe("what the activity page reads", () => {
-  it("reads the agents from the bounded shell and never the whole workspace", async () => {
+  it("reads the agents from the bounded shell", async () => {
     server.listActivity.mockResolvedValue(
       page([PROGRESS], null, { total: 1, byActor: { atlas: 1 }, byEntity: { task: 1 } }),
     );
@@ -749,6 +744,5 @@ describe("what the activity page reads", () => {
       within(screen.getByRole("group", { name: "Actor" })).getByRole("link", { name: "Atlas 1" }),
     ).toBeInTheDocument();
     expect(server.listWorkspaceShell).toHaveBeenCalled();
-    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 });

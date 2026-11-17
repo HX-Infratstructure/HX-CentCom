@@ -9,9 +9,9 @@ import type {
 } from "@/components/server-types";
 
 function tally(keys: readonly (string | null)[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const key of keys) if (key !== null) counts[key] = (counts[key] ?? 0) + 1;
-  return counts;
+  const counts = new Map<string, number>();
+  for (const key of keys) if (key !== null) counts.set(key, (counts.get(key) ?? 0) + 1);
+  return Object.fromEntries(counts);
 }
 
 const attending = (tasks: readonly Task[], reason: Task["attention"][number]) =>
@@ -80,7 +80,7 @@ export function tasksPageWith(
   return { items, nextCursor, counts };
 }
 
-/** The whole snapshot that REST and MCP still serve, for tests that mock listWorkspace. */
+/** The whole snapshot that REST and MCP still serve. The overview tests build the shell and task reads from it. */
 export function workspaceWith(fields: Partial<Omit<Workspace, "counts">>): Workspace {
   const decisions = fields.decisions ?? [];
   const tasks = fields.tasks ?? [];
