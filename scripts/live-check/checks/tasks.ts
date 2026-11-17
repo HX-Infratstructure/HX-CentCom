@@ -48,6 +48,11 @@ async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   });
 }
 
+/** The IDs in code-unit order, so two lists compare as sets whatever order the page shows them in. */
+function sortedIds(records: readonly { readonly id: string }[]): string[] {
+  return records.map((record) => record.id).sort();
+}
+
 function repoCounts(byRepo: Facet): [string, number][] {
   // The API stores an omitted repository as "" (docs/API.md), and "" is no repository to filter by.
   return Object.entries(byRepo).filter(([repo]) => repo !== "");
@@ -60,16 +65,16 @@ async function filterNarrows(ctx: CheckContext): Promise<CheckOutcome> {
   const [repo, total] = pick;
   const page = new TasksPage(ctx.session);
   await page.open({ repo });
-  const rows = await page.rowCount();
+  const shown = sortedIds(await page.rows());
   const reread = await ctx.api.getJson<TaskList>(`/api/v1/tasks?${new URLSearchParams({ repo })}`);
   const settled = reread.counts.total;
-  const expected = reread.items.length;
+  const expected = sortedIds(reread.items);
   const screenshot = await ctx.screenshot("tasks-filter");
   const part =
     settled === total
-      ? checked(rows === expected, "filtered rows differ from the API count")
+      ? checked(sameOrder(shown, expected), "filtered task IDs differ from the API's first page")
       : noData(`the ${repo} task count moved from ${total} to ${settled} during the check`);
-  return verdict([part], { repo, total, settled, expected, rows, screenshot });
+  return verdict([part], { repo, total, settled, expected, shown, screenshot });
 }
 
 async function updatesShowMore(ctx: CheckContext): Promise<CheckOutcome> {
@@ -93,14 +98,8 @@ async function staleBadge(ctx: CheckContext): Promise<CheckOutcome> {
   await page.open();
   const rows = await page.rows();
   const screenshot = await ctx.screenshot("stale-badge");
-  const expected = items
-    .filter((task) => task.attention.includes("stale"))
-    .map((task) => task.id)
-    .sort();
-  const shown = rows
-    .filter((row) => row.stale)
-    .map((row) => row.id)
-    .sort();
+  const expected = sortedIds(items.filter((task) => task.attention.includes("stale")));
+  const shown = sortedIds(rows.filter((row) => row.stale));
   return verdict([checked(sameOrder(shown, expected), "Stale commit badges differ from the API")], {
     expected,
     shown,

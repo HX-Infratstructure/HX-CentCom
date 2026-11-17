@@ -46,81 +46,6 @@ function taskApi(tasks: readonly TaskItem[], path: string): unknown {
   return list;
 }
 
-/** Each API read answers from the next snapshot of tasks; the page renders `rows` table rows. */
-function fakeContext(snapshots: Record<string, number>[], rows: number): CheckContext {
-  const reads = [...snapshots];
-  const session = {
-    goto: async () => 200,
-    page: { locator: () => ({ count: async () => rows }) },
-  };
-  const api = {
-    getJson: async (path: string) => {
-      const next = reads.shift();
-      assert.ok(next, "the check read the API more often than the test expected");
-      return taskApi(tasksFor(next), path);
-    },
-  };
-  return {
-    session,
-    api,
-    screenshot: async (name: string) => name,
-  } as unknown as CheckContext;
-}
-
-const filterCheck = checks.find((check) => check.id === "tasks-filter");
-assert.ok(filterCheck, "tasks-filter is exported");
-
-describe("tasks-filter", () => {
-  test("a task count that moves between the API and page reads gives no data, not FAIL", async () => {
-    const outcome = await filterCheck.run(
-      fakeContext(
-        [
-          { alpha: 1, beta: 3 },
-          { alpha: 2, beta: 3 },
-        ],
-        2,
-      ),
-    );
-    assert.equal(outcome.status, "LIVE_NOT_EXECUTED");
-    assert.equal(outcome.reason, "the alpha task count moved from 1 to 2 during the check");
-  });
-
-  test("rows that differ while both API reads agree still FAIL", async () => {
-    const counts = { alpha: 1, beta: 3 };
-    const outcome = await filterCheck.run(fakeContext([counts, counts], 4));
-    assert.equal(outcome.status, "FAIL");
-    assert.equal(outcome.reason, "filtered rows differ from the API count");
-  });
-
-  test("rows that match a stable API count PASS", async () => {
-    const counts = { alpha: 1, beta: 3 };
-    const outcome = await filterCheck.run(fakeContext([counts, counts], 1));
-    assert.equal(outcome.status, "PASS");
-  });
-
-  test("with more tasks than one page, the page shows the first page of the filtered list", async () => {
-    const counts = { alpha: 25, beta: 30 };
-    const firstPage = await filterCheck.run(fakeContext([counts, counts], PAGE_SIZE));
-    assert.equal(firstPage.status, "PASS", firstPage.reason);
-    const everyTask = await filterCheck.run(fakeContext([counts, counts], 25));
-    assert.equal(everyTask.status, "FAIL");
-  });
-
-  test("a count that moves with more tasks than one page still gives no data", async () => {
-    const outcome = await filterCheck.run(
-      fakeContext(
-        [
-          { alpha: 25, beta: 30 },
-          { alpha: 26, beta: 30 },
-        ],
-        PAGE_SIZE,
-      ),
-    );
-    assert.equal(outcome.status, "LIVE_NOT_EXECUTED");
-    assert.equal(outcome.reason, "the alpha task count moved from 25 to 26 during the check");
-  });
-});
-
 interface DomWindow {
   readonly document: Document;
 }
@@ -150,6 +75,92 @@ function domContext(answer: (path: string) => unknown, html: string): CheckConte
   };
   return { session, api, screenshot: async (name: string) => name } as unknown as CheckContext;
 }
+
+/** The Tasks board table, one row per task, each showing the task's ID. */
+function boardTable(tasks: readonly TaskItem[]): string {
+  return `<table class="board-table"><tbody>${tasks
+    .map((task) => `<tr><td><code class="record-id">${task.id}</code></td></tr>`)
+    .join("")}</tbody></table>`;
+}
+
+/** Each API read answers from the next snapshot of tasks; the page's board table shows `shown`. */
+function fakeContext(
+  snapshots: Record<string, number>[],
+  shown: readonly TaskItem[],
+): CheckContext {
+  const reads = [...snapshots];
+  const answer = (path: string) => {
+    const next = reads.shift();
+    assert.ok(next, "the check read the API more often than the test expected");
+    return taskApi(tasksFor(next), path);
+  };
+  return domContext(answer, boardTable(shown));
+}
+
+const filterCheck = checks.find((check) => check.id === "tasks-filter");
+assert.ok(filterCheck, "tasks-filter is exported");
+
+describe("tasks-filter", () => {
+  const firstAlphaPage = tasksFor({ alpha: 25 }).slice(0, PAGE_SIZE);
+
+  test("a task count that moves between the API and page reads gives no data, not FAIL", async () => {
+    const outcome = await filterCheck.run(
+      fakeContext(
+        [
+          { alpha: 1, beta: 3 },
+          { alpha: 2, beta: 3 },
+        ],
+        tasksFor({ alpha: 2 }),
+      ),
+    );
+    assert.equal(outcome.status, "LIVE_NOT_EXECUTED");
+    assert.equal(outcome.reason, "the alpha task count moved from 1 to 2 during the check");
+  });
+
+  test("a page that ignores the filter while both API reads agree still FAILs", async () => {
+    const counts = { alpha: 1, beta: 3 };
+    const outcome = await filterCheck.run(fakeContext([counts, counts], tasksFor(counts)));
+    assert.equal(outcome.status, "FAIL");
+    assert.equal(outcome.reason, "filtered task IDs differ from the API's first page");
+  });
+
+  test("the filtered tasks on a stable API PASS", async () => {
+    const counts = { alpha: 1, beta: 3 };
+    const outcome = await filterCheck.run(fakeContext([counts, counts], tasksFor({ alpha: 1 })));
+    assert.equal(outcome.status, "PASS", outcome.reason);
+  });
+
+  test("with more tasks than one page, the page shows the first page of the filtered list", async () => {
+    const counts = { alpha: 25, beta: 30 };
+    const firstPage = await filterCheck.run(fakeContext([counts, counts], firstAlphaPage));
+    assert.equal(firstPage.status, "PASS", firstPage.reason);
+    const everyTask = await filterCheck.run(fakeContext([counts, counts], tasksFor({ alpha: 25 })));
+    assert.equal(everyTask.status, "FAIL");
+  });
+
+  test("a full page of another repository's tasks FAILs, though its row count matches", async () => {
+    const counts = { alpha: 25, beta: 30 };
+    const betaPage = tasksFor({ beta: 30 }).slice(0, PAGE_SIZE);
+    const outcome = await filterCheck.run(fakeContext([counts, counts], betaPage));
+    assert.equal(outcome.status, "FAIL");
+    assert.deepEqual(outcome.evidence["shown"], betaPage.map((task) => task.id).sort());
+    assert.deepEqual(outcome.evidence["expected"], firstAlphaPage.map((task) => task.id).sort());
+  });
+
+  test("a count that moves with more tasks than one page still gives no data", async () => {
+    const outcome = await filterCheck.run(
+      fakeContext(
+        [
+          { alpha: 25, beta: 30 },
+          { alpha: 26, beta: 30 },
+        ],
+        firstAlphaPage,
+      ),
+    );
+    assert.equal(outcome.status, "LIVE_NOT_EXECUTED");
+    assert.equal(outcome.reason, "the alpha task count moved from 25 to 26 during the check");
+  });
+});
 
 function checkById(id: string) {
   const check = checks.find((candidate) => candidate.id === id);
@@ -188,10 +199,7 @@ describe("stale-badge", () => {
   test("a stale task beyond the first page is not expected on the page", async () => {
     const firstPage = tasksFor({ r: PAGE_SIZE });
     const beyond: TaskItem = { id: "LATE-1", repository: "r", stale: true, attention: ["stale"] };
-    const html = `<table class="board-table"><tbody>${firstPage
-      .map((task) => `<tr><td><code class="record-id">${task.id}</code></td></tr>`)
-      .join("")}</tbody></table>`;
-    const ctx = domContext((path) => taskApi([...firstPage, beyond], path), html);
+    const ctx = domContext((path) => taskApi([...firstPage, beyond], path), boardTable(firstPage));
     const outcome = await checkById("stale-badge").run(ctx);
     assert.equal(outcome.status, "PASS", outcome.reason);
   });
