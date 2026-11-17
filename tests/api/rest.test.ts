@@ -5,6 +5,7 @@ import { Route as decisions } from "@/routes/api/v1/decisions";
 import { Route as decide } from "@/routes/api/v1/decisions/$id/decide";
 import { Route as keys } from "@/routes/api/v1/keys";
 import { Route as key } from "@/routes/api/v1/keys/$id";
+import { Route as tasks } from "@/routes/api/v1/tasks";
 import { Route as task } from "@/routes/api/v1/tasks/$id";
 import { Route as requirements } from "@/routes/api/v1/tasks/$id/requirements";
 import { Route as postUpdate } from "@/routes/api/v1/tasks/$id/updates";
@@ -525,6 +526,61 @@ describe("GET /api/v1/tasks/:id", () => {
     const res = await api.rest(task, "GET", "/api/v1/tasks/NOPE-1", { params: { id: "NOPE-1" } });
     expect(res.status).toBe(404);
     expect((await errorOf(res)).code).toBe("not_found");
+  });
+});
+
+describe("GET /api/v1/tasks", () => {
+  type TasksPage = { items: Json[]; nextCursor: string | null; counts: Json };
+
+  async function tasksPage(query: string): Promise<TasksPage> {
+    const res = await api.rest(tasks, "GET", `/api/v1/tasks?${query}`);
+    expect(res.status, `GET /api/v1/tasks?${query} is 200`).toBe(200);
+    return (await res.json()) as TasksPage;
+  }
+
+  it("is public and returns items, nextCursor and counts", async () => {
+    const res = await api.rest(tasks, "GET", "/api/v1/tasks");
+    expect(res.status, "no key needed").toBe(200);
+    const body = (await res.json()) as Json;
+    expect(Object.keys(body).sort()).toEqual(["counts", "items", "nextCursor"]);
+    expect((body["items"] as Json[]).length).toBeGreaterThan(0);
+  });
+
+  it("pages open tasks one at a time with the cursor", async () => {
+    const first = await tasksPage("open=true&limit=1");
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]?.["open"]).toBe(true);
+    expect(first.nextCursor, "a second open task exists").not.toBeNull();
+
+    const second = await tasksPage(
+      `open=true&limit=1&cursor=${encodeURIComponent(first.nextCursor ?? "")}`,
+    );
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]?.["open"]).toBe(true);
+    expect(second.items[0]?.["id"], "the next task, not the first again").not.toBe(
+      first.items[0]?.["id"],
+    );
+  });
+
+  it.each([
+    ["open=yes", "open"],
+    ["limit=101", "limit"],
+  ])("is 400 invalid for ?%s", async (query, path) => {
+    const res = await api.rest(tasks, "GET", `/api/v1/tasks?${query}`);
+    expect(res.status).toBe(400);
+    const error = await errorOf(res);
+    expect(error.code).toBe("invalid");
+    expect(error.issues?.map((i) => i.path)).toContain(path);
+  });
+
+  it("still creates a task with POST", async () => {
+    const res = await api.rest(tasks, "POST", "/api/v1/tasks", {
+      authorization: cc1,
+      body: { id: "CC-91", title: "Paged task list", sourceUrl: SOURCE_URL },
+    });
+    expect(res.status, "POST /api/v1/tasks is 201").toBe(201);
+    const { task: created } = (await res.json()) as { task: Json };
+    expect(created).toMatchObject({ id: "CC-91", agent: "CC1" });
   });
 });
 

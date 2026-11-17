@@ -4,6 +4,7 @@ import { Route as decisions } from "@/routes/api/v1/decisions";
 import { Route as decide } from "@/routes/api/v1/decisions/$id/decide";
 import { Route as keys } from "@/routes/api/v1/keys";
 import { Route as key } from "@/routes/api/v1/keys/$id";
+import { Route as tasks } from "@/routes/api/v1/tasks";
 import { Route as task } from "@/routes/api/v1/tasks/$id";
 import { Route as requirements } from "@/routes/api/v1/tasks/$id/requirements";
 import { Route as postUpdate } from "@/routes/api/v1/tasks/$id/updates";
@@ -68,6 +69,7 @@ const PUBLIC_READS: readonly Call[] = [
     path: "/api/v1/tasks/CC-01",
     params: { id: "CC-01" },
   },
+  { name: "GET /api/v1/tasks", route: tasks, method: "GET", path: "/api/v1/tasks" },
   { name: "GET /api/v1/updates", route: updates, method: "GET", path: "/api/v1/updates" },
   { name: "GET /api/v1/activity", route: activity, method: "GET", path: "/api/v1/activity" },
   { name: "GET /api/v1/decisions", route: decisions, method: "GET", path: "/api/v1/decisions" },
