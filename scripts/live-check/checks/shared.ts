@@ -1,6 +1,6 @@
 /** Response shapes of the `/api/v1` endpoints the checks read, and the helpers every check module shares. */
 
-import type { ActivityEntity } from "../../../src/components/server-types.ts";
+import type { ActivityEntity, Task } from "../../../src/components/server-types.ts";
 
 export const PAGE_ROUTES = {
   home: "/",
@@ -22,7 +22,8 @@ export interface ListPage {
   readonly counts: { readonly total: number; readonly [facet: string]: Facet | number };
 }
 
-type Attention = "blocked" | "owner" | "stale";
+/** The server's needs-attention reasons, from its task row, so a new reason cannot leave this out of date. */
+type Attention = Task["attention"][number];
 
 export interface TaskItem {
   readonly id: string;
