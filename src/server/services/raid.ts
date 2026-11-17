@@ -17,7 +17,13 @@ import {
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Db, Tx } from "@/server/db/client";
-import { agents, engineeringTasks, ownerDecisions, type Json } from "@/server/db/schema";
+import {
+  agents,
+  engineeringTasks,
+  ownerDecisions,
+  type BlockedOn,
+  type Json,
+} from "@/server/db/schema";
 import {
   BLOCKING_REF_PATTERN,
   formatRaidId,
@@ -612,7 +618,7 @@ async function releaseTask(
 /** What a release did to its task: unblocked it, found it not blocked, or left it blocked by `open` or `blockedOn`. */
 function releaseOutcome(
   taskId: string,
-  blockedOn: string,
+  blockedOn: BlockedOn,
   unblocked: boolean,
   open: readonly string[],
 ): string {
