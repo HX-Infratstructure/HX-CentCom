@@ -23,6 +23,7 @@ import type {
   PostProgressInput,
   RequestDecisionInput,
   SetRequirementInput,
+  TaskQueryInput,
   UpdateQueryInput,
 } from "./inputs";
 
@@ -89,6 +90,17 @@ export type DecisionCounts = {
   readonly byStatus: Readonly<Partial<Record<DecisionStatus, number>>>;
 };
 
+/**
+ * Task facet counts, under the same rule as UpdateCounts; `open` applies to every count. `byAttention` counts each
+ * reason's tasks, which are open by that reason's rule.
+ */
+export type TaskCounts = {
+  readonly total: number;
+  readonly byAgent: Readonly<Record<string, number>>;
+  readonly byRepo: Readonly<Record<string, number>>;
+  readonly byAttention: Readonly<Record<Task["attention"][number], number>>;
+};
+
 /** Activity facet counts, under the same rule as UpdateCounts; `entityId` and `since` apply to every count. */
 export type ActivityCounts = {
   readonly total: number;
@@ -100,6 +112,8 @@ export type ActivityCounts = {
 export type Page<T> = { readonly items: readonly T[]; readonly nextCursor: string | null };
 export type UpdatesPage = Page<TaskUpdate> & { readonly counts: UpdateCounts };
 export type ActivityPage = Page<ActivityEntry> & { readonly counts: ActivityCounts };
+/** Blocked first, then the earliest start date, a task with none last, then id. */
+export type TasksPage = Page<Task> & { readonly counts: TaskCounts };
 /**
  * Pending first, then the latest request; a decision with no recorded request time sorts last. A status filter that
  * admits no Pending decision lists the newest decision first instead, with a cursor the default order refuses.
@@ -210,6 +224,7 @@ export interface Services {
   listUpdates(query?: UpdateQueryInput): Promise<UpdatesPage>;
   listActivity(query?: ActivityQueryInput): Promise<ActivityPage>;
   listDecisions(query?: DecisionQueryInput): Promise<DecisionsPage>;
+  listTasks(query?: TaskQueryInput): Promise<TasksPage>;
   /** One decision, whatever its status; 404 for an unknown id. */
   getDecision(decisionId: string): Promise<Decision>;
   /** 404 for an unknown task. */

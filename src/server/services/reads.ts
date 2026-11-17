@@ -43,6 +43,7 @@ import {
   decisionQueryInput,
   isoMicros,
   parse,
+  taskQueryInput,
   updateQueryInput,
   type Parsed,
 } from "./inputs";
@@ -58,7 +59,9 @@ import type {
   Progress,
   Requirement,
   Task,
+  TaskCounts,
   TaskDetail,
+  TasksPage,
   UpdateCounts,
   UpdatesPage,
   Workspace,
@@ -72,19 +75,27 @@ const decisionId = z.string().min(1).max(100);
 const decisionCursor = z.tuple([z.boolean(), instantOrNone, decisionId]);
 /** The literal tag keeps a history cursor from parsing as a default one, and the other way round. */
 const historyCursor = z.tuple([z.literal("decided"), instantOrNone, decisionId]);
+/** Unblocked, the start date (`infinity` for none) and the id; the tag sets it apart from the other cursors. */
+const taskCursor = z.tuple([
+  z.literal("task"),
+  z.boolean(),
+  z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal("infinity")]),
+  decisionId,
+]);
 
 type FeedKey = z.output<typeof feedCursor>;
 type DecisionKey = z.output<typeof decisionCursor>;
 type HistoryKey = z.output<typeof historyCursor>;
+type TaskKey = z.output<typeof taskCursor>;
+type CursorKey = FeedKey | DecisionKey | HistoryKey | TaskKey;
 
-function encodeCursor(key: FeedKey | DecisionKey | HistoryKey): string {
+function encodeCursor(key: CursorKey): string {
   return Buffer.from(JSON.stringify(key), "utf8").toString("base64url");
 }
 
-function decodeCursor<S extends typeof feedCursor | typeof decisionCursor | typeof historyCursor>(
-  shape: S,
-  cursor: string,
-): z.output<S> {
+function decodeCursor<
+  S extends typeof feedCursor | typeof decisionCursor | typeof historyCursor | typeof taskCursor,
+>(shape: S, cursor: string): z.output<S> {
   const malformed = () =>
     ServiceError.invalid("The cursor is malformed.", [
       { path: "cursor", message: "not a cursor from this API" },
@@ -170,20 +181,36 @@ const attention = sql<Attention[]>`array_remove(array[${sql.join(
   sql`, `,
 )}], null)`;
 
-/** The tasks that `where` selects, in board order, with their requirements and computed fields. */
+type TaskOrder = readonly (SQL | AnyPgColumn)[];
+
+/** The earliest start date first, a task with none last, then id. */
+const BOARD_ORDER: TaskOrder = [sql`${task.start_date} asc nulls last`, task.id];
+
+/**
+ * The first `limit` tasks that `where` selects, in `orderBy` (board order by default), with their requirements and
+ * computed fields.
+ */
 async function tasksWith(
   tx: Tx,
   where?: SQL,
+  { orderBy = BOARD_ORDER, limit }: { readonly orderBy?: TaskOrder; readonly limit?: number } = {},
 ): Promise<{ readonly tasks: Task[]; readonly requirements: Requirement[] }> {
-  const rows = await tx
+  const selected = tx
     .select({ ...getTableColumns(task), open: isOpen, stale, attention })
     .from(task)
     .where(where)
-    .orderBy(sql`${task.start_date} asc nulls last`, task.id);
+    .orderBy(...orderBy)
+    .$dynamic();
+  const rows = await (limit === undefined ? selected : selected.limit(limit));
   const requirements = await tx
     .select()
     .from(taskRequirements)
-    .where(inArray(taskRequirements.task_id, tx.select({ id: task.id }).from(task).where(where)))
+    .where(
+      inArray(
+        taskRequirements.task_id,
+        rows.map((t) => t.id),
+      ),
+    )
     .orderBy(taskRequirements.task_id, taskRequirements.created_at, taskRequirements.id);
   const progress = computeProgress(requirements);
   return {
@@ -350,7 +377,7 @@ const feedKey = (row: { readonly created_at: string; readonly id: string }): Fee
 async function page<T>(
   query: { limit(n: number): PromiseLike<T[]> },
   limit: number,
-  key: (row: T) => FeedKey | DecisionKey | HistoryKey,
+  key: (row: T) => CursorKey,
 ): Promise<Page<T>> {
   const rows = await query.limit(limit + 1);
   const items = rows.slice(0, limit);
@@ -569,5 +596,87 @@ export async function listDecisions(db: Db, raw: unknown): Promise<DecisionsPage
       (row) => order.key(row),
     );
     return { ...decisions, counts: await countDecisions(tx, query) };
+  }, SNAPSHOT);
+}
+
+const unblocked = sql<boolean>`(${task.blocked_on} = 'none')`;
+const startOrLast = sql<string>`coalesce(${task.start_date}, 'infinity'::date)`;
+
+/** Blocked first, then board order; the cursor compares the same expressions as one row value. */
+const TASK_ORDER = {
+  orderBy: [unblocked, startOrLast, task.id],
+  after(cursor: string | undefined): SQL | undefined {
+    if (cursor === undefined) return undefined;
+    const [, isUnblocked, start, id] = decodeCursor(taskCursor, cursor);
+    return sql`(${unblocked}, ${startOrLast}, ${task.id}) > (${isUnblocked}::boolean, ${start}::date, ${id}::text)`;
+  },
+  key: (row: Task): TaskKey => [
+    "task",
+    row.blocked_on === "none",
+    row.start_date ?? "infinity",
+    row.id,
+  ],
+} as const;
+
+type TaskFacet = "agent" | "repo" | "attention";
+type TaskQuery = Parsed<typeof taskQueryInput>;
+
+function taskFilters(query: TaskQuery, except?: TaskFacet): SQL[] {
+  const filters: (SQL | undefined)[] = [
+    except !== "agent" && query.agentId !== undefined ? eq(task.agent, query.agentId) : undefined,
+    except !== "repo" && query.repo !== undefined ? eq(task.repository, query.repo) : undefined,
+    except !== "attention" && query.attention !== undefined ? attends(query.attention) : undefined,
+    query.open === undefined ? undefined : query.open ? isOpen : sql`not ${isOpen}`,
+  ];
+  return filters.filter((f): f is SQL => f !== undefined);
+}
+
+const tasksAttending = (reason: Attention) =>
+  sql<number>`(count(*) filter (where ${attends(reason)}))::int`.mapWith(Number);
+
+async function countTasks(tx: Tx, query: TaskQuery): Promise<TaskCounts> {
+  const [total] = await tx
+    .select({ n: count })
+    .from(task)
+    .where(and(...taskFilters(query)));
+  const byAgent = await tx
+    .select({ key: task.agent, n: count })
+    .from(task)
+    .where(and(...taskFilters(query, "agent")))
+    .groupBy(task.agent);
+  const byRepo = await tx
+    .select({ key: task.repository, n: count })
+    .from(task)
+    .where(and(...taskFilters(query, "repo")))
+    .groupBy(task.repository);
+  const [byAttention] = await tx
+    .select({
+      blocked: tasksAttending("blocked"),
+      owner: tasksAttending("owner"),
+      stale: tasksAttending("stale"),
+    })
+    .from(task)
+    .where(and(...taskFilters(query, "attention")));
+  return {
+    total: total?.n ?? 0,
+    byAgent: Object.fromEntries(byAgent.flatMap((r) => (r.key === null ? [] : [[r.key, r.n]]))),
+    byRepo: Object.fromEntries(byRepo.map((r) => [r.key, r.n])),
+    byAttention: byAttention ?? { blocked: 0, owner: 0, stale: 0 },
+  };
+}
+
+export async function listTasks(db: Db, raw: unknown): Promise<TasksPage> {
+  const query = parse(taskQueryInput, raw);
+  return db.transaction(async (tx) => {
+    const where = and(...taskFilters(query), TASK_ORDER.after(query.cursor));
+    const tasks = await page(
+      {
+        limit: async (n) =>
+          (await tasksWith(tx, where, { orderBy: TASK_ORDER.orderBy, limit: n })).tasks,
+      },
+      query.limit,
+      TASK_ORDER.key,
+    );
+    return { ...tasks, counts: await countTasks(tx, query) };
   }, SNAPSHOT);
 }

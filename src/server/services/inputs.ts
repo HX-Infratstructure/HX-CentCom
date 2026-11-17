@@ -257,6 +257,21 @@ export const updateQueryInput = z
   })
   .default({});
 
+export const taskQueryInput = z
+  .object({
+    agentId: id.optional(),
+    repo: id.optional(),
+    /** The open tasks that need attention for this reason, under the rule of `Task.attention`. */
+    attention: z.enum(["blocked", "owner", "stale"]).optional(),
+    /** A query string carries `true` or `false`; no other string is a boolean. */
+    open: z
+      .union([z.boolean(), z.enum(["true", "false"]).transform((v) => v === "true")])
+      .optional(),
+    limit,
+    cursor: cursor.optional(),
+  })
+  .default({});
+
 export const activityQueryInput = z
   .object({
     actor: id.optional(),
@@ -284,6 +299,7 @@ export type RequestDecisionInput = z.input<typeof requestDecisionInput>;
 export type DecideInput = z.input<typeof decideInput>;
 export type CreateTaskInput = z.input<typeof createTaskInput>;
 export type UpdateQueryInput = z.input<typeof updateQueryInput>;
+export type TaskQueryInput = z.input<typeof taskQueryInput>;
 export type ActivityQueryInput = z.input<typeof activityQueryInput>;
 export type DecisionQueryInput = z.input<typeof decisionQueryInput>;
 
