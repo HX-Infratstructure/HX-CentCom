@@ -167,6 +167,7 @@ async function activityRowChanges(ctx: CheckContext): Promise<CheckOutcome> {
     return verdict([checked(false, "the page shows neither an activity row nor its empty state")], {
       screenshot,
     });
+  if (rows.length === 0) return verdict([noData("the activity log is empty")], { screenshot });
   const row = rows.find((entry) => entry.changes.length > 0);
   if (!row)
     return verdict([noData("no row on the first page shows a changed field")], { screenshot });

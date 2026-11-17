@@ -1,7 +1,7 @@
 import { LESSON_STATUS_LABELS, RAID_TYPE_LABELS } from "../../../src/lib/field-labels.ts";
 import { richTextPlainText } from "../../../src/lib/rich-text.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
-import { checked, noData, verdict } from "../verdict.ts";
+import { checked, noData, verdict, type Part } from "../verdict.ts";
 import { BoardPage, sheetMatchesRow, type SheetVisit } from "./pages/board-page.ts";
 import { PAGE_ROUTES, pickNarrowingValue, sameOrder, type ListPage } from "./shared.ts";
 
@@ -81,13 +81,14 @@ async function filterBoard(ctx: CheckContext, board: Board) {
   const { comparison, ...rows } = await shownApiPage(page, filtered, filteredIds, reread);
   return {
     route: board.route,
-    part:
-      comparison === "moved"
-        ? movedDuringLoad(board.route)
-        : checked(
-            comparison === "matches",
-            `${board.route}: filtered row IDs or count differ from the filtered API`,
-          ),
+    part: loadVerdict(
+      board.route,
+      comparison,
+      checked(
+        comparison === "matches",
+        `${board.route}: filtered row IDs or count differ from the filtered API`,
+      ),
+    ),
     url,
     facetCount,
     ...rows,
@@ -181,8 +182,14 @@ function groupedApiOrder(items: ListPage["items"], register: Register) {
   return [...items].sort((a, b) => rank(a) - rank(b)).map((item) => item.id);
 }
 
-function movedDuringLoad(route: string) {
-  return noData(`${route}: the API rows changed between the API read and the page load`);
+/** How a loaded page compares with the API page: it matches, the API rows moved during the load, or it differs. */
+type LoadComparison = "matches" | "moved" | "differs";
+
+/** No data when the API rows moved during the load, since the page could not be compared; otherwise `compared`. */
+function loadVerdict(route: string, comparison: LoadComparison, compared: Part): Part {
+  return comparison === "moved"
+    ? noData(`${route}: the API rows changed between the API read and the page load`)
+    : compared;
 }
 
 /**
@@ -205,7 +212,8 @@ async function shownApiPage(
   const again = await reread();
   const ids = (read: ListPage) => read.items.map((item) => item.id);
   const moved = again.counts.total !== apiPage.counts.total || !sameOrder(ids(again), ids(apiPage));
-  return { comparison: moved ? ("moved" as const) : ("differs" as const), ...rows };
+  const comparison: LoadComparison = moved ? "moved" : "differs";
+  return { comparison, ...rows };
 }
 
 /** The page shows the API's first page: the same row IDs in the grouped API order, and the first row opens its own sheet. */
@@ -221,14 +229,12 @@ async function registerRows(ctx: CheckContext, board: Register) {
   const visit: SheetVisit | null = rows.uiRows > 0 ? await page.openRow(0, lastColumn) : null;
   const ok = comparison === "matches" && visit !== null && sheetMatchesRow(visit);
   const empty = rows.expected === 0 && rows.uiRows === 0;
+  const compared = empty
+    ? noData(`${board.route}: the API has no rows`)
+    : checked(ok, `${board.route}: row IDs or the first row's sheet differ from the API`);
   return {
     route: board.route,
-    part:
-      comparison === "moved"
-        ? movedDuringLoad(board.route)
-        : empty
-          ? noData(`${board.route}: the API has no rows`)
-          : checked(ok, `${board.route}: row IDs or the first row's sheet differ from the API`),
+    part: loadVerdict(board.route, comparison, compared),
     ...rows,
     apiTotal: first.counts.total,
     visit,

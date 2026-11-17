@@ -92,37 +92,39 @@ function writeRecord(
   return blocked.length;
 }
 
-async function runChecks({ args, session }: Run, deps: ResolvedDeps): Promise<0 | 1> {
-  const recorder = new CheckRecorder(args.out, deps.clock);
+async function runChecks(
+  { args, session }: Run,
+  recorder: CheckRecorder,
+  deps: ResolvedDeps,
+): Promise<readonly string[]> {
   const ctx: CheckContext = {
     session,
     api: new LiveApi(args.base, deps.fetch),
     screenshot: screenshotter(session, args.out),
   };
-  let trailingConsoleErrors: readonly string[];
   try {
     for (const check of deps.checks) {
       const result = await recorder.run(check, ctx);
       console.log(`${result.status} ${check.id}${result.reason ? ` (${result.reason})` : ""}`);
     }
-    trailingConsoleErrors = session.takeConsoleErrors();
+    return session.takeConsoleErrors();
   } catch (error) {
+    const trailingConsoleErrors =
+      (await alsoTry("reading the console errors", () => session.takeConsoleErrors())) ?? [];
     await alsoTry("writing live-check.json", () =>
-      writeRecord(recorder, session, { base: args.base, trailingConsoleErrors: [] }),
+      writeRecord(recorder, session, { base: args.base, trailingConsoleErrors }),
     );
     throw error;
   }
-  return recorder.exitCode(
-    writeRecord(recorder, session, { base: args.base, trailingConsoleErrors }),
-  );
 }
 
-/** Runs a cleanup step while an earlier error propagates: its own failure is logged, never thrown. */
-async function alsoTry(step: string, cleanup: () => unknown): Promise<void> {
+/** Runs a step while an earlier error propagates: its own failure is logged, never thrown. */
+async function alsoTry<T>(step: string, action: () => T): Promise<Awaited<T> | undefined> {
   try {
-    await cleanup();
+    return await action();
   } catch (error) {
     console.error(`live-check: ${step} also failed:`, error);
+    return undefined;
   }
 }
 
@@ -132,8 +134,8 @@ function setupError(error: unknown): 2 {
   return 2;
 }
 
-function crashed(error: unknown): 2 {
-  console.error("live-check: the run stopped after setup:", error);
+function crashed(step: string, error: unknown): 2 {
+  console.error(`live-check: ${step} failed:`, error);
   return 2;
 }
 
@@ -145,17 +147,24 @@ export async function main(argv: readonly string[], deps: CliDeps = {}): Promise
   } catch (error) {
     return setupError(error);
   }
+  const { args, session } = run;
+  const recorder = new CheckRecorder(args.out, resolved.clock);
+  let step = "running the checks";
   let code: 0 | 1;
   try {
-    code = await runChecks(run, resolved);
+    const trailingConsoleErrors = await runChecks(run, recorder, resolved);
+    step = "writing live-check.json";
+    code = recorder.exitCode(
+      writeRecord(recorder, session, { base: args.base, trailingConsoleErrors }),
+    );
   } catch (error) {
-    await alsoTry("closing the browser", () => run.session.close());
-    return crashed(error);
+    await alsoTry("closing the browser", () => session.close());
+    return crashed(step, error);
   }
   try {
-    await run.session.close();
+    await session.close();
   } catch (error) {
-    return crashed(error);
+    return crashed("closing the browser", error);
   }
   return code;
 }

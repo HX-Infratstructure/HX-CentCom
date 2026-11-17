@@ -5,7 +5,7 @@ export type Rgba = readonly [number, number, number, number];
 
 const WHITE: Rgba = [255, 255, 255, 1];
 const CLEAR: Rgba = [0, 0, 0, 0];
-const SAMPLE_LIMIT = 400;
+export const SAMPLE_LIMIT = 400;
 
 export interface ContrastPair {
   readonly selector: string;

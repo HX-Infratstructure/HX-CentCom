@@ -412,6 +412,18 @@ describe("activity-row-changes", () => {
   });
 });
 
+describe("activity-row-changes on an empty log", () => {
+  test("names the empty log as its reason, apart from rows that show no changed field", async () => {
+    const api = { "/api/v1/activity": { items: [] }, "/api/v1/workspace": WORKSPACE };
+    const empty = await run("activity-row-changes", fakeContext(api, []));
+    assert.equal(empty.reason, "the activity log is empty");
+    const unchanged = [{ actorName: "CC1", createdAt: CREATED, changes: [] }];
+    const noChange = await run("activity-row-changes", fakeContext(api, unchanged));
+    assert.equal(noChange.status, "LIVE_NOT_EXECUTED");
+    assert.notEqual(noChange.reason, empty.reason);
+  });
+});
+
 /** Each route answers 200 with the chrome's h1; `failing` renders the route's error state, as RouteError does. */
 function pagesContext(failing: string | null): CheckContext {
   let path = "";

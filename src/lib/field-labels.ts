@@ -145,8 +145,9 @@ export function shownChanges(before: unknown, after: unknown): readonly FieldCha
   });
 }
 
+/** Whether `value` is a keyed object. An array is not one, so an array snapshot shows no index-keyed changes. */
 export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function isShort(value: unknown): value is ChangeValue {

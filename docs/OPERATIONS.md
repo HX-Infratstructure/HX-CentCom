@@ -109,7 +109,7 @@ npm run live-check -- --base <url> --out <folder>
 
 The checker writes `<folder>/live-check.json`. Its top level holds `writtenAt`, `base`, `summary`, `blockedRequests`, and `trailingConsoleErrors`. `base` is the `--base` URL that the run checked. Each entry in `results` holds a check's status, evidence, UTC time, `consoleErrors`, and `lateConsoleErrors`. Each check ends PASS, FAIL, or LIVE_NOT_EXECUTED. LIVE_NOT_EXECUTED means that the live data gave the check nothing to test.
 
-A console error logged while a check runs turns its PASS into FAIL. `lateConsoleErrors` holds the errors logged after the previous check returned and before this one started. `trailingConsoleErrors` holds the errors logged after the last check returned. Neither list changes a status or the exit code.
+A console error logged while a check runs turns its PASS into FAIL. `lateConsoleErrors` holds the errors logged after the previous check returned and before this one started. `trailingConsoleErrors` holds the errors logged after the last check returned. After a crash, it holds the errors logged since the last completed check. Neither list changes a status or the exit code.
 
 The screenshots go in the same folder, and the evidence of each check names the ones it took. The contrast check takes one per page it visits: `contrast-tasks.png`, `contrast-decisions.png`, and `contrast-home.png`.
 
@@ -117,7 +117,7 @@ The exit code tells the result:
 
 - `0`: no check failed, and the checker blocked no request. LIVE_NOT_EXECUTED checks do not change the exit code.
 - `1`: a check failed, or the checker blocked a request. Nothing else exits with code 1.
-- `2`: a usage or setup error, such as a missing argument or a browser that does not start, or a run that stopped after setup. A crash stops the run, and so does a failure to write `live-check.json` or to close the browser, even when every check passed. After a crash, `live-check.json` still holds the checks that finished, if the checker could write it. When the write fails, stderr names the write error with its stack, and the folder holds no complete record of this run.
+- `2`: a usage or setup error, such as a missing argument or a browser that does not start, or a run that stopped after setup. A crash stops the run, and so does a failure to write `live-check.json` or to close the browser, even when every check passed. On stderr, the checker names the step that failed, as `live-check: <step> failed:` with the error and its stack. The step is `running the checks`, `writing live-check.json`, or `closing the browser`. After a crash, `live-check.json` still holds the checks that finished, if the checker could write it. When the write fails, the folder holds no complete record of this run.
 
 ### Deploy a later commit
 

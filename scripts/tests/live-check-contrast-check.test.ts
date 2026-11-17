@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { checks, displayRatio } from "../live-check/checks/contrast-check.ts";
+import { SAMPLE_LIMIT } from "../live-check/contrast.ts";
 import type { CheckContext, CheckOutcome } from "../live-check/types.ts";
 
 const WHITE = { bg: [255, 255, 255, 1], opacity: 1 };
@@ -79,8 +80,14 @@ describe("contrast check", () => {
     const unmeasured = firstPage(await run(404, [BLACK_TEXT], 1));
     assert.deepEqual(Object.keys(unmeasured).sort(), Object.keys(measured).sort());
     assert.deepEqual(
-      [unmeasured["checked"], unmeasured["sampled"], unmeasured["failing"], unmeasured["lowest"]],
-      [0, 0, [], null],
+      [
+        unmeasured["checked"],
+        unmeasured["sampled"],
+        unmeasured["failing"],
+        unmeasured["lowest"],
+        unmeasured["limit"],
+      ],
+      [0, 0, [], null, SAMPLE_LIMIT],
     );
   });
 

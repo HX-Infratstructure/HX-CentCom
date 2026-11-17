@@ -1,5 +1,6 @@
 import type { ReadOnlySession } from "../../session.ts";
 import { PAGE_ROUTES } from "../shared.ts";
+import { ACTIVITY_ROWS, LIST_EMPTY } from "./selectors.ts";
 
 export interface ActivityChange {
   readonly field: string;
@@ -30,9 +31,9 @@ export class ActivityPage {
    * structure is not what this checker reads.
    */
   rows(): Promise<ActivityRow[] | null> {
-    return this.#session.page.evaluate(() => {
-      const rows = [...document.querySelectorAll("ul.activity-log > li article.activity-row")].map(
-        (row) => ({
+    return this.#session.page.evaluate(
+      ({ activityRows, listEmpty }) => {
+        const rows = [...document.querySelectorAll(activityRows)].map((row) => ({
           actorName:
             row.querySelector(".activity-head .agent-person-name")?.textContent?.trim() ?? "",
           createdAt: row.querySelector(".activity-side time")?.getAttribute("datetime") ?? null,
@@ -41,10 +42,11 @@ export class ActivityPage {
             from: li.querySelector(".change-from")?.textContent?.trim() ?? null,
             to: li.querySelector(".change-to")?.textContent?.trim() ?? null,
           })),
-        }),
-      );
-      if (rows.length > 0) return rows;
-      return document.querySelector(".list-empty") ? [] : null;
-    });
+        }));
+        if (rows.length > 0) return rows;
+        return document.querySelector(listEmpty) ? [] : null;
+      },
+      { activityRows: ACTIVITY_ROWS, listEmpty: LIST_EMPTY },
+    );
   }
 }

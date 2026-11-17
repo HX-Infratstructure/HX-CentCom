@@ -1,4 +1,9 @@
-import { sampleContrast, type ContrastPair, type ContrastSample } from "../contrast.ts";
+import {
+  SAMPLE_LIMIT,
+  sampleContrast,
+  type ContrastPair,
+  type ContrastSample,
+} from "../contrast.ts";
 import type { CheckContext, CheckOutcome, LiveCheck } from "../types.ts";
 import { checked, noData, verdict, type Part } from "../verdict.ts";
 import { PAGE_ROUTES, type PageName } from "./shared.ts";
@@ -55,8 +60,15 @@ function contrastPart(
   return noData(`${route}: no text element was found`);
 }
 
-// A route that does not answer 200 is not measured. Its record keeps a measured route's keys, empty.
-const UNMEASURED: ContrastSample = { pairs: [], skipped: 0, sampled: 0, found: 0, limit: 0 };
+// A route that does not answer 200 is not measured. Its record keeps a measured route's keys, empty,
+// and the sampler's cap, which is configuration rather than a measurement.
+const UNMEASURED: ContrastSample = {
+  pairs: [],
+  skipped: 0,
+  sampled: 0,
+  found: 0,
+  limit: SAMPLE_LIMIT,
+};
 
 async function contrastOn(ctx: CheckContext, name: PageName) {
   const route = PAGE_ROUTES[name];

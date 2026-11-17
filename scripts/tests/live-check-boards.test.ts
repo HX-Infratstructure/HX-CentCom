@@ -65,9 +65,11 @@ function fakeContext(site: Site): CheckContext {
   const shown = () => site.pages.get(current) ?? [];
   const at = () => (item === null ? current : `${current}?item=${item}`);
   const columns = ["ID", "Summary", ...(site.controlColumn ? [site.controlColumn] : [])];
+  // Column 0 is the row's header cell, which holds the row's own link, as every board row does.
+  const holdsLink = (cell: number) => cell === 0 || columns[cell] === site.controlColumn;
   const element = (selector: string, cell = -1, ownTable = false): Record<string, unknown> => ({
-    count: async () =>
-      selector.includes("a[href]") ? Number(columns[cell] === site.controlColumn) : shown().length,
+    count: async () => (selector.includes("a[href]") ? Number(holdsLink(cell)) : shown().length),
+    and: () => ({ count: async () => Number(cell === 0) }),
     allTextContents: async () =>
       selector.includes("thead")
         ? ownTable
@@ -324,6 +326,15 @@ describe("BoardPage.openRow", () => {
       /\/decisions column "Blocks" holds its own control/,
     );
     assert.equal(new URL(ctx.session.page.url()).searchParams.has("item"), false);
+  });
+
+  test("opens the row from its header column, whose cell holds the row's own link", async () => {
+    const ctx = fakeContext({ ...decisionSite(DESCRIPTION, RENDERED), controlColumn: "Blocks" });
+    const page = new BoardPage(ctx.session, "/decisions");
+    await page.load();
+    const visit = await page.openRow(0, "ID");
+    assert.equal(visit.itemParam, visit.rowId);
+    assert.equal(new URL(visit.urlClosed).searchParams.has("item"), false);
   });
 
   test("fails naming the sheet's record ID when that element is missing, not as an empty ID", async () => {

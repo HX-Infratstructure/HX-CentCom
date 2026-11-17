@@ -367,7 +367,7 @@ describe("main after setup", () => {
           fakeDeps(session, [passing, crashAfterSecondCheck(session)]),
         );
         assert.equal(code, 2);
-        assert.match(stderr.text(), /page crashed/);
+        assert.match(stderr.text(), /running the checks failed: Error: page crashed/);
         assert.match(stderr.text(), STACK_LINE);
       } finally {
         stderr.restore();
@@ -419,6 +419,56 @@ describe("main after setup", () => {
     });
   });
 
+  test("keeps the console errors logged before a crash in trailingConsoleErrors", async () => {
+    await inTempDir(async (out) => {
+      const session = fakeSession();
+      let pending: string[] = [];
+      let crashNext = false;
+      session.takeConsoleErrors = () => {
+        if (crashNext) {
+          crashNext = false;
+          throw new Error("page crashed");
+        }
+        const errors = pending;
+        pending = [];
+        return errors;
+      };
+      const crashing = fakeCheck("crashing", async () => {
+        pending.push("Uncaught Error: before the crash");
+        crashNext = true;
+        return { status: "PASS", evidence: {} };
+      });
+      const stderr = captureStderr();
+      try {
+        const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [crashing]));
+        assert.equal(code, 2);
+        assert.match(stderr.text(), /page crashed/);
+        const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+        assert.deepEqual(written.trailingConsoleErrors, ["Uncaught Error: before the crash"]);
+      } finally {
+        stderr.restore();
+      }
+    });
+  });
+
+  test("a passing run whose browser cannot close exits 2 and names that step", async () => {
+    await inTempDir(async (out) => {
+      const session = fakeSession();
+      session.close = async () => {
+        throw new Error("close failed");
+      };
+      const stderr = captureStderr();
+      try {
+        const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [passing]));
+        assert.equal(code, 2);
+        assert.match(stderr.text(), /closing the browser failed: Error: close failed/);
+        assert.doesNotMatch(stderr.text(), /after setup/);
+      } finally {
+        stderr.restore();
+      }
+    });
+  });
+
   test("a passing run whose record cannot be written exits 2 with the write error and its stack", async () => {
     await inTempDir(async (dir) => {
       const out = join(dir, "out");
@@ -431,7 +481,7 @@ describe("main after setup", () => {
       try {
         const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [sabotage]));
         assert.equal(code, 2);
-        assert.match(stderr.text(), /EEXIST|ENOTDIR/);
+        assert.match(stderr.text(), /writing live-check\.json failed: Error: (EEXIST|ENOTDIR)/);
         assert.match(stderr.text(), STACK_LINE);
         assert.equal(session.closed, true);
       } finally {

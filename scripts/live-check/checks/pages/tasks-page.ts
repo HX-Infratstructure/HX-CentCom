@@ -1,6 +1,12 @@
 import type { ReadOnlySession } from "../../session.ts";
 import { PAGE_ROUTES } from "../shared.ts";
-import { BOARD_ROWS, RECORD_ID, STATUS_CELLS, UPDATE_ITEMS } from "./selectors.ts";
+import {
+  BOARD_ROWS,
+  RECORD_ID,
+  SHOW_MORE_BUTTON,
+  STATUS_CELLS,
+  UPDATE_ITEMS,
+} from "./selectors.ts";
 
 const SHOW_MORE_TIMEOUT_MS = 20_000;
 
@@ -75,7 +81,7 @@ export class TasksPage {
   async showMore(): Promise<number> {
     const page = this.#session.page;
     const before = await this.feedCount();
-    const button = page.locator("#updates .show-more button");
+    const button = page.locator(SHOW_MORE_BUTTON);
     if ((await button.count()) === 0) throw new Error("the update log has no Show more button");
     await button.click();
     await page.waitForFunction(

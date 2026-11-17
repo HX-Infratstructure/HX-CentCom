@@ -5,6 +5,8 @@ import { BOARD_ROWS, RECORD_ID } from "./selectors.ts";
 
 const VISIBLE_ROWS = `${BOARD_ROWS}:visible`;
 const ROW_ID = `th ${RECORD_ID}`;
+/** A row's header cell. Its link is the row's own, which a row click follows (`src/components/board.tsx` `followRowLink`). */
+const ROW_HEADER = ":scope > th";
 const SHEET = "[role=dialog]";
 const SHEET_ID = `.detail-head ${RECORD_ID}`;
 /** The rendered description in a record's sheet (`src/components/decision.tsx:195-197`), without its heading. */
@@ -95,7 +97,7 @@ export class BoardPage {
     const cellIndex = (await this.columns(index)).indexOf(column);
     if (cellIndex === -1) throw new Error(`${this.route} has no column "${column}"`);
     const cell = row.locator("th, td").nth(cellIndex);
-    if ((await cell.locator(OWN_ACTION).count()) > 0) {
+    if (!(await this.#isHeaderCell(row, cell)) && (await cell.locator(OWN_ACTION).count()) > 0) {
       throw new Error(
         `${this.route} column "${column}" holds its own control, so a click there opens no sheet`,
       );
@@ -108,6 +110,10 @@ export class BoardPage {
     });
     await this.#closeSheet(sheet);
     return { column, rowId, ...shown, urlClosed: page.url() };
+  }
+
+  async #isHeaderCell(row: Locator, cell: Locator): Promise<boolean> {
+    return (await cell.and(row.locator(ROW_HEADER)).count()) > 0;
   }
 
   async #observeSheet(
