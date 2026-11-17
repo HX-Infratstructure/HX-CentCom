@@ -196,7 +196,7 @@ function agentRef(id: string, agents: AgentDirectory): AgentRef {
   return agents.get(id) ?? { id, name: id, tone: null, role: null };
 }
 
-function statusRef(id: string, statuses: StatusDirectory): StatusRef {
+export function statusRef(id: string, statuses: StatusDirectory): StatusRef {
   return statuses.get(id) ?? { id, label: id, isDone: false };
 }
 

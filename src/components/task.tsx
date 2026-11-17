@@ -3,6 +3,7 @@ import { ChevronRight, CircleAlert } from "lucide-react";
 import { BoardBody } from "./board";
 import type { Detail } from "./detail";
 import { DetailSheet } from "./detail-sheet";
+import { statusRef } from "./adapt";
 import { lists } from "./lists";
 import {
   ATTENTION_LABELS,
@@ -241,25 +242,30 @@ type StatusPart = { readonly status: StatusRef; readonly count: number };
  * Open labels first, then done ones. Within each, by `rank`; a status with no rank (one the directory does not know)
  * goes last, and ties go in id order.
  */
-function ordered(parts: StatusPart[], rank: (id: string) => number): readonly StatusPart[] {
-  return parts.sort(
+function ordered(
+  parts: readonly StatusPart[],
+  rank: (id: string) => number,
+): readonly StatusPart[] {
+  return [...parts].sort(
     (a, b) =>
       Number(a.status.isDone) - Number(b.status.isDone) ||
       rank(a.status.id) - rank(b.status.id) ||
-      (a.status.id < b.status.id ? -1 : a.status.id > b.status.id ? 1 : 0),
+      a.status.id.localeCompare(b.status.id),
   );
 }
 
 /**
- * How a table's rows split across status labels. The table has no directory, so every label ranks the same and goes in
- * id order, which is the directory's order: the server reads the labels sorted by id.
+ * How a table's rows split across status labels. The table has no directory, so every label ranks the same and the
+ * order within open and done labels is a stable order by id.
  */
 function rowStatusParts(tasks: readonly TaskView[]): readonly StatusPart[] {
-  const counts = new Map<string, { status: StatusRef; count: number }>();
+  const counts = new Map<string, StatusPart>();
   for (const { statusLabel } of tasks) {
-    const entry = counts.get(statusLabel.id) ?? { status: statusLabel, count: 0 };
-    entry.count += 1;
-    counts.set(statusLabel.id, entry);
+    const seen = counts.get(statusLabel.id);
+    counts.set(statusLabel.id, {
+      status: seen?.status ?? statusLabel,
+      count: (seen?.count ?? 0) + 1,
+    });
   }
   return ordered([...counts.values()], () => 0);
 }
@@ -271,10 +277,7 @@ function countStatusParts(
 ): readonly StatusPart[] {
   const position = new Map([...statuses.keys()].map((id, i) => [id, i]));
   return ordered(
-    Object.entries(byStatus).map(([id, count]) => ({
-      status: statuses.get(id) ?? { id, label: id, isDone: false },
-      count,
-    })),
+    Object.entries(byStatus).map(([id, count]) => ({ status: statusRef(id, statuses), count })),
     (id) => position.get(id) ?? Number.POSITIVE_INFINITY,
   );
 }
