@@ -776,7 +776,10 @@ describe("the overview's number widgets", () => {
   })();
 
   it("reads every number from the server's counts, not from the task rows the page holds", async () => {
-    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, { shell: SERVER_COUNTS });
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, {
+      shell: SERVER_COUNTS,
+      pendingPage: pendingPageOf(SEED_LIKE.decisions, 42),
+    });
 
     expect(widgets()).toEqual([
       "Open tasks180",
@@ -785,6 +788,16 @@ describe("the overview's number widgets", () => {
       "Pending decisions42",
       "Open pull requests2",
     ]);
+  });
+
+  it("shows one pending count, the Pending page's total, when the shell's count disagrees", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, {
+      shell: shellWith({ agents: AGENTS, statusLabels: STATUSES, pendingDecisions: 9 }),
+      pendingPage: pendingPageOf(SEED_LIKE.decisions, 4),
+    });
+
+    expect(widgets()[3]).toBe("Pending decisions4");
+    expect(section("Needs your decision").heading).toBe("Needs your decision 4");
   });
 
   it("shows the server's tasks by status, open labels first, with each label's share", async () => {

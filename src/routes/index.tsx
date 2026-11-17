@@ -165,7 +165,11 @@ function Overview(): ReactNode {
   return (
     <Workspace page="Overview" description={DESCRIPTION}>
       <div className="dashboard">
-        <SummaryWidgets counts={shell.counts} statuses={shell.statuses} />
+        <SummaryWidgets
+          counts={shell.counts}
+          pendingDecisions={pendingTotal}
+          statuses={shell.statuses}
+        />
 
         <div className="dashboard-columns">
           <div className="dashboard-stack">
@@ -264,13 +268,16 @@ function usePendingDecisions({ agents }: ShellView): {
 
 /**
  * The dashboard's numbers, from the server's counts: open tasks and their attention reasons, pending decisions, and the
- * open PR count. A blocked or owner number opens the open tasks under it.
+ * open PR count. A blocked or owner number opens the open tasks under it. The pending count is the Pending page's
+ * total, the one "Needs your decision" shows, so a refetch between the shell and that page cannot show two numbers.
  */
 function SummaryWidgets({
   counts,
+  pendingDecisions,
   statuses,
 }: {
   counts: ShellView["counts"];
+  pendingDecisions: number;
   statuses: StatusDirectory;
 }): ReactNode {
   const tasks = counts.tasks;
@@ -314,10 +321,7 @@ function SummaryWidgets({
         </li>
         <li data-hue="orange">
           <Link to="/decisions" className="number-widget">
-            <WidgetNumber
-              label="Pending decisions"
-              value={counts.decisions.byStatus.Pending ?? 0}
-            />
+            <WidgetNumber label="Pending decisions" value={pendingDecisions} />
           </Link>
         </li>
         <li data-hue="green">
