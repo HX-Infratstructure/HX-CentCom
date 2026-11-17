@@ -102,7 +102,7 @@ describe("CheckRecorder console errors", () => {
     assert.match(noisy.reason ?? "", /1 console error/);
   });
 
-  test("console errors keep a LIVE_NOT_EXECUTED check LIVE_NOT_EXECUTED", async () => {
+  test("console errors turn a LIVE_NOT_EXECUTED check into FAIL and keep its no-data reason", async () => {
     const browser = new FakeBrowser();
     const rec = new CheckRecorder("/nonexistent", () => NOW);
     await rec.run(
@@ -115,10 +115,9 @@ describe("CheckRecorder console errors", () => {
       browser.context(),
     );
     const empty = resultFor(rec, "empty");
-    assert.equal(empty.status, "LIVE_NOT_EXECUTED");
+    assert.equal(empty.status, "FAIL");
     assert.deepEqual(empty.consoleErrors, ["hydration warning"]);
     assert.equal(empty.reason, "no data; 1 console error(s)");
-    assert.equal(rec.exitCode(0), 0, "LIVE_NOT_EXECUTED does not change the exit code");
   });
 
   test("console errors keep a FAIL check FAIL with its own reason first", async () => {

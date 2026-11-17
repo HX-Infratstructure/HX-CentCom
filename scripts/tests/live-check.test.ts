@@ -295,6 +295,28 @@ describe("main", () => {
     });
   });
 
+  test("exits 1 when a LIVE_NOT_EXECUTED check logged console errors while it ran", async () => {
+    await inTempDir(async (out) => {
+      const session = fakeSession();
+      let buffer: string[] = [];
+      session.takeConsoleErrors = () => {
+        const errors = buffer;
+        buffer = [];
+        return errors;
+      };
+      const empty = fakeCheck("empty", async () => {
+        buffer.push("Uncaught TypeError: x");
+        return { status: "LIVE_NOT_EXECUTED", evidence: {}, reason: "no data" };
+      });
+      const code = await main(["--base", BASE, "--out", out], fakeDeps(session, [empty]));
+      assert.equal(code, 1);
+      const written = JSON.parse(readFileSync(join(out, "live-check.json"), "utf8"));
+      assert.equal(written.results[0].status, "FAIL");
+      assert.equal(written.results[0].reason, "no data; 1 console error(s)");
+      assert.deepEqual(written.summary, { PASS: 0, FAIL: 1, LIVE_NOT_EXECUTED: 0 });
+    });
+  });
+
   test("records the base URL the run checked", async () => {
     await inTempDir(async (out) => {
       await main(["--base", BASE, "--out", out], fakeDeps(fakeSession(), [passing]));

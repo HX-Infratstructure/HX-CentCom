@@ -109,7 +109,7 @@ npm run live-check -- --base <url> --out <folder>
 
 The checker writes `<folder>/live-check.json`. Its top level holds `writtenAt`, `base`, `summary`, `blockedRequests`, and `trailingConsoleErrors`. `base` is the `--base` URL that the run checked. Each entry in `results` holds a check's status, evidence, UTC time, `consoleErrors`, and `lateConsoleErrors`. Each check ends PASS, FAIL, or LIVE_NOT_EXECUTED. LIVE_NOT_EXECUTED means that the live data gave the check nothing to test.
 
-A console error logged while a check runs turns its PASS into FAIL. `lateConsoleErrors` holds the errors logged after the previous check returned and before this one started. `trailingConsoleErrors` holds the errors logged after the last check returned. After a crash, it holds the errors logged since the last completed check. Neither list changes a status or the exit code.
+A console error logged while a check runs turns its PASS or LIVE_NOT_EXECUTED into FAIL. `lateConsoleErrors` holds the errors logged after the previous check returned and before this one started. `trailingConsoleErrors` holds the errors logged after the last check returned. After a crash, it holds the errors logged since the last completed check. Neither list changes a status or the exit code.
 
 The screenshots go in the same folder, and the evidence of each check names the ones it took. The contrast check takes one per page it visits: `contrast-tasks.png`, `contrast-decisions.png`, and `contrast-home.png`.
 

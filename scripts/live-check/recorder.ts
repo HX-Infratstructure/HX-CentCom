@@ -51,7 +51,7 @@ function withConsoleErrors(outcome: CheckOutcome, consoleErrors: readonly string
   const reason = [outcome.reason, `${consoleErrors.length} console error(s)`]
     .filter(Boolean)
     .join("; ");
-  return { ...outcome, status: outcome.status === "PASS" ? "FAIL" : outcome.status, reason };
+  return { ...outcome, status: "FAIL", reason };
 }
 
 export class CheckRecorder {
