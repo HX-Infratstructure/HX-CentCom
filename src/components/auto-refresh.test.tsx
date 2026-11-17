@@ -2,18 +2,18 @@ import { RouterProvider } from "@tanstack/react-router";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouter } from "@/router";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith } from "@/test/ui-fixtures";
 import type { ActivityEntry, ActivityPage } from "./server-types";
 
-const server = vi.hoisted(() => ({ listWorkspace: vi.fn(), listActivity: vi.fn() }));
+const server = vi.hoisted(() => ({ listWorkspaceShell: vi.fn(), listActivity: vi.fn() }));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
-  listWorkspace: server.listWorkspace,
+  listWorkspaceShell: server.listWorkspaceShell,
   listActivity: server.listActivity,
 }));
 
 // Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
-const WORKSPACE = workspaceWith({
+const SHELL = shellWith({
   agents: [{ id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true }],
 });
 
@@ -83,29 +83,29 @@ beforeEach(() => {
   // Only intervals and the clock: React Query's notify batching and Testing Library's waits keep real timeouts.
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
   vi.setSystemTime(START);
-  server.listWorkspace.mockResolvedValue(WORKSPACE);
+  server.listWorkspaceShell.mockResolvedValue(SHELL);
   server.listActivity.mockResolvedValue(NO_ACTIVITY);
 });
 
 afterEach(() => {
   vi.useRealTimers();
   Reflect.deleteProperty(document, "visibilityState");
-  server.listWorkspace.mockReset();
+  server.listWorkspaceShell.mockReset();
   server.listActivity.mockReset();
 });
 
 describe("a page keeps itself current", () => {
-  it("re-checks the activity list and the workspace every 60 seconds while the tab is visible", async () => {
+  it("re-checks the activity list and the shared directory every 60 seconds while the tab is visible", async () => {
     await renderActivity();
     const activity = server.listActivity.mock.calls.length;
-    const workspace = server.listWorkspace.mock.calls.length;
+    const shell = server.listWorkspaceShell.mock.calls.length;
 
     await elapse(59_000);
     expect(server.listActivity).toHaveBeenCalledTimes(activity);
 
     await elapse(1_000);
     expect(server.listActivity).toHaveBeenCalledTimes(activity + 1);
-    expect(server.listWorkspace).toHaveBeenCalledTimes(workspace + 1);
+    expect(server.listWorkspaceShell).toHaveBeenCalledTimes(shell + 1);
   });
 
   it("does not re-check while the tab is hidden, and resumes once it shows again", async () => {
@@ -126,13 +126,13 @@ describe("a page keeps itself current", () => {
   it("re-checks every query at once from the header's Refresh button", async () => {
     await renderActivity();
     const activity = server.listActivity.mock.calls.length;
-    const workspace = server.listWorkspace.mock.calls.length;
+    const shell = server.listWorkspaceShell.mock.calls.length;
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await elapse(0);
 
     expect(server.listActivity).toHaveBeenCalledTimes(activity + 1);
-    expect(server.listWorkspace).toHaveBeenCalledTimes(workspace + 1);
+    expect(server.listWorkspaceShell).toHaveBeenCalledTimes(shell + 1);
   });
 
   it("keeps the pages Show more loaded when it re-checks a list, reading each again from the first", async () => {
@@ -164,7 +164,7 @@ describe("a page keeps itself current", () => {
 
     await elapse(60_000);
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(server.listWorkspace).toHaveBeenCalledTimes(2);
+    expect(server.listWorkspaceShell).toHaveBeenCalledTimes(2);
     expect(screen.getByText(/^Updated/)).toHaveTextContent("Updated 1 min ago");
 
     await act(async () => release(NO_ACTIVITY));
