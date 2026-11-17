@@ -3,7 +3,9 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   keepPreviousData,
   queryOptions,
+  skipToken,
   useInfiniteQuery,
+  useQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
@@ -11,8 +13,8 @@ import {
 import {
   adaptDecisionPages,
   adaptShell,
+  adaptTaskPages,
   adaptUpdatePages,
-  adaptWorkspace,
   toAppError,
 } from "@/components/adapt";
 import { DecisionList } from "@/components/decision";
@@ -20,17 +22,19 @@ import { EmptyState, ErrorState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
 import {
   ATTENTION_LABELS,
-  attentionOf,
-  openTasks,
   splitInbox,
   type Attention,
   type Directory,
   type ShellView,
   type StatusDirectory,
-  type TaskView,
 } from "@/components/model";
 import { PullRequestList } from "@/components/pull-request";
-import type { DecisionsPage, UpdateCounts, UpdatesPage } from "@/components/server-types";
+import type {
+  DecisionsPage,
+  TasksPage,
+  UpdateCounts,
+  UpdatesPage,
+} from "@/components/server-types";
 import { StatusOverview, TaskTable } from "@/components/task";
 import { UpdateList } from "@/components/update-item";
 import { FilterBar, FilterLink } from "@/components/url-state";
@@ -38,18 +42,15 @@ import { RouteError, Workspace } from "@/components/workspace";
 import {
   prPages,
   shellQuery,
-  tasksQuery,
+  taskPages,
   updatePages,
   type PrQuery,
   type UpdateQuery,
 } from "@/lib/task-data";
-import { listDecisions } from "@/lib/tasks.functions";
+import { listDecisions, listTasks } from "@/lib/tasks.functions";
 
 type FeedFilters = { readonly agentId?: string | undefined; readonly taskId?: string | undefined };
 type OverviewDeps = FeedFilters & { readonly attention?: Attention | undefined };
-type OpenTaskFilters = ReturnType<typeof lists.openTasks.filters>;
-
-const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
 const shellView = { ...shellQuery, select: adaptShell };
 const DECISIONS_SHOWN = 5;
 const PRS_SHOWN = 8;
@@ -65,14 +66,23 @@ const pendingDecisionsQuery = queryOptions({
   queryFn: () => listDecisions({ data: PENDING_PAGE }),
 });
 
-/** The Open tasks list: blocked first, filtered and counted by its attention facet. */
-function openTaskRows(tasks: readonly TaskView[], filters: OpenTaskFilters) {
-  return lists.openTasks.local(openTasks(tasks), filters, { attention: attentionOf });
+/** The update read caps `taskIds` at 100, so the feed reads at most that many of the reason's open tasks. */
+const ATTENTION_IDS = 100;
+
+/** The first page of the reason's open tasks, which holds every one of them when the server counts at most 100. */
+function attentionPageQuery(attention: Attention | undefined) {
+  return queryOptions({
+    queryKey: ["tasks", "attention-ids", attention],
+    queryFn:
+      attention === undefined
+        ? skipToken
+        : () => listTasks({ data: { open: true, attention, limit: ATTENTION_IDS } }),
+  });
 }
 
-/** The ids of the rows the Open tasks list shows under `attention`. */
-function tasksNeeding(attention: Attention, tasks: readonly TaskView[]): readonly string[] {
-  return openTaskRows(tasks, { attention }).items.map((t) => t.id);
+/** The ids of the reason's open tasks, or undefined when the server holds more than the page shows. */
+function attentionIdsOf(page: TasksPage): readonly string[] | undefined {
+  return page.counts.total <= ATTENTION_IDS ? page.items.map((t) => t.id) : undefined;
 }
 
 /**
@@ -106,23 +116,22 @@ export const Route = createFileRoute("/")({
       attention: lists.openTasks.filters(search).attention,
     };
   },
-  /** Prefetches the feed read the first render derives from the same workspace, so server rendering has its data. */
+  /** Prefetches the reads the first render makes, so server rendering has their data. */
   loader: async ({ context: { queryClient }, deps: { attention, ...feed } }) => {
-    const workspace = queryClient.ensureQueryData(tasksQuery);
-    // Only a reason makes the feed wait for the workspace, because its read is keyed by the reason's open tasks.
+    // Only a reason makes the feed wait for a task read, because its read is keyed by the reason's open tasks.
     const loadFeed = async () => {
       const attentionIds =
         attention === undefined
           ? undefined
-          : tasksNeeding(attention, adaptWorkspace(await workspace).tasks);
+          : attentionIdsOf(await queryClient.ensureQueryData(attentionPageQuery(attention)));
       const query = feedQuery(feed, attention, attentionIds);
       if (query !== null) {
         await queryClient.ensureInfiniteQueryData(updatePages(query, attentionIds));
       }
     };
     await Promise.all([
-      workspace,
       loadFeed(),
+      queryClient.ensureInfiniteQueryData(taskPages({ open: true, attention })),
       queryClient.ensureQueryData(shellQuery),
       queryClient.ensureQueryData(pendingDecisionsQuery),
       queryClient.ensureInfiniteQueryData(prPages(OPEN_PRS)),
@@ -149,14 +158,9 @@ export const Route = createFileRoute("/")({
 const OPEN_TASKS_ID = "open-tasks";
 
 function Overview(): ReactNode {
-  const search = Route.useSearch();
-  const { data: ws } = useSuspenseQuery(workspaceQuery);
   const { data: shell } = useSuspenseQuery(shellView);
   const { pending, total: pendingTotal } = usePendingDecisions(shell);
-  const taskFilters = lists.openTasks.filters(search);
-  const tasks = openTaskRows(ws.tasks, taskFilters);
   const decisionsId = useId();
-  const tasksId = useId();
 
   return (
     <Workspace page="Overview" description={DESCRIPTION}>
@@ -186,28 +190,60 @@ function Overview(): ReactNode {
             <OpenPullRequests />
           </div>
 
-          <Feed dir={ws} tasks={ws.tasks} />
+          <Feed dir={shell} />
         </div>
 
-        <section id={OPEN_TASKS_ID} aria-labelledby={tasksId} className="overview-tasks">
-          <div className="section-bar">
-            <h2 id={tasksId} className="section-title">
-              Open tasks <span className="count">{tasks.items.length}</span>
-            </h2>
-            <FilterBar search={lists.openTasks} counts={tasks.counts} label="Filter open tasks" />
-          </div>
-          {tasks.items.length === 0 ? (
-            <EmptyState>
-              {lists.openTasks.active(taskFilters)
-                ? "No open tasks match these filters."
-                : "Every task is done and nothing is blocked."}
-            </EmptyState>
-          ) : (
-            <TaskTable tasks={tasks.items} compact />
-          )}
-        </section>
+        <OpenTasks dir={shell} />
       </div>
     </Workspace>
+  );
+}
+
+/**
+ * The server's open tasks under the URL's reason, blocked first. The compact table groups the rows and keeps the
+ * server's order in each group.
+ */
+function OpenTasks({ dir }: { dir: Directory }): ReactNode {
+  const headingId = useId();
+  const { attention } = Route.useLoaderDeps();
+  const select = useCallback(
+    (data: InfiniteData<TasksPage, string | undefined>) => adaptTaskPages(data.pages, dir),
+    [dir],
+  );
+  const pages = useSuspenseInfiniteQuery({ ...taskPages({ open: true, attention }), select });
+  const { items, counts } = pages.data;
+  const total = counts?.total ?? 0;
+  return (
+    <section id={OPEN_TASKS_ID} aria-labelledby={headingId} className="overview-tasks">
+      <div className="section-bar">
+        <h2 id={headingId} className="section-title">
+          Open tasks <span className="count">{total}</span>
+        </h2>
+        <FilterBar
+          search={lists.openTasks}
+          counts={{ attention: counts?.byAttention ?? {} }}
+          label="Filter open tasks"
+        />
+      </div>
+      {items.length === 0 ? (
+        <EmptyState>
+          {attention !== undefined
+            ? "No open tasks match these filters."
+            : "Every task is done and nothing is blocked."}
+        </EmptyState>
+      ) : (
+        <TaskTable tasks={items} compact />
+      )}
+      <ShowMore
+        shown={items.length}
+        total={total}
+        noun="tasks"
+        hasMore={pages.hasNextPage}
+        pending={pages.isFetchingNextPage}
+        error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
+        onShowMore={() => void pages.fetchNextPage()}
+      />
+    </section>
   );
 }
 
@@ -351,12 +387,15 @@ function OpenPullRequests(): ReactNode {
 
 /**
  * The attention control stays on the Open tasks list; the feed names the reason it applies. The reason's tasks come
- * from the current workspace, so a refresh that changes them changes the feed's read.
+ * from a bounded task read, so a refresh that changes them changes the feed's read.
  */
-function Feed({ dir, tasks }: { dir: Directory; tasks: readonly TaskView[] }): ReactNode {
+function Feed({ dir }: { dir: Directory }): ReactNode {
   const headingId = useId();
   const { attention, agentId, taskId } = Route.useLoaderDeps();
-  const attentionIds = attention === undefined ? undefined : tasksNeeding(attention, tasks);
+  const { data: attentionIds } = useQuery({
+    ...attentionPageQuery(attention),
+    select: attentionIdsOf,
+  });
   const query = feedQuery({ agentId, taskId }, attention, attentionIds);
   const filtered = attention !== undefined || agentId !== undefined || taskId !== undefined;
   return (

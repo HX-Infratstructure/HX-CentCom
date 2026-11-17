@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { shellWith, workspaceWith } from "@/test/ui-fixtures";
+import { shellWith, tasksPageWith, workspaceWith } from "@/test/ui-fixtures";
 import type {
   Agent,
   Decision,
@@ -10,17 +10,48 @@ import type {
   PullRequest,
   StatusLabel,
   Task,
+  TasksPage,
   TaskUpdate,
   UpdatesPage,
   Workspace,
   WorkspaceShell,
 } from "./server-types";
 
-const server = vi.hoisted(() => ({ listUpdates: vi.fn() }));
+const server = vi.hoisted(() => ({
+  listUpdates: vi.fn(),
+  listTasks: vi.fn(),
+  listWorkspace: vi.fn(),
+}));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   listUpdates: server.listUpdates,
+  listTasks: server.listTasks,
+  listWorkspace: server.listWorkspace,
 }));
+
+type TaskRequest = {
+  readonly open?: boolean;
+  readonly attention?: Task["attention"][number];
+  readonly limit?: number;
+  readonly cursor?: string;
+};
+
+/** The task read under the server's rules: open and attention filter, blocked tasks first, pages of 20 by default. */
+function serveTasks(tasks: readonly Task[]) {
+  server.listTasks.mockImplementation(({ data }: { data: TaskRequest }) => {
+    const all = tasks.filter(
+      (t) =>
+        (data.open !== true || t.open) &&
+        (data.attention === undefined || t.attention.includes(data.attention)),
+    );
+    const blocked = (t: Task) => t.attention.includes("blocked");
+    const ordered = [...all.filter(blocked), ...all.filter((t) => !blocked(t))];
+    const start = Number(data.cursor ?? 0);
+    const end = start + (data.limit ?? 20);
+    const nextCursor = end < ordered.length ? String(end) : null;
+    return Promise.resolve(tasksPageWith(ordered.slice(start, end), { all: ordered, nextCursor }));
+  });
+}
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
@@ -124,12 +155,17 @@ function pendingPageOf(decisions: readonly Decision[], total?: number): Decision
 }
 
 /** The server reads the overview's numbers and decisions come from. By default they agree with the snapshot. */
-type ServerReads = { readonly shell?: WorkspaceShell; readonly pendingPage?: DecisionsPage };
+type ServerReads = {
+  readonly shell?: WorkspaceShell;
+  readonly pendingPage?: DecisionsPage;
+  readonly taskPage?: TasksPage;
+};
 
 /**
  * The route's own loader and selects run against the stored snapshot and pages. Only the open-PR read is stored, so a
  * route that asked the server for any other PR query would fail to load. The feed asks the mocked `listUpdates`, so a
- * test can read what the feed sent.
+ * test can read what the feed sent. The task reads ask the mocked `listTasks`, which serves the snapshot's tasks, or
+ * `reads.taskPage` for every task read.
  */
 async function renderOverview(
   raw: Workspace,
@@ -139,6 +175,8 @@ async function renderOverview(
   reads: ServerReads = {},
 ) {
   server.listUpdates.mockResolvedValue(updates);
+  if (reads.taskPage === undefined) serveTasks(raw.tasks);
+  else server.listTasks.mockResolvedValue(reads.taskPage);
   const pendingPage = reads.pendingPage ?? pendingPageOf(raw.decisions);
   const shell =
     reads.shell ??
@@ -151,7 +189,6 @@ async function renderOverview(
   return renderApp(url, {
     heading: "Overview",
     seed: [
-      [["task-workspace"], raw],
       [["workspace-shell"], shell],
       [["decisions", "overview", { status: "Pending", limit: 100 }], pendingPage],
       [["prs", "list", { state: "open" }], { pages: [openPrs], pageParams: [undefined] }],
@@ -161,6 +198,8 @@ async function renderOverview(
 
 afterEach(() => {
   server.listUpdates.mockReset();
+  server.listTasks.mockReset();
+  server.listWorkspace.mockReset();
 });
 
 function section(name: string) {
@@ -230,6 +269,65 @@ describe("the overview's open tasks", () => {
       "Close the benchmark run",
     ]);
     expect(open.heading).toBe("Open tasks 5");
+  });
+
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      task({ id: `IRP-${100 + i}`, title: `Open task ${String(i).padStart(2, "0")}` }),
+    );
+
+  it("shows the first page of 20 and fetches the next page with the cursor on Show more", async () => {
+    await renderOverview(workspace({ tasks: many(25) }));
+
+    const region = screen.getByRole("region", { name: /^Open tasks/ });
+    expect(section("Open tasks").taskTitles).toHaveLength(20);
+    expect(section("Open tasks").heading).toBe("Open tasks 25");
+    expect(region).toHaveTextContent("Showing 20 of 25 tasks.");
+
+    await act(async () => {
+      fireEvent.click(within(region).getByRole("button", { name: "Show more" }));
+    });
+    expect(await within(region).findByText("Showing all 25 tasks.")).toBeInTheDocument();
+    expect(section("Open tasks").taskTitles).toHaveLength(25);
+    expect(server.listTasks).toHaveBeenCalledWith({ data: { open: true, cursor: "20" } });
+    expect(server.listWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("keeps the server's order, so a blocked task the server returns first leads its group", async () => {
+    const calm = task({ id: "IRP-40", title: "Tune the shadow thresholds" });
+    const stuck = task({
+      id: "IRP-41",
+      title: "Wire the eval dashboard",
+      blocked_on: "dependency",
+      attention: ["blocked"],
+    });
+    await renderOverview(workspace({ tasks: [calm, stuck] }), NO_PRS, "/", NO_UPDATES, {
+      taskPage: tasksPageWith([stuck, calm]),
+    });
+
+    expect(section("Open tasks").taskTitles).toEqual([
+      "Wire the eval dashboard",
+      "Tune the shadow thresholds",
+    ]);
+  });
+
+  it("counts the attention chips with the server's byAttention and never reads the whole workspace", async () => {
+    const page = tasksPageWith(many(3));
+    await renderOverview(workspace({ tasks: many(3) }), NO_PRS, "/", NO_UPDATES, {
+      taskPage: {
+        ...page,
+        counts: { ...page.counts, total: 9, byAttention: { blocked: 7, owner: 4, stale: 2 } },
+      },
+    });
+
+    const facet = within(screen.getByRole("group", { name: "Needs attention" }));
+    expect(facet.getAllByRole("link").map((chip) => chip.textContent)).toEqual([
+      "Blocked7",
+      "Waiting on the owner4",
+      "Stale commit2",
+    ]);
+    expect(section("Open tasks").heading).toBe("Open tasks 9");
+    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 });
 
@@ -401,7 +499,43 @@ describe("the overview's needs-attention filter", () => {
     await renderOverview(workspace({ tasks: blocked }), NO_PRS, "/?attention=blocked");
 
     expect(section("Open tasks").heading).toBe("Open tasks 101");
+    expect(server.listTasks).toHaveBeenCalledWith({
+      data: { open: true, attention: "blocked", limit: 100 },
+    });
     expect(feedRequests()).toEqual([{ data: { attention: "blocked" } }]);
+  });
+
+  it("asks for the chosen task alone only while the reason's 100-row page holds every one of its tasks", async () => {
+    const blocked = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        task({
+          id: `IRP-${200 + i}`,
+          title: `Blocked task ${i}`,
+          blocked_on: "dependency",
+          attention: ["blocked"],
+        }),
+      );
+    await renderOverview(
+      workspace({ tasks: blocked(100) }),
+      NO_PRS,
+      "/?attention=blocked&task=IRP-299",
+    );
+    expect(feedRequests()).toEqual([{ data: { taskId: "IRP-299" } }]);
+  });
+
+  it("sends no feed request for a chosen task when more than 100 open tasks need attention for the reason", async () => {
+    const blocked = Array.from({ length: 101 }, (_, i) =>
+      task({
+        id: `IRP-${200 + i}`,
+        title: `Blocked task ${i}`,
+        blocked_on: "dependency",
+        attention: ["blocked"],
+      }),
+    );
+    await renderOverview(workspace({ tasks: blocked }), NO_PRS, "/?attention=blocked&task=IRP-201");
+    expect(section("Open tasks").heading).toBe("Open tasks 101");
+    expect(section("Latest updates").empty).toBe("No updates match these filters.");
+    expect(feedRequests()).toEqual([]);
   });
 
   it("lets the server answer when no open task needs attention for the reason", async () => {
@@ -505,7 +639,7 @@ describe("the overview's needs-attention filter", () => {
     },
   );
 
-  it("follows the reason's tasks when a workspace refresh changes them", async () => {
+  it("follows the reason's tasks when a refresh of the task reads changes them", async () => {
     const calm = task({ id: "IRP-73", title: "Wire the eval dashboard" });
     const router = await renderOverview(
       workspace({ tasks: [calm] }),
@@ -520,11 +654,9 @@ describe("the overview's needs-attention filter", () => {
       nextCursor: null,
       counts: { total: 1, byAgent: { atlas: 1 }, byTask: { "IRP-73": 1 }, bySource: { api: 1 } },
     });
-    act(() => {
-      router.options.context.queryClient.setQueryData(
-        ["task-workspace"],
-        workspace({ tasks: [{ ...calm, blocked_on: "dependency", attention: ["blocked"] }] }),
-      );
+    serveTasks([{ ...calm, blocked_on: "dependency", attention: ["blocked"] }]);
+    await act(async () => {
+      await router.options.context.queryClient.invalidateQueries({ queryKey: ["tasks"] });
     });
 
     const feed = screen.getByRole("region", { name: /^Latest updates/ });
