@@ -6,6 +6,8 @@ This page covers local development, the deploy to the HX hosts, and troubleshoot
 
 ### Run one test file
 
+On a fresh checkout, run `npx playwright install chromium` once before the tests. `scripts/tests/live-check-contrast.test.ts` and `scripts/tests/live-check-session.test.ts` start Playwright's Chromium, and `npm test` runs both. `npm ci` does not download the browser. The command installs it in `~/.cache/ms-playwright`.
+
 `npm test` runs every suite. To run one file, call its runner directly:
 
 ```sh
@@ -89,9 +91,37 @@ Agents and the owner send their Bearer keys over plain HTTP on the HX LAN, which
 
 `deploy/hx15/verify.sh` only reads. It checks the app unit, `GET /`, `GET /api/v1/workspace`, and the MCP tool list without a key, and prints one `PASS` or `FAIL` line per check. Run it on HX-15, against the app port or the HX-7 URL ([Verify a running app](../deploy/hx15/README.md#verify-a-running-app)).
 
+### Check the live pages after a deploy
+
+`verify.sh` checks the units and the API. `npm run live-check` checks the pages, so run it after `verify.sh`. It opens each of the seven pages in Chromium and compares what they show with `/api/v1`, and it measures text contrast against WCAG AA. The checks take their filter values from the API's data and never hard-code them, so they need no fixed test data. The values come from the facet counts, or, for the Tasks repository filter, from the workspace's task list. `scripts/live-check/checks/index.ts` lists every check.
+
+The checker only reads, so it is safe to run at any time. It lets only GET and HEAD requests through. It aborts any other request, records it in `live-check.json`, and exits with code 1.
+
+Run it on HX-15 from the `current` release, not from the clone. `install.sh` builds each release from `git archive <S>` and runs `npm ci --include=dev` in it, so the release holds the checker of that commit and its dev dependencies, Playwright among them. Neither the fetch nor `install.sh` moves the clone's `HEAD`, so the checker in the clone can be older than the deployed commit, or absent. `cat RELEASE` prints the full SHA of the release. Confirm that it is the SHA you deployed.
+
+```sh
+cd ~/.local/share/hx-centcom/current
+cat RELEASE
+npm run live-check -- --base <url> --out <folder>
+```
+
+`<url>` is the app's URL, such as `http://192.168.50.207:8420`. Give `--out` a folder outside the clone and outside `~/.local/share/hx-centcom`. `install.sh` refuses a clone with untracked files, and the results would be untracked files. `install.sh` also deletes old releases with everything in them. The checker starts Playwright's Chromium, as two of the tests do. If that browser is missing, install it from the release with the command in [Run one test file](#run-one-test-file).
+
+The checker writes `<folder>/live-check.json`. Its top level holds `writtenAt`, `base`, `summary`, `blockedRequests`, and `trailingConsoleErrors`. `base` is the `--base` URL that the run checked. Each entry in `results` holds a check's status, evidence, UTC time, `consoleErrors`, and `lateConsoleErrors`. Each check ends PASS, FAIL, or LIVE_NOT_EXECUTED. LIVE_NOT_EXECUTED means that the live data gave the check nothing to test.
+
+A console error logged while a check runs turns its PASS or LIVE_NOT_EXECUTED into FAIL. `lateConsoleErrors` holds the errors logged after the previous check returned and before this one started. `trailingConsoleErrors` holds the errors logged after the last check returned. After a crash, it holds the errors logged since the last completed check. Neither list changes a status or the exit code.
+
+The screenshots go in the same folder, and the evidence of each check names the ones it took. The contrast check takes one per page it visits: `contrast-tasks.png`, `contrast-decisions.png`, and `contrast-home.png`.
+
+The exit code tells the result:
+
+- `0`: no check failed, and the checker blocked no request. LIVE_NOT_EXECUTED checks do not change the exit code.
+- `1`: a check failed, or the checker blocked a request. Nothing else exits with code 1.
+- `2`: a usage or setup error, such as a missing argument or a browser that does not start, or a run that stopped after setup. A crash stops the run, and so does a failure to write `live-check.json` or to close the browser, even when every check passed. On stderr, the checker names the step that failed, as `live-check: <step> failed:` with the error and its stack. The step is `running the checks`, `writing live-check.json`, or `closing the browser`. After a crash, `live-check.json` still holds the checks that finished, if the checker could write it. When the write fails, the folder holds no complete record of this run.
+
 ### Deploy a later commit
 
-Each new commit needs its own GO. Run `install.sh <new S>`. It keeps the release that `previous` points at and reinstalls the sync units if they are installed ([Deploy a later commit](../deploy/hx15/README.md#deploy-a-later-commit-go-for-that-sha)).
+Each new commit needs its own GO. Run `install.sh <new S>`. It keeps the release that `previous` points at and reinstalls the sync units if they are installed ([Deploy a later commit](../deploy/hx15/README.md#deploy-a-later-commit-go-for-that-sha)). After the install and `verify.sh`, [check the live pages](#check-the-live-pages-after-a-deploy).
 
 ### Roll back
 

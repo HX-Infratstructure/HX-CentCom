@@ -456,6 +456,21 @@ describe("what each activity row changed", () => {
     expect(changesOf("Task IRP-04")).toEqual([]);
   });
 
+  it("shows no change for a write whose snapshots are arrays, not rows", async () => {
+    const arrays = entry({
+      action: "task.progress",
+      entity: "task",
+      entity_id: "CC-01",
+      before: ["In progress", 3],
+      after: ["Blocked", 4],
+    });
+    server.listWorkspace.mockResolvedValue(WORKSPACE);
+    server.listActivity.mockResolvedValue(page([arrays]));
+    await renderActivity("/activity", false);
+
+    expect(changesOf("Task CC-01")).toEqual([]);
+  });
+
   it("shows a requirement's state change in the page's words", async () => {
     server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page(LOG));

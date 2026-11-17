@@ -260,6 +260,16 @@ Each later commit needs its own GO. Fetch it as in [Fetch the commit](#fetch-the
 
 The previous release stays, and `previous` points at it. The script keeps one more release and deletes the older ones. If the sync units are installed, the script reinstalls them from the new release. Then run V-A8, and `verify.sh` through `http://192.168.50.207:8420` (V-B2 in [`../hx7/README.md`](../hx7/README.md#checks-v-b)).
 
+Then check the pages through the same URL. Run the checker from the `current` release, not from the clone:
+
+```sh
+cd ~/.local/share/hx-centcom/current
+cat RELEASE
+npm run live-check -- --base http://192.168.50.207:8420 --out <folder outside the clone and outside ~/.local/share/hx-centcom>
+```
+
+The second command must print `<new S>`. The checker changes nothing on the app. [Check the live pages after a deploy](../../docs/OPERATIONS.md#check-the-live-pages-after-a-deploy) gives its setup, why it runs from the release, where the results go, and what each exit code means.
+
 ## Roll back to the previous release (R1)
 
 A rollback is a host change, so it needs the owner's GO.

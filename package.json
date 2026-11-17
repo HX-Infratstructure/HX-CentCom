@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/server/db/cli.ts migrate",
-    "db:seed": "tsx src/server/db/cli.ts seed"
+    "db:seed": "tsx src/server/db/cli.ts seed",
+    "live-check": "node scripts/live-check/cli.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -92,6 +93,7 @@
     "globals": "^15.15.0",
     "jsdom": "^20.0.3",
     "nitro": "3.0.260603-beta",
+    "playwright": "1.65.0",
     "prettier": "^3.7.3",
     "tsx": "^4.23.15",
     "typescript": "^5.8.3",

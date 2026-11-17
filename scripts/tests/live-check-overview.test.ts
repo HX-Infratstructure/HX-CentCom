@@ -1,0 +1,453 @@
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
+import { checks } from "../live-check/checks/overview.ts";
+import type { CheckContext, CheckOutcome } from "../live-check/types.ts";
+
+/** An API answer may be a function of whether the page has loaded, to model a write between the two reads. */
+function fakeContext(api: Record<string, unknown>, pageData: unknown): CheckContext {
+  let pageLoaded = false;
+  const session = {
+    goto: async () => {
+      pageLoaded = true;
+      return 200;
+    },
+    page: { evaluate: async () => pageData },
+  };
+  return {
+    session,
+    api: {
+      getJson: async (path: string) => {
+        if (!(path in api)) throw new Error(`unexpected API path ${path}`);
+        const answer = api[path];
+        return typeof answer === "function" ? answer(pageLoaded) : answer;
+      },
+    },
+    screenshot: async (name: string) => name,
+  } as unknown as CheckContext;
+}
+
+function run(id: string, ctx: CheckContext): Promise<CheckOutcome> {
+  const check = checks.find((entry) => entry.id === id);
+  assert.ok(check, `check ${id} exists`);
+  return check.run(ctx);
+}
+
+const OPEN_PRS = "/api/v1/github/prs?state=open";
+
+describe("pull-requests-open-first", () => {
+  test("expects as many Open rows as the server's default page holds, not the open total", async () => {
+    const page = Array.from({ length: 20 }, (_, i) => ({ title: `PR ${i}` }));
+    const api = { [OPEN_PRS]: { items: page, counts: { total: 45 } } };
+    const ctx = fakeContext(api, [{ title: "Open", rows: 20 }]);
+    assert.equal((await run("pull-requests-open-first", ctx)).status, "PASS");
+  });
+
+  test("passes with no Open group when no pull request is open", async () => {
+    const ctx = fakeContext({ [OPEN_PRS]: { items: [], counts: { total: 0 } } }, [
+      { title: "Merged", rows: 3 },
+    ]);
+    assert.equal((await run("pull-requests-open-first", ctx)).status, "PASS");
+  });
+
+  test("fails when an Open group shows although no pull request is open", async () => {
+    const ctx = fakeContext({ [OPEN_PRS]: { items: [], counts: { total: 0 } } }, [
+      { title: "Merged", rows: 3 },
+      { title: "Open", rows: 1 },
+    ]);
+    const outcome = await run("pull-requests-open-first", ctx);
+    assert.equal(outcome.status, "FAIL");
+    assert.equal(outcome.reason, "an Open group shows although the API has no open pull request");
+  });
+
+  test("still needs the Open group first with the API's row count", async () => {
+    const api = { [OPEN_PRS]: { items: [{ title: "a" }, { title: "b" }], counts: { total: 2 } } };
+    const first = fakeContext(api, [
+      { title: "Open", rows: 2 },
+      { title: "Merged", rows: 3 },
+    ]);
+    assert.equal((await run("pull-requests-open-first", first)).status, "PASS");
+    const missing = fakeContext(api, [{ title: "Merged", rows: 3 }]);
+    const outcome = await run("pull-requests-open-first", missing);
+    assert.equal(outcome.status, "FAIL");
+    assert.equal(outcome.reason, "Open group is not first or its row count differs");
+    const wrongCount = fakeContext(api, [{ title: "Open", rows: 1 }]);
+    assert.equal((await run("pull-requests-open-first", wrongCount)).status, "FAIL");
+  });
+});
+
+const CREATED = "2026-11-16T17:00:00.123Z";
+const WORKSPACE = {
+  agents: [
+    { id: "cc1", display_name: "CC1" },
+    { id: "cc2", display_name: "CC2" },
+  ],
+  statusLabels: [
+    { id: "todo", label: "To do" },
+    { id: "done", label: "Done" },
+  ],
+};
+
+function activityContext(
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+  change: { field: string; from: string | null; to: string | null },
+  entity = "task",
+): CheckContext {
+  return fakeContext(
+    {
+      "/api/v1/activity": {
+        items: [{ entity, actor: "cc1", created_at: "2026-11-16T17:00:00.123456Z", before, after }],
+      },
+      "/api/v1/workspace": WORKSPACE,
+    },
+    [{ actorName: "CC1", createdAt: CREATED, changes: [change] }],
+  );
+}
+
+describe("activity-row-changes", () => {
+  test("passes when the shown values are the API values as the page prints them", async () => {
+    const ctx = activityContext(
+      { title: "Old title", priority: null, done: false, commit_sha: "abcdef0123456789" },
+      { title: "New title", priority: 2, done: true, commit_sha: "1234567890abcdef" },
+      { field: "title", from: "Old title", to: "New title" },
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "PASS");
+    for (const change of [
+      { field: "priority", from: "none", to: "2" },
+      { field: "done", from: "false", to: "true" },
+      { field: "commit sha", from: "abcdef0", to: "1234567" },
+    ]) {
+      const each = activityContext(
+        { priority: null, done: false, commit_sha: "abcdef0123456789" },
+        { priority: 2, done: true, commit_sha: "1234567890abcdef" },
+        change,
+      );
+      assert.equal((await run("activity-row-changes", each)).status, "PASS", change.field);
+    }
+  });
+
+  test("fails when the shown values differ from the API values", async () => {
+    const ctx = activityContext(
+      { title: "Old title" },
+      { title: "New title" },
+      { field: "title", from: "wrong-a", to: "wrong-b" },
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "FAIL");
+  });
+
+  test("fails when only one side differs from the API value", async () => {
+    const ctx = activityContext(
+      { title: "Old title" },
+      { title: "New title" },
+      { field: "title", from: "Old title", to: "wrong-b" },
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "FAIL");
+  });
+
+  test("a shown none to none fails, because an empty or missing value is no change", async () => {
+    const cases = [
+      { before: { title: "" }, after: { title: null } },
+      { before: {}, after: { title: "" } },
+    ];
+    for (const { before, after } of cases) {
+      const ctx = activityContext(before, after, { field: "title", from: "none", to: "none" });
+      assert.equal(
+        (await run("activity-row-changes", ctx)).status,
+        "FAIL",
+        JSON.stringify({ before, after }),
+      );
+    }
+  });
+
+  test("a create row showing a change fails, because the page shows no change for a create", async () => {
+    const ctx = activityContext(
+      null,
+      { title: "New" },
+      { field: "title", from: "none", to: "New" },
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "FAIL");
+  });
+
+  test("an updated at field shown as a change fails, because the page never shows a bookkeeping key", async () => {
+    const [from, to] = ["2026-11-16T16:00:00Z", "2026-11-16T17:00:00Z"];
+    const ctx = activityContext(
+      { title: "Same", updated_at: from },
+      { title: "Same", updated_at: to },
+      { field: "updated at", from, to },
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "FAIL");
+  });
+
+  test("long text shows as edited, with no from value", async () => {
+    const long = "x".repeat(41);
+    const ok = activityContext(
+      { notes: "short" },
+      { notes: long },
+      { field: "notes", from: null, to: "edited" },
+    );
+    assert.equal((await run("activity-row-changes", ok)).status, "PASS");
+    const printed = activityContext(
+      { notes: "short" },
+      { notes: long },
+      { field: "notes", from: "short", to: long },
+    );
+    assert.equal((await run("activity-row-changes", printed)).status, "FAIL");
+  });
+
+  test("a labelled field shows the page's labels", async () => {
+    const cases = [
+      {
+        entity: "decision",
+        key: "status",
+        from: "Pending",
+        to: "Decided",
+        shownFrom: "Pending",
+        shownTo: "Decided",
+      },
+      {
+        entity: "requirement",
+        key: "state",
+        from: "PASS",
+        to: "FAIL",
+        shownFrom: "Proven",
+        shownTo: "Failed",
+      },
+      {
+        entity: "raid_item",
+        key: "validation_state",
+        from: "unverified",
+        to: "validated",
+        shownFrom: "Unverified",
+        shownTo: "Validated",
+      },
+      {
+        entity: "task",
+        key: "status",
+        from: "todo",
+        to: "done",
+        shownFrom: "To do",
+        shownTo: "Done",
+      },
+      {
+        entity: "task",
+        key: "status",
+        from: "todo",
+        to: "gone",
+        shownFrom: "To do",
+        shownTo: "gone",
+      },
+    ];
+    for (const c of cases) {
+      const field = c.key.replace(/_/g, " ");
+      const [from, to] = [c.shownFrom, c.shownTo];
+      const right = activityContext(
+        { [c.key]: c.from },
+        { [c.key]: c.to },
+        { field, from, to },
+        c.entity,
+      );
+      assert.equal(
+        (await run("activity-row-changes", right)).status,
+        "PASS",
+        `${c.entity} ${c.key}`,
+      );
+    }
+  });
+
+  test("a labelled field showing the wrong labels fails", async () => {
+    const cases = [
+      {
+        entity: "decision",
+        key: "status",
+        from: "Pending",
+        to: "Decided",
+        shownFrom: "wrong-a",
+        shownTo: "wrong-b",
+      },
+      {
+        entity: "decision",
+        key: "status",
+        from: "Pending",
+        to: "Decided",
+        shownFrom: "Pending",
+        shownTo: "Deferred",
+      },
+      {
+        entity: "requirement",
+        key: "state",
+        from: "PASS",
+        to: "FAIL",
+        shownFrom: "PASS",
+        shownTo: "FAIL",
+      },
+      {
+        entity: "task",
+        key: "status",
+        from: "todo",
+        to: "done",
+        shownFrom: "todo",
+        shownTo: "done",
+      },
+    ];
+    for (const c of cases) {
+      const field = c.key.replace(/_/g, " ");
+      const [from, to] = [c.shownFrom, c.shownTo];
+      const wrong = activityContext(
+        { [c.key]: c.from },
+        { [c.key]: c.to },
+        { field, from, to },
+        c.entity,
+      );
+      assert.equal(
+        (await run("activity-row-changes", wrong)).status,
+        "FAIL",
+        `${c.entity} ${from} ${to}`,
+      );
+    }
+  });
+
+  test("the page's display rules print these literal strings", async () => {
+    const cases = [
+      { entity: "task", key: "title", from: "a", to: "y".repeat(40), shown: ["a", "y".repeat(40)] },
+      { entity: "task", key: "title", from: "a", to: "y".repeat(41), shown: [null, "edited"] },
+      { entity: "task", key: "priority", from: null, to: 2, shown: ["none", "2"] },
+      {
+        entity: "task",
+        key: "commit_sha",
+        from: "abcdef0123",
+        to: "1234567890",
+        shown: ["abcdef0", "1234567"],
+      },
+      {
+        entity: "decision",
+        key: "gate_type",
+        from: "merge",
+        to: "live_run",
+        shown: ["Merge", "Live run"],
+      },
+      {
+        entity: "requirement",
+        key: "state",
+        from: "NOT_RUN",
+        to: "PASS",
+        shown: ["Not run", "Proven"],
+      },
+      { entity: "task", key: "status", from: "todo", to: "done", shown: ["To do", "Done"] },
+    ] as const;
+    for (const c of cases) {
+      const [from, to] = c.shown;
+      const ctx = activityContext(
+        { [c.key]: c.from },
+        { [c.key]: c.to },
+        { field: c.key.replace(/_/g, " "), from, to },
+        c.entity,
+      );
+      assert.equal(
+        (await run("activity-row-changes", ctx)).status,
+        "PASS",
+        `${c.entity} ${c.key} ${to}`,
+      );
+    }
+  });
+
+  const titleItem = (actor: string, createdAt: string, from: string, to: string) => ({
+    entity: "task",
+    actor,
+    created_at: createdAt,
+    before: { title: from },
+    after: { title: to },
+  });
+  const titleRow = [
+    { actorName: "CC1", createdAt: CREATED, changes: [{ field: "title", from: "Old", to: "New" }] },
+  ];
+
+  test("an item written between the API read and the page load still matches", async () => {
+    const item = titleItem("cc1", "2026-11-16T17:00:00.123456Z", "Old", "New");
+    const ctx = fakeContext(
+      {
+        "/api/v1/activity": (pageLoaded: boolean) => ({ items: pageLoaded ? [item] : [] }),
+        "/api/v1/workspace": WORKSPACE,
+      },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", ctx)).status, "PASS");
+  });
+
+  test("any API item in the row's millisecond can match the row", async () => {
+    const other = titleItem("cc2", "2026-11-16T17:00:00.123100Z", "A", "B");
+    const same = titleItem("cc1", "2026-11-16T17:00:00.123900Z", "Old", "New");
+    const both = fakeContext(
+      { "/api/v1/activity": { items: [other, same] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", both)).status, "PASS");
+    const neither = fakeContext(
+      { "/api/v1/activity": { items: [other] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", neither)).status, "FAIL");
+  });
+
+  test("a row older than the API page has no data, and a gap inside the page fails", async () => {
+    const newer = titleItem("cc1", "2026-11-16T17:00:05.000000Z", "Old", "New");
+    const older = titleItem("cc1", "2026-11-16T16:59:55.000000Z", "Old", "New");
+    const scrolledOff = fakeContext(
+      { "/api/v1/activity": { items: [newer] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", scrolledOff)).status, "LIVE_NOT_EXECUTED");
+    const gap = fakeContext(
+      { "/api/v1/activity": { items: [newer, older] }, "/api/v1/workspace": WORKSPACE },
+      titleRow,
+    );
+    assert.equal((await run("activity-row-changes", gap)).status, "FAIL");
+  });
+
+  test("a page that shows neither rows nor its empty state fails, and the empty state has no data", async () => {
+    const api = { "/api/v1/activity": { items: [] }, "/api/v1/workspace": WORKSPACE };
+    const unrecognized = await run("activity-row-changes", fakeContext(api, null));
+    assert.equal(unrecognized.status, "FAIL");
+    const empty = await run("activity-row-changes", fakeContext(api, []));
+    assert.equal(empty.status, "LIVE_NOT_EXECUTED");
+  });
+});
+
+describe("activity-row-changes on an empty log", () => {
+  test("names the empty log as its reason, apart from rows that show no changed field", async () => {
+    const api = { "/api/v1/activity": { items: [] }, "/api/v1/workspace": WORKSPACE };
+    const empty = await run("activity-row-changes", fakeContext(api, []));
+    assert.equal(empty.reason, "the activity log is empty");
+    const unchanged = [{ actorName: "CC1", createdAt: CREATED, changes: [] }];
+    const noChange = await run("activity-row-changes", fakeContext(api, unchanged));
+    assert.equal(noChange.status, "LIVE_NOT_EXECUTED");
+    assert.notEqual(noChange.reason, empty.reason);
+  });
+});
+
+/** Each route answers 200 with the chrome's h1; `failing` renders the route's error state, as RouteError does. */
+function pagesContext(failing: string | null): CheckContext {
+  let path = "";
+  const shown = () => ({
+    heading: "Workspace",
+    error: path === failing ? "Could not load the page" : null,
+  });
+  const session = {
+    goto: async (to: string) => {
+      path = to;
+      return 200;
+    },
+    takeConsoleErrors: () => [],
+    page: { evaluate: async () => shown() },
+  };
+  return { session, screenshot: async (name: string) => name } as unknown as CheckContext;
+}
+
+describe("pages-load", () => {
+  test("passes when every route shows its page", async () => {
+    assert.equal((await run("pages-load", pagesContext(null))).status, "PASS");
+  });
+
+  test("fails when a route shows its error state inside the chrome", async () => {
+    assert.equal((await run("pages-load", pagesContext("/tasks"))).status, "FAIL");
+  });
+});
