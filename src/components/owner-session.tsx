@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,8 +27,34 @@ export function OwnerKeyControl(): ReactNode {
   );
 }
 
-function OwnerKeyDialog(): ReactNode {
+/**
+ * Public mode's pointer to owner mode: says what needs the key and opens the same key dialog as the header. Storing the
+ * key unmounts the prompt with its button, so focus moves to `focusAfter`, which the caller keeps mounted or mounts.
+ */
+export function OwnerKeyPrompt({
+  children,
+  focusAfter,
+}: {
+  children: ReactNode;
+  focusAfter: RefObject<HTMLElement | null>;
+}): ReactNode {
+  return (
+    <div className="owner-key-prompt">
+      <p>{children}</p>
+      <OwnerKeyDialog trigger="Enter owner key" focusAfter={focusAfter} />
+    </div>
+  );
+}
+
+function OwnerKeyDialog({
+  trigger = "Owner key",
+  focusAfter,
+}: {
+  trigger?: string;
+  focusAfter?: RefObject<HTMLElement | null>;
+}): ReactNode {
   const [open, setOpen] = useState(false);
+  const stored = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const inputId = useId();
   const errorId = useId();
@@ -45,6 +71,7 @@ function OwnerKeyDialog(): ReactNode {
       setError("This browser blocks session storage, so it cannot keep the key.");
       return;
     }
+    stored.current = true;
     setOpen(false);
   }
 
@@ -53,15 +80,23 @@ function OwnerKeyDialog(): ReactNode {
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) setError(null);
+        if (next) stored.current = false;
+        else setError(null);
       }}
     >
       <DialogTrigger asChild>
         <Button type="button" variant="outline" size="sm">
-          Owner key
+          {trigger}
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          const target = stored.current ? focusAfter?.current : null;
+          if (target === null || target === undefined) return;
+          event.preventDefault();
+          target.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Owner key</DialogTitle>
           <DialogDescription>

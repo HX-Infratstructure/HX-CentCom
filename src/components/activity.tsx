@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Undo2 } from "lucide-react";
 import {
   AlertDialog,
@@ -23,26 +23,36 @@ import {
   type AppError,
   type OwnerActions,
 } from "./model";
+import { OwnerKeyPrompt } from "./owner-session";
 import { AgentBadge, Time } from "./record-parts";
 import { RecordLink } from "./url-state";
 
-/** The activity log, newest first. Revert appears only in owner mode, and only on the rows that offer it. */
+/**
+ * The activity log, newest first. Revert appears only in owner mode, and only on the rows that offer it. In public mode,
+ * one prompt above the list asks for the owner key when any listed row is revertible.
+ */
 export function ActivityList({
   entries,
   owner,
 }: {
   entries: readonly ActivityView[];
-  /** null in public mode: no row offers Revert. */
+  /** null in public mode: no row offers Revert, and the owner key prompt stands in for it. */
   owner: OwnerActions | null;
 }): ReactNode {
+  const list = useRef<HTMLUListElement>(null);
   return (
-    <ul className="activity-log">
-      {entries.map((entry) => (
-        <li key={entry.id}>
-          <ActivityRow entry={entry} owner={owner} />
-        </li>
-      ))}
-    </ul>
+    <>
+      {owner === null && entries.some((entry) => entry.revertible) && (
+        <OwnerKeyPrompt focusAfter={list}>Revert needs the owner key.</OwnerKeyPrompt>
+      )}
+      <ul ref={list} tabIndex={-1} className="activity-log">
+        {entries.map((entry) => (
+          <li key={entry.id}>
+            <ActivityRow entry={entry} owner={owner} />
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
