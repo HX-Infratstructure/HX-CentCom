@@ -1,8 +1,39 @@
 import { fireEvent, isInaccessible, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
-import type { Agent, StatusLabel, Task, UpdatesPage } from "./server-types";
+import { shellWith, tasksPageWith } from "@/test/ui-fixtures";
+import type {
+  Agent,
+  Requirement,
+  StatusLabel,
+  Task,
+  TaskCounts,
+  TasksPage,
+  UpdatesPage,
+} from "./server-types";
+
+const server = vi.hoisted(() => ({
+  listTasks: vi.fn(),
+  getTask: vi.fn(),
+  listWorkspace: vi.fn(),
+}));
+vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
+  listTasks: server.listTasks,
+  getTask: server.getTask,
+  listWorkspace: server.listWorkspace,
+}));
+
+beforeEach(() => {
+  server.listTasks.mockReset();
+  server.getTask.mockReset();
+  server.listWorkspace.mockReset();
+});
+
+afterEach(() => {
+  // The page reads tasks a page at a time and never the whole workspace.
+  expect(server.listWorkspace).not.toHaveBeenCalled();
+});
 
 // Names the seed roster does not use (tests/codebase/agent-display-names.test.ts).
 const AGENTS: readonly Agent[] = [
@@ -46,19 +77,31 @@ function task(fields: Pick<Task, "id" | "title"> & Partial<Task>): Task {
   };
 }
 
-const workspace = (tasks: readonly Task[]) =>
-  workspaceWith({ tasks, agents: AGENTS, statusLabels: STATUSES });
+/** The board's filters as the route sends them: the URL's agent and repository, never `open`. */
+type BoardQuery = { readonly agentId?: string; readonly repo?: string };
 
 /**
- * `updateDeps` is the route's `loaderDeps` for `url`: only the agent filter reaches the update log's query key.
- * The route's own loader and `select: adaptWorkspace` run against the stored snapshot.
+ * Seeds the bounded reads for `url`: the shell, the first page of the task read for `query`, and the update log, whose
+ * query key carries only the agent filter. `page` is what the server returns for the URL's filters.
  */
-async function renderTasks(url: string, tasks: readonly Task[], updateDeps: object = {}) {
+async function renderTasks(
+  url: string,
+  page: TasksPage | readonly Task[],
+  query: BoardQuery = {},
+): Promise<void> {
+  const first = Array.isArray(page) ? tasksPageWith(page) : (page as TasksPage);
+  // The page renders the whole document, so every test mounts it on `document` as the app does: mixing that with the
+  // <div> mount in one file loops React's event dispatch (render-app.tsx). An open sheet is modal: the h1 behind it is
+  // hidden.
+  const sheet = new URL(url, "http://localhost").searchParams.has("item");
   await renderApp(url, {
     heading: "Tasks",
+    onDocument: true,
+    hidden: sheet,
     seed: [
-      [["task-workspace"], workspace(tasks)],
-      [["updates", updateDeps], { pages: [NO_UPDATES], pageParams: [undefined] }],
+      [["workspace-shell"], shellWith({ agents: AGENTS, statusLabels: STATUSES })],
+      [["tasks", "list", query], { pages: [first], pageParams: [undefined] }],
+      [["updates", { agentId: query.agentId }], { pages: [NO_UPDATES], pageParams: [undefined] }],
     ],
   });
 }
@@ -95,9 +138,23 @@ const ROSTER: readonly Task[] = [
   }),
 ];
 
+const ATLAS = ROSTER.filter((t) => t.agent === "atlas");
+
+/** The server's facet counts: each facet ignores its own filter, so the agent chips count every agent's tasks. */
+const ATLAS_COUNTS: TaskCounts = {
+  total: 2,
+  byAgent: { atlas: 2, beacon: 2 },
+  byRepo: { "HX-CentCom": 1, "HX-LiteLLM": 1 },
+  byAttention: { blocked: 0, owner: 0, stale: 0 },
+};
+
 describe("the task board's agent filter", () => {
-  it("shows only the chosen agent's tasks", async () => {
-    await renderTasks("/tasks?agent=atlas", ROSTER, { agentId: "atlas" });
+  it("shows the server's rows for the chosen agent", async () => {
+    await renderTasks(
+      "/tasks?agent=atlas",
+      { items: ATLAS, nextCursor: null, counts: ATLAS_COUNTS },
+      { agentId: "atlas" },
+    );
 
     expect(taskTitles()).toEqual(["Draft the shadow hook config", "Route the LiteLLM hook"]);
   });
@@ -115,7 +172,7 @@ describe("the task board's agent filter", () => {
   });
 
   it("says no task matches when the chosen agent has none", async () => {
-    await renderTasks("/tasks?agent=cinder", ROSTER, { agentId: "cinder" });
+    await renderTasks("/tasks?agent=cinder", tasksPageWith([]), { agentId: "cinder" });
 
     expect(screen.getAllByRole("status").map((s) => s.textContent)).toContain(
       "No tasks match these filters.",
@@ -123,35 +180,190 @@ describe("the task board's agent filter", () => {
     expect(taskTitles()).toEqual([]);
   });
 
-  it("counts every agent's tasks on the agent chips and only the chosen agent's on the repository chips", async () => {
-    await renderTasks("/tasks?agent=atlas", ROSTER, { agentId: "atlas" });
+  it("shows the server's counts on the chips, not a count of the loaded rows", async () => {
+    await renderTasks(
+      "/tasks?agent=atlas",
+      {
+        items: ATLAS,
+        nextCursor: "after-IRP-43",
+        counts: {
+          ...ATLAS_COUNTS,
+          total: 31,
+          byAgent: { atlas: 31, beacon: 9 },
+          byRepo: { "HX-CentCom": 24, "HX-LiteLLM": 7 },
+        },
+      },
+      { agentId: "atlas" },
+    );
 
-    expectChips("Agent", ["Atlas 2", "Beacon 2"]);
-    expectChips("Repository", ["HX-CentCom 1", "HX-LiteLLM 1"]);
+    expectChips("Agent", ["Atlas 31", "Beacon 9"]);
+    expectChips("Repository", ["HX-CentCom 24", "HX-LiteLLM 7"]);
   });
 
   it("names the chosen agent and its count on the Agent toolbar button, and leaves Repository unset", async () => {
-    await renderTasks("/tasks?agent=atlas", ROSTER, { agentId: "atlas" });
+    await renderTasks(
+      "/tasks?agent=atlas",
+      { items: ATLAS, nextCursor: null, counts: ATLAS_COUNTS },
+      { agentId: "atlas" },
+    );
 
     const buttons = screen.getByRole("group", { name: "Filter tasks" }).querySelectorAll("summary");
     expect([...buttons].map((b) => b.textContent)).toEqual(["AgentAtlas2", "Repository"]);
   });
 
-  it("counts every task on the repository chips without the agent filter", async () => {
-    await renderTasks("/tasks", ROSTER);
+  it("sends both board filters to the task read", async () => {
+    const both = ATLAS.filter((t) => t.repository === "HX-LiteLLM");
+    await renderTasks(
+      "/tasks?agent=atlas&repo=HX-LiteLLM",
+      { items: both, nextCursor: null, counts: { ...ATLAS_COUNTS, total: 1 } },
+      { agentId: "atlas", repo: "HX-LiteLLM" },
+    );
 
-    expectChips("Agent", ["Atlas 2", "Beacon 2"]);
-    expectChips("Repository", ["HX-CentCom 3", "HX-LiteLLM 2"]);
+    expect(taskTitles()).toEqual(["Route the LiteLLM hook"]);
   });
 
   it("counts a repository named after an object property, such as constructor, as an ordinary value", async () => {
-    await renderTasks("/tasks", [
-      task({ id: "IRP-46", title: "Draft the shadow hook config", repository: "constructor" }),
-      task({ id: "IRP-47", title: "Wire the eval dashboard", repository: "toString" }),
-      task({ id: "IRP-48", title: "Pin the router build" }),
-    ]);
+    await renderTasks("/tasks", {
+      items: [
+        task({ id: "IRP-46", title: "Draft the shadow hook config", repository: "constructor" }),
+        task({ id: "IRP-47", title: "Wire the eval dashboard", repository: "toString" }),
+        task({ id: "IRP-48", title: "Pin the router build" }),
+      ],
+      nextCursor: null,
+      counts: {
+        total: 3,
+        byAgent: { atlas: 3 },
+        byRepo: JSON.parse('{"constructor": 1, "HX-CentCom": 1, "toString": 1}') as Record<
+          string,
+          number
+        >,
+        byAttention: { blocked: 0, owner: 0, stale: 0 },
+      },
+    });
 
     expectChips("Repository", ["constructor 1", "HX-CentCom 1", "toString 1"]);
+  });
+});
+
+describe("the board's Show more", () => {
+  const ALL: readonly Task[] = Array.from({ length: 25 }, (_, i) => {
+    const n = String(i + 1).padStart(2, "0");
+    return task({ id: `IRP-1${n}`, title: `Task number ${n}` });
+  });
+  const FIRST = tasksPageWith(ALL.slice(0, 20), { all: ALL, nextCursor: "after-IRP-120" });
+  const REST = tasksPageWith(ALL.slice(20), { all: ALL });
+
+  it("shows the first 20 of 25 tasks, then the next page from the first page's cursor", async () => {
+    server.listTasks.mockResolvedValue(REST);
+    await renderTasks("/tasks", FIRST);
+
+    expect(taskTitles()).toHaveLength(20);
+    expect(screen.getByText("Showing 20 of 25 tasks.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+
+    expect(await screen.findByText("Showing all 25 tasks.")).toBeInTheDocument();
+    expect(server.listTasks).toHaveBeenCalledWith({
+      data: { agentId: undefined, repo: undefined, cursor: "after-IRP-120" },
+    });
+    expect(taskTitles()).toEqual(ALL.map((t) => t.title));
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("serves the kanban from the same loaded page", async () => {
+    await renderTasks("/tasks?view=kanban", FIRST);
+
+    const cards = screen.getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+    expect(cards).toEqual(ALL.slice(0, 20).map((t) => t.title));
+    expect(screen.getByText("Showing 20 of 25 tasks.")).toBeInTheDocument();
+  });
+});
+
+describe("the timeline's order", () => {
+  // The server's order: blocked first, then start date.
+  const SERVER_ORDER: readonly Task[] = [
+    task({
+      id: "IRP-84",
+      title: "Unblock the router",
+      start_date: "2026-11-12",
+      attention: ["blocked"],
+    }),
+    task({ id: "IRP-83", title: "Write the release notes" }),
+    task({ id: "IRP-82", title: "Pin the router build", start_date: "2026-11-02" }),
+    task({ id: "IRP-81", title: "Wire the eval dashboard", start_date: "2026-11-02" }),
+  ];
+
+  it("shows the loaded tasks by start date, missing dates last, then id", async () => {
+    await renderTasks("/tasks?view=timeline", SERVER_ORDER);
+
+    const titles = new Set(SERVER_ORDER.map((t) => t.title));
+    const rows = screen
+      .getAllByRole("link")
+      .map((link) => link.textContent)
+      .filter((text) => text !== null && titles.has(text));
+    expect(rows).toEqual([
+      "Wire the eval dashboard",
+      "Pin the router build",
+      "Unblock the router",
+      "Write the release notes",
+    ]);
+  });
+
+  it("shows the same tasks on the kanban", async () => {
+    await renderTasks("/tasks?view=kanban", SERVER_ORDER);
+
+    const cards = screen.getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+    expect([...cards].sort()).toEqual(SERVER_ORDER.map((t) => t.title).sort());
+  });
+});
+
+describe("the task sheet", () => {
+  const ON_PAGE = task({ id: "IRP-91", title: "Wire the eval dashboard" });
+  const BEYOND = task({ id: "IRP-99", title: "Rotate the agent keys" });
+  const REQUIREMENT: Requirement = {
+    id: "a8975406-7a84-4788-a7de-0a26b5a31197",
+    task_id: "IRP-99",
+    requirement: "Every agent key rotates within a day",
+    source_url: null,
+    proof_url: null,
+    state: "NOT_RUN",
+    version: 1,
+    updated_by: "atlas",
+    created_at: "2026-11-14T16:24:57.151Z",
+  };
+
+  it("opens a task that is not on the loaded page by its id, with its requirements", async () => {
+    server.getTask.mockResolvedValue({ task: BEYOND, requirements: [REQUIREMENT], decisions: [] });
+    await renderTasks("/tasks?item=IRP-99", [ON_PAGE]);
+
+    const sheet = await screen.findByRole("dialog");
+    expect(
+      await within(sheet).findByText("Every agent key rotates within a day"),
+    ).toBeInTheDocument();
+    expect(within(sheet).getByText("Rotate the agent keys")).toBeInTheDocument();
+    expect(server.getTask).toHaveBeenCalledWith({ data: { id: "IRP-99" } });
+  });
+
+  it("reads a task on the loaded page by its id too, because list rows carry no requirements", async () => {
+    server.getTask.mockResolvedValue({
+      task: ON_PAGE,
+      requirements: [{ ...REQUIREMENT, task_id: "IRP-91" }],
+      decisions: [],
+    });
+    await renderTasks("/tasks?item=IRP-91", [ON_PAGE]);
+
+    const sheet = await screen.findByRole("dialog");
+    expect(
+      await within(sheet).findByText("Every agent key rotates within a day"),
+    ).toBeInTheDocument();
+  });
+
+  it("says the task is missing when the by-id read finds none", async () => {
+    server.getTask.mockResolvedValue(null);
+    await renderTasks("/tasks?item=IRP-98", [ON_PAGE]);
+
+    const sheet = await screen.findByRole("dialog");
+    expect(await within(sheet).findByText(/IRP-98 is not in the/)).toBeInTheDocument();
   });
 });
 

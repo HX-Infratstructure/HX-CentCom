@@ -27,9 +27,9 @@ describe("the show-more status line", () => {
     expect(screen.getByRole("alert").textContent).toBe("Could not load more lessons. fetch failed");
   });
 
-  // tsc proves this one: the directive fails the type check as soon as "tasks" compiles.
+  // tsc proves this one: the directive fails the type check as soon as "agents" compiles.
   it("does not compile a noun that has no singular in the registry", () => {
-    // @ts-expect-error "tasks" has no singular, so no list can show it until the registry names one.
-    const unregistered: ShowMoreProps["noun"] = "tasks";
+    // @ts-expect-error "agents" has no singular, so no list can show it until the registry names one.
+    const unregistered: ShowMoreProps["noun"] = "agents";
   });
 });

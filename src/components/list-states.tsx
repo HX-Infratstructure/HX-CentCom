@@ -65,6 +65,7 @@ const SINGULAR = {
   "RAID items": "RAID item",
   "pull requests": "pull request",
   "activity entries": "activity entry",
+  tasks: "task",
 } as const;
 
 export type ShowMoreProps = {
