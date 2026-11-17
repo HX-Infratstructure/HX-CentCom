@@ -2,10 +2,13 @@ import type { QueryKey } from "@tanstack/react-query";
 import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith } from "@/test/ui-fixtures";
 import type { Agent, Lesson, LessonsPage, RaidItem, RaidPage } from "./server-types";
 
-const server = vi.hoisted(() => ({ getRaidItem: vi.fn(), getLesson: vi.fn() }));
+const server = vi.hoisted(() => ({
+  getRaidItem: vi.fn(),
+  getLesson: vi.fn(),
+}));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   getRaidItem: server.getRaidItem,
@@ -20,7 +23,7 @@ const AGENTS: readonly Agent[] = [
   { id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true },
 ];
 
-const WORKSPACE = workspaceWith({ agents: AGENTS });
+const SHELL = shellWith({ agents: AGENTS });
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -96,7 +99,7 @@ async function renderPage(url: string, page: string, list: readonly [QueryKey, u
   await renderApp(url, {
     heading: page,
     seed: [
-      [["task-workspace"], WORKSPACE],
+      [["workspace-shell"], SHELL],
       [list[0], { pages: [list[1]], pageParams: [undefined] }],
     ],
     onDocument: true,

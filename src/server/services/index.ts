@@ -10,8 +10,10 @@ import {
   getTask,
   listActivity,
   listDecisions,
+  listTasks,
   listUpdates,
   listWorkspace,
+  listWorkspaceShell,
   myWork,
 } from "./reads";
 import {
@@ -59,9 +61,11 @@ export function createServices(db: Db, deps: Partial<ServiceDeps> = {}): Service
   return {
     resolveActor: (authHeader) => resolveActor(db, authHeader),
     listWorkspace: () => listWorkspace(db),
+    listWorkspaceShell: () => listWorkspaceShell(db),
     listUpdates: (query) => listUpdates(db, query),
     listActivity: (query) => listActivity(db, query),
     listDecisions: (query) => listDecisions(db, query),
+    listTasks: (query) => listTasks(db, query),
     getDecision: (decisionId) => getDecision(db, decisionId),
     getTask: (taskId) => getTask(db, taskId),
     myWork: (actor, agentId) => myWork(db, actor, agentId),
@@ -144,6 +148,7 @@ export {
   requestDecisionInput,
   decideInput,
   updateQueryInput,
+  taskQueryInput,
   activityQueryInput,
   decisionQueryInput,
   type CreateTaskInput,
@@ -152,6 +157,7 @@ export {
   type RequestDecisionInput,
   type DecideInput,
   type UpdateQueryInput,
+  type TaskQueryInput,
   type ActivityQueryInput,
   type DecisionQueryInput,
 } from "./inputs";

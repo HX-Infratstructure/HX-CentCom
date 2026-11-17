@@ -41,7 +41,7 @@ const scanned = new Map(
 
 describe("one source of truth for agents", () => {
   it("the scan sees the literals of the UI source files", () => {
-    expect(scanned.get("src/lib/task-data.ts")).toContain("task-workspace");
+    expect(scanned.get("src/lib/task-data.ts")).toContain("workspace-shell");
   });
 
   it("no UI source file restates an agent's display name", async () => {

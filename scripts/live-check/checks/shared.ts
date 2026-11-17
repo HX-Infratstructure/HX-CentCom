@@ -1,6 +1,6 @@
 /** Response shapes of the `/api/v1` endpoints the checks read, and the helpers every check module shares. */
 
-import type { ActivityEntity } from "../../../src/components/server-types.ts";
+import type { ActivityEntity, Task } from "../../../src/components/server-types.ts";
 
 export const PAGE_ROUTES = {
   home: "/",
@@ -22,16 +22,30 @@ export interface ListPage {
   readonly counts: { readonly total: number; readonly [facet: string]: Facet | number };
 }
 
-export interface WorkspaceTask {
+/** The server's needs-attention reasons, from its task row, so a new reason cannot leave this out of date. */
+type Attention = Task["attention"][number];
+
+export interface TaskItem {
   readonly id: string;
   readonly repository: string;
   readonly stale: boolean | null;
   /** Holds `stale` only for an open task whose `stale` is true; the UI's Stale commit badge follows it. */
-  readonly attention: readonly ("blocked" | "owner" | "stale")[];
+  readonly attention: readonly Attention[];
+}
+
+/** `GET /api/v1/tasks`: the first page (20 by default) for the filters, as the Tasks page shows it. */
+export interface TaskList {
+  readonly items: readonly TaskItem[];
+  readonly nextCursor: string | null;
+  readonly counts: {
+    readonly total: number;
+    readonly byAgent: Facet;
+    readonly byRepo: Facet;
+    readonly byAttention: Readonly<Record<Attention, number>>;
+  };
 }
 
 export interface Workspace {
-  readonly tasks: readonly WorkspaceTask[];
   readonly agents: readonly { readonly id: string; readonly display_name: string }[];
   readonly statusLabels: readonly { readonly id: string; readonly label: string }[];
   readonly updatesCursor: string | null;

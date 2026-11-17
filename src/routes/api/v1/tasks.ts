@@ -6,6 +6,7 @@ export const Route = createFileRoute("/api/v1/tasks")({
     handlers: {
       ANY: (ctx) =>
         endpoint(ctx, {
+          GET: async (req) => Response.json(await req.services.listTasks(unparsed(req.query))),
           POST: async (req) =>
             req.services.createTask(await req.actor(), unparsed(await req.json()), {
               idempotencyKey: req.opts.idempotencyKey,

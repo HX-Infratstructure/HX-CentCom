@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp, type Seed } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith, tasksPageWith } from "@/test/ui-fixtures";
 import type {
   ActivityEntry,
   ActivityPage,
@@ -20,9 +20,23 @@ import type {
   UpdatesPage,
 } from "./server-types";
 
+const server = vi.hoisted(() => ({ listTasks: vi.fn() }));
+vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
+  listTasks: server.listTasks,
+}));
+
+type TaskRequest = {
+  readonly agentId?: string;
+  readonly open?: boolean;
+  readonly attention?: Task["attention"][number];
+  readonly limit?: number;
+  readonly cursor?: string;
+};
+
 /**
  * T14: every list page's default view shows at most 20 rows and keeps its filters in the URL. A paged list's first
- * page holds 20 rows and a cursor, as the server's default page does; the kanban shows the whole task set.
+ * page holds 20 rows and a cursor, as the server's default page does; the kanban pages its tasks from the server too.
  */
 
 const PAGE_SIZE = 20;
@@ -74,10 +88,7 @@ function task(
   };
 }
 
-/**
- * The seed's seven tasks, their ids and titles, with invented agents. The board shows the whole task set
- * (docs/ARCHITECTURE.md).
- */
+/** The seed's seven tasks, their ids and titles, with invented agents. */
 const TASKS: readonly Task[] = [
   task({
     id: "IRP-04",
@@ -140,7 +151,42 @@ const TASKS: readonly Task[] = [
   }),
 ];
 
-const WORKSPACE = workspaceWith({ tasks: TASKS, agents: AGENTS, statusLabels: STATUSES });
+/** The seed's tasks and 18 more, so the board's first page of 20 leaves tasks for Show more. */
+const BOARD: readonly Task[] = [
+  ...TASKS,
+  ...range(18, (n) =>
+    task({
+      id: `HX30-${pad(n)}`,
+      title: `Benchmark batch ${n}`,
+      agent: "cinder",
+      group: "backlog",
+      status: "Waiting",
+    }),
+  ),
+];
+
+const SHELL = shellWith({ agents: AGENTS, statusLabels: STATUSES, tasks: BOARD });
+
+/** The task read under the server's rules: agent, open and attention filters, pages of 20 by default. */
+function serveTasks(tasks: readonly Task[]) {
+  server.listTasks.mockImplementation(({ data }: { data: TaskRequest }) => {
+    const all = tasks.filter(
+      (t) =>
+        (data.agentId === undefined || t.agent === data.agentId) &&
+        (data.open !== true || t.open) &&
+        (data.attention === undefined || t.attention.includes(data.attention)),
+    );
+    const start = Number(data.cursor ?? 0);
+    const end = start + (data.limit ?? PAGE_SIZE);
+    const nextCursor = end < all.length ? String(end) : null;
+    return Promise.resolve(tasksPageWith(all.slice(start, end), { all, nextCursor }));
+  });
+}
+
+beforeEach(() => {
+  server.listTasks.mockReset();
+  serveTasks(BOARD);
+});
 
 function update(n: number, fields: Partial<TaskUpdate> = {}): TaskUpdate {
   return {
@@ -353,7 +399,8 @@ function renderList(url: string, page: string, seed: Seed) {
   return renderApp(url, {
     heading: page,
     seed: [
-      [["task-workspace"], WORKSPACE],
+      [["workspace-shell"], SHELL],
+      [["decisions", "overview", { status: "Pending", limit: 100 }], decisions([], 0)],
       [["prs", "list", { state: "open" }], firstPage(NO_PRS)],
       ...seed,
     ],
@@ -452,7 +499,7 @@ const LIST_PAGES: Readonly<Record<string, ListPage>> = {
     seed: [[["updates", {}], firstPage(updates([], 0))]],
     list: main,
     rows: () => within(main()).queryAllByRole("rowheader"),
-    paged: false,
+    paged: true,
     filtered: {
       url: "/tasks?agent=atlas",
       seed: [[["updates", { agentId: "atlas" }], firstPage(updates([], 0))]],

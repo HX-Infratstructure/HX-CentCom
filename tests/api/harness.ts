@@ -67,6 +67,13 @@ export interface Api {
   close(): Promise<void>;
 }
 
+/** A string body is sent as written, so a test can send malformed JSON; any other body is sent as JSON. */
+function requestBody(body: RestInit["body"]): string | undefined {
+  if (body === undefined) return undefined;
+  if (typeof body === "string") return body;
+  return JSON.stringify(body);
+}
+
 export async function startApi(): Promise<Api> {
   const t = await createTestDb();
   const clients: Client[] = [];
@@ -94,12 +101,7 @@ export async function startApi(): Promise<Api> {
     rest: (route, method, path, init = {}) => {
       const headers = new Headers(init.headers);
       if (init.authorization !== undefined) headers.set("authorization", init.authorization);
-      const body =
-        init.body === undefined
-          ? undefined
-          : typeof init.body === "string"
-            ? init.body
-            : JSON.stringify(init.body);
+      const body = requestBody(init.body);
       if (body !== undefined && !headers.has("content-type"))
         headers.set("content-type", "application/json");
       const request = new Request(`${ORIGIN}${path}`, {

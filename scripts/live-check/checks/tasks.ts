@@ -4,9 +4,10 @@ import { TasksPage } from "./pages/tasks-page.ts";
 import {
   pickNarrowingValue,
   sameOrder,
+  type Facet,
+  type TaskList,
   type UpdateList,
   type Workspace,
-  type WorkspaceTask,
 } from "./shared.ts";
 
 async function labelsAndKanban(ctx: CheckContext): Promise<CheckOutcome> {
@@ -47,31 +48,33 @@ async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   });
 }
 
-function repoCounts(tasks: readonly WorkspaceTask[]): Map<string, number> {
-  const tally = new Map<string, number>();
-  for (const task of tasks) {
-    // The API stores an omitted repository as "" (docs/API.md), and "" is no repository to filter by.
-    if (task.repository !== "") tally.set(task.repository, (tally.get(task.repository) ?? 0) + 1);
-  }
-  return tally;
+/** The IDs in code-unit order, so two lists compare as sets whatever order the page shows them in. */
+function sortedIds(records: readonly { readonly id: string }[]): string[] {
+  return records.map((record) => record.id).sort();
+}
+
+function repoCounts(byRepo: Facet): [string, number][] {
+  // The API stores an omitted repository as "" (docs/API.md), and "" is no repository to filter by.
+  return Object.entries(byRepo).filter(([repo]) => repo !== "");
 }
 
 async function filterNarrows(ctx: CheckContext): Promise<CheckOutcome> {
-  const { tasks } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
-  const pick = pickNarrowingValue(repoCounts(tasks), tasks.length);
-  if (!pick) return verdict([noData("no repository narrows the tasks")], { tasks: tasks.length });
-  const [repo, expected] = pick;
+  const { counts } = await ctx.api.getJson<TaskList>("/api/v1/tasks");
+  const pick = pickNarrowingValue(repoCounts(counts.byRepo), counts.total);
+  if (!pick) return verdict([noData("no repository narrows the tasks")], { tasks: counts.total });
+  const [repo, total] = pick;
   const page = new TasksPage(ctx.session);
   await page.open({ repo });
-  const rows = await page.rowCount();
-  const reread = await ctx.api.getJson<Workspace>("/api/v1/workspace");
-  const settled = repoCounts(reread.tasks).get(repo) ?? 0;
+  const shown = sortedIds(await page.rows());
+  const reread = await ctx.api.getJson<TaskList>(`/api/v1/tasks?${new URLSearchParams({ repo })}`);
+  const settled = reread.counts.total;
+  const expected = sortedIds(reread.items);
   const screenshot = await ctx.screenshot("tasks-filter");
   const part =
-    settled === expected
-      ? checked(rows === expected, "filtered rows differ from the API count")
-      : noData(`the ${repo} task count moved from ${expected} to ${settled} during the check`);
-  return verdict([part], { repo, expected, settled, rows, screenshot });
+    settled === total
+      ? checked(sameOrder(shown, expected), "filtered task IDs differ from the API's first page")
+      : noData(`the ${repo} task count moved from ${total} to ${settled} during the check`);
+  return verdict([part], { repo, total, settled, expected, shown, screenshot });
 }
 
 async function updatesShowMore(ctx: CheckContext): Promise<CheckOutcome> {
@@ -90,19 +93,13 @@ async function updatesShowMore(ctx: CheckContext): Promise<CheckOutcome> {
 }
 
 async function staleBadge(ctx: CheckContext): Promise<CheckOutcome> {
-  const { tasks } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
+  const { items } = await ctx.api.getJson<TaskList>("/api/v1/tasks");
   const page = new TasksPage(ctx.session);
   await page.open();
   const rows = await page.rows();
   const screenshot = await ctx.screenshot("stale-badge");
-  const expected = tasks
-    .filter((task) => task.attention.includes("stale"))
-    .map((task) => task.id)
-    .sort();
-  const shown = rows
-    .filter((row) => row.stale)
-    .map((row) => row.id)
-    .sort();
+  const expected = sortedIds(items.filter((task) => task.attention.includes("stale")));
+  const shown = sortedIds(rows.filter((row) => row.stale));
   return verdict([checked(sameOrder(shown, expected), "Stale commit badges differ from the API")], {
     expected,
     shown,

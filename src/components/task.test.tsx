@@ -1,8 +1,27 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
-import type { Agent, GithubPrsPage, StatusLabel, Task, UpdatesPage } from "./server-types";
+import { shellWith, tasksPageWith } from "@/test/ui-fixtures";
+import type {
+  Agent,
+  DecisionsPage,
+  GithubPrsPage,
+  StatusLabel,
+  Task,
+  UpdatesPage,
+} from "./server-types";
+
+const server = vi.hoisted(() => ({ listTasks: vi.fn(), getTask: vi.fn() }));
+vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
+  listTasks: server.listTasks,
+  getTask: server.getTask,
+}));
+
+afterEach(() => {
+  server.listTasks.mockReset();
+  server.getTask.mockReset();
+});
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
@@ -19,6 +38,12 @@ const NO_UPDATES: UpdatesPage = {
   items: [],
   nextCursor: null,
   counts: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
+};
+
+const NO_PENDING: DecisionsPage = {
+  items: [],
+  nextCursor: null,
+  counts: { total: 0, byGateType: {}, byStatus: {} },
 };
 
 const NO_PRS: GithubPrsPage = {
@@ -56,14 +81,24 @@ const TASKS: readonly Task[] = [
   task({ id: "IRP-83", title: "Write the release notes", stale: null, commit_sha: null }),
 ];
 
-const workspace = (tasks: readonly Task[]) =>
-  workspaceWith({ tasks, agents: AGENTS, statusLabels: STATUSES });
+/** The server's task reads: every page read returns `tasks`, and a read by id returns that task. */
+function serveTasks(tasks: readonly Task[]) {
+  server.listTasks.mockResolvedValue(tasksPageWith(tasks));
+  server.getTask.mockImplementation(({ data }: { data: { id: string } }) => {
+    const found = tasks.find((t) => t.id === data.id);
+    return Promise.resolve(
+      found === undefined ? null : { task: found, requirements: [], decisions: [] },
+    );
+  });
+}
 
 async function renderPage(url: string, page: string, tasks: readonly Task[] = TASKS) {
+  serveTasks(tasks);
   await renderApp(url, {
     heading: page,
     seed: [
-      [["task-workspace"], workspace(tasks)],
+      [["workspace-shell"], shellWith({ tasks, agents: AGENTS, statusLabels: STATUSES })],
+      [["decisions", "overview", { status: "Pending", limit: 100 }], NO_PENDING],
       [["updates", {}], { pages: [NO_UPDATES], pageParams: [undefined] }],
       [["prs", "list", { state: "open" }], { pages: [NO_PRS], pageParams: [undefined] }],
     ],

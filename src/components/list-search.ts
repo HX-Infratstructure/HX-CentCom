@@ -1,8 +1,8 @@
 import { assertNever, toInstant, type Instant } from "./model";
 
 /**
- * The URL contract of a filterable list: which search keys it owns, how they parse, and how a list the route holds in
- * full is filtered and counted. url-state.tsx renders it; nothing else in src/components reads search params.
+ * The URL contract of a filterable list: which search keys it owns and how they parse. url-state.tsx renders it;
+ * nothing else in src/components reads search params.
  */
 
 export const ITEM = "item";
@@ -58,11 +58,6 @@ export type FacetCounts<F extends Facets> = {
     Record<string, number>
   >;
 };
-type Readers<F extends Facets, T> = {
-  readonly [K in keyof F]: (
-    item: T,
-  ) => F[K] extends { kind: "days" } ? Instant | null : string | readonly string[] | null;
-};
 
 export interface ListSearch<F extends Facets> {
   readonly facets: F;
@@ -72,33 +67,17 @@ export interface ListSearch<F extends Facets> {
   validate(raw: Record<string, unknown>): SearchOf<F>;
   filters(search: SearchOf<F>): FiltersOf<F>;
   active(filters: FiltersOf<F>): boolean;
-  /**
-   * Faceting for a list the route already holds in full. Counts follow the UpdateCounts rule: each facet applies
-   * every filter except its own.
-   */
-  local<T>(
-    items: readonly T[],
-    filters: FiltersOf<F>,
-    read: Readers<F, T>,
-  ): { readonly items: readonly T[]; readonly counts: FacetCounts<F> };
 }
 
 export type AnySearch = Readonly<Record<string, string>>;
 type AnyFilters = Readonly<Record<string, string | DayRange>>;
 export type AnyCounts = Readonly<Record<string, Readonly<Record<string, number>>>>;
-type AnyValue = string | readonly string[] | null;
-type AnyReaders<T> = Readonly<Record<string, (item: T) => AnyValue>>;
 
 export interface SpecCore {
   readonly facets: readonly (readonly [string, Facet])[];
   validate(raw: Readonly<Record<string, unknown>>): AnySearch;
   filters(search: Readonly<Record<string, unknown>>): AnyFilters;
   active(filters: Readonly<Record<string, unknown>>): boolean;
-  local<T>(
-    items: readonly T[],
-    filters: AnyFilters,
-    read: AnyReaders<T>,
-  ): { readonly items: readonly T[]; readonly counts: AnyCounts };
 }
 
 /**
@@ -142,27 +121,7 @@ function specCore(facets: Facets): SpecCore {
     return entries.some(([key]) => values[key] !== undefined);
   }
 
-  function local<T>(items: readonly T[], wanted: AnyFilters, read: AnyReaders<T>) {
-    const tests = entries.map(([key, f]) => ({ key, f, want: wanted[key], read: read[key] }));
-    const passes = (item: T, test: (typeof tests)[number]) =>
-      test.want === undefined || test.read === undefined || matches(test.want, test.read(item));
-    const visible = items.filter((item) => tests.every((test) => passes(item, test)));
-    const counts: Record<string, Record<string, number>> = {};
-    for (const test of tests) {
-      const reader = test.read;
-      if (test.f.kind === "days" || reader === undefined) continue;
-      // Open facet values come from the data, so a value such as "constructor" must not read Object.prototype.
-      const tally: Record<string, number> = Object.create(null);
-      for (const item of items) {
-        if (!tests.every((other) => other === test || passes(item, other))) continue;
-        for (const value of valuesOf(reader(item))) tally[value] = (tally[value] ?? 0) + 1;
-      }
-      counts[test.key] = tally;
-    }
-    return { items: visible, counts };
-  }
-
-  return { facets: entries, validate, filters, active, local };
+  return { facets: entries, validate, filters, active };
 }
 
 function parseFacetValue(f: Facet, raw: unknown): string | undefined {
@@ -221,24 +180,6 @@ function dayRange(text: string): DayRange {
       ? {}
       : { until: toInstant(new Date(Date.parse(`${to}T00:00:00Z`) + 86_400_000).toISOString()) }),
   };
-}
-
-function matches(want: string | DayRange, got: AnyValue): boolean {
-  if (typeof want !== "string") {
-    if (typeof got !== "string") return false;
-    const time = Date.parse(got);
-    return (
-      (want.since === undefined || time >= Date.parse(want.since)) &&
-      (want.until === undefined || time < Date.parse(want.until))
-    );
-  }
-  return valuesOf(got).includes(want);
-}
-
-function valuesOf(got: AnyValue): readonly string[] {
-  if (got === null) return [];
-  if (typeof got === "string") return [got];
-  return got;
 }
 
 /** A search updater that keeps every other key, for `<Link search>` and `navigate({ search })`. */

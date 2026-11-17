@@ -23,6 +23,7 @@ import type {
   PostProgressInput,
   RequestDecisionInput,
   SetRequirementInput,
+  TaskQueryInput,
   UpdateQueryInput,
 } from "./inputs";
 
@@ -89,6 +90,17 @@ export type DecisionCounts = {
   readonly byStatus: Readonly<Partial<Record<DecisionStatus, number>>>;
 };
 
+/**
+ * Task facet counts, under the same rule as UpdateCounts; `open` applies to every count. `byAttention` counts each
+ * reason's tasks, which are open by that reason's rule.
+ */
+export type TaskCounts = {
+  readonly total: number;
+  readonly byAgent: Readonly<Record<string, number>>;
+  readonly byRepo: Readonly<Record<string, number>>;
+  readonly byAttention: Readonly<Record<Task["attention"][number], number>>;
+};
+
 /** Activity facet counts, under the same rule as UpdateCounts; `entityId` and `since` apply to every count. */
 export type ActivityCounts = {
   readonly total: number;
@@ -100,6 +112,8 @@ export type ActivityCounts = {
 export type Page<T> = { readonly items: readonly T[]; readonly nextCursor: string | null };
 export type UpdatesPage = Page<TaskUpdate> & { readonly counts: UpdateCounts };
 export type ActivityPage = Page<ActivityEntry> & { readonly counts: ActivityCounts };
+/** Blocked first, then the earliest start date, a task with none last, then id. */
+export type TasksPage = Page<Task> & { readonly counts: TaskCounts };
 /**
  * Pending first, then the latest request; a decision with no recorded request time sorts last. A status filter that
  * admits no Pending decision lists the newest decision first instead, with a cursor the default order refuses.
@@ -107,24 +121,46 @@ export type ActivityPage = Page<ActivityEntry> & { readonly counts: ActivityCoun
 export type DecisionsPage = Page<Decision> & { readonly counts: DecisionCounts };
 
 /**
- * One snapshot. `updates`, `updatesCursor` and `counts.updates` equal `listUpdates({})` at that snapshot, and
- * `counts.decisions` equals `listDecisions({}).counts`. Tasks, requirements, agents, status labels and repository heads
- * are whole. `createTask` creates tasks; only the seed creates agents and status labels, and the GitHub sync writes the
- * repository heads. `setRequirement` creates requirements, so they grow through the API; they stay whole because the
- * task sheet reads them from this snapshot and has no read of its own. `decisions` holds every Pending decision and
- * every decision whose `blocks` holds a task that is not done; `listDecisions` pages the rest, and `listGithubPrs` the
- * pull requests.
+ * The workspace's task counts, over every task. `open` counts the tasks whose `Task.open` holds, and `blocked` and
+ * `owner` the tasks whose `Task.attention` holds that reason, the rule `TaskCounts.byAttention` counts by. `byStatus` is
+ * keyed by status label id and leaves out a status that no task has.
  */
-export type Workspace = {
-  readonly tasks: readonly Task[];
+export type WorkspaceTaskCounts = {
+  readonly total: number;
+  readonly open: number;
+  readonly blocked: number;
+  readonly owner: number;
+  readonly byStatus: Readonly<Record<string, number>>;
+};
+
+/**
+ * One snapshot, which the pages read. `updates`, `updatesCursor` and `counts.updates` equal `listUpdates({})` at that
+ * snapshot, and `counts.decisions` equals `listDecisions({}).counts`. Agents, status labels and repository heads are
+ * whole: only the seed creates agents and status labels, and the GitHub sync writes the repository heads.
+ */
+export type WorkspaceShell = {
   readonly updates: readonly TaskUpdate[];
   readonly updatesCursor: string | null;
-  readonly requirements: readonly Requirement[];
-  readonly decisions: readonly Decision[];
   readonly agents: readonly Agent[];
   readonly statusLabels: readonly StatusLabel[];
   readonly repos: readonly RepoHead[];
-  readonly counts: { readonly updates: UpdateCounts; readonly decisions: DecisionCounts };
+  readonly counts: {
+    readonly updates: UpdateCounts;
+    readonly decisions: DecisionCounts;
+    readonly tasks: WorkspaceTaskCounts;
+  };
+};
+
+/**
+ * The shell plus every task and requirement, in the shell's snapshot. The pages read `listWorkspaceShell` and page the
+ * tasks with `listTasks`; this whole snapshot stays for the REST and MCP clients. `decisions` holds every Pending
+ * decision and every decision whose `blocks` holds an open task, one that is blocked or not done; `listDecisions` pages
+ * the rest, and `listGithubPrs` the pull requests.
+ */
+export type Workspace = WorkspaceShell & {
+  readonly tasks: readonly Task[];
+  readonly requirements: readonly Requirement[];
+  readonly decisions: readonly Decision[];
 };
 
 /** One task with its requirements and every decision whose `blocks` holds it, whatever its status. */
@@ -207,9 +243,11 @@ export type RevertResult = {
 export interface Services {
   resolveActor(authHeader: string | null): Promise<Actor | null>;
   listWorkspace(): Promise<Workspace>;
+  listWorkspaceShell(): Promise<WorkspaceShell>;
   listUpdates(query?: UpdateQueryInput): Promise<UpdatesPage>;
   listActivity(query?: ActivityQueryInput): Promise<ActivityPage>;
   listDecisions(query?: DecisionQueryInput): Promise<DecisionsPage>;
+  listTasks(query?: TaskQueryInput): Promise<TasksPage>;
   /** One decision, whatever its status; 404 for an unknown id. */
   getDecision(decisionId: string): Promise<Decision>;
   /** 404 for an unknown task. */

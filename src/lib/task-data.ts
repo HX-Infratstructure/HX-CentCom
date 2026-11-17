@@ -1,12 +1,24 @@
 import {
   infiniteQueryOptions,
   queryOptions,
+  skipToken,
   type DefaultOptions,
   type InfiniteData,
 } from "@tanstack/react-query";
 import { adaptPullRequestPages } from "@/components/adapt";
-import type { GithubPrQueryInput, GithubPrsPage, UpdateQueryInput } from "@/server/services";
-import { listGithubPrs, listUpdates, listWorkspace } from "./tasks.functions";
+import type {
+  GithubPrQueryInput,
+  GithubPrsPage,
+  TaskQueryInput,
+  UpdateQueryInput,
+} from "@/server/services";
+import {
+  getTask,
+  listGithubPrs,
+  listTasks,
+  listUpdates,
+  listWorkspaceShell,
+} from "./tasks.functions";
 
 /**
  * The query client's defaults, which the router and the tests share. Every active query re-checks the server every 60
@@ -22,10 +34,35 @@ export const QUERY_DEFAULTS = {
   refetchOnWindowFocus: true,
 } satisfies DefaultOptions["queries"];
 
-export const tasksQuery = queryOptions({
-  queryKey: ["task-workspace"],
-  queryFn: () => listWorkspace(),
+/** The pages' bounded workspace read: agents, status labels, repository heads, the latest updates and the counts. */
+export const shellQuery = queryOptions({
+  queryKey: ["workspace-shell"],
+  queryFn: () => listWorkspaceShell(),
 });
+
+/** The task read's filters. The cursor never enters the URL. */
+export type TaskQuery = Pick<
+  NonNullable<TaskQueryInput>,
+  "agentId" | "repo" | "attention" | "open"
+>;
+
+/** The one task read. Each route adapts the pages with its directory (`adaptTaskPages`), so there is no `select`. */
+export function taskPages(query: TaskQuery) {
+  return infiniteQueryOptions({
+    queryKey: ["tasks", "list", query],
+    queryFn: ({ pageParam }) => listTasks({ data: { ...query, cursor: pageParam } }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** One task with its requirements, for the task sheet. null is a miss. */
+export function taskById(id: string | undefined) {
+  return queryOptions({
+    queryKey: ["tasks", "one", id],
+    queryFn: id === undefined ? skipToken : () => getTask({ data: { id } }),
+  });
+}
 
 /** The update feed's filters. The cursor never enters the URL. */
 export type UpdateQuery = Pick<
@@ -36,7 +73,7 @@ export type UpdateQuery = Pick<
 /**
  * The one update-feed read, for the overview's latest updates and the tasks page's update log. Each route adds its own
  * `select`, because adapting a page needs the workspace's directory. `refreshOn` joins only the key: the overview's
- * needs-attention feed passes the reason's open tasks, so a workspace refresh that changes them reads the feed again.
+ * needs-attention feed passes the reason's open tasks, so a task read that changes them reads the feed again.
  */
 export function updatePages(query: UpdateQuery, refreshOn?: readonly string[]) {
   return infiniteQueryOptions({

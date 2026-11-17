@@ -1,24 +1,55 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith, tasksPageWith, workspaceWith } from "@/test/ui-fixtures";
 import type {
   Agent,
   Decision,
+  DecisionsPage,
   GithubPrsPage,
   PullRequest,
   StatusLabel,
   Task,
+  TasksPage,
   TaskUpdate,
   UpdatesPage,
   Workspace,
+  WorkspaceShell,
 } from "./server-types";
 
-const server = vi.hoisted(() => ({ listUpdates: vi.fn() }));
+const server = vi.hoisted(() => ({
+  listUpdates: vi.fn(),
+  listTasks: vi.fn(),
+}));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   listUpdates: server.listUpdates,
+  listTasks: server.listTasks,
 }));
+
+type TaskRequest = {
+  readonly open?: boolean;
+  readonly attention?: Task["attention"][number];
+  readonly limit?: number;
+  readonly cursor?: string;
+};
+
+/** The task read under the server's rules: open and attention filter, blocked tasks first, pages of 20 by default. */
+function serveTasks(tasks: readonly Task[]) {
+  server.listTasks.mockImplementation(({ data }: { data: TaskRequest }) => {
+    const all = tasks.filter(
+      (t) =>
+        (data.open !== true || t.open) &&
+        (data.attention === undefined || t.attention.includes(data.attention)),
+    );
+    const blocked = (t: Task) => t.attention.includes("blocked");
+    const ordered = [...all.filter(blocked), ...all.filter((t) => !blocked(t))];
+    const start = Number(data.cursor ?? 0);
+    const end = start + (data.limit ?? 20);
+    const nextCursor = end < ordered.length ? String(end) : null;
+    return Promise.resolve(tasksPageWith(ordered.slice(start, end), { all: ordered, nextCursor }));
+  });
+}
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
@@ -111,22 +142,53 @@ function pr(fields: Pick<PullRequest, "number" | "state"> & Partial<PullRequest>
 const workspace = (rows: Partial<Pick<Workspace, "tasks" | "decisions">>) =>
   workspaceWith({ agents: AGENTS, statusLabels: STATUSES, ...rows });
 
+function pendingPageOf(decisions: readonly Decision[], total?: number): DecisionsPage {
+  const items = decisions.filter((d) => d.status === "Pending");
+  const all = total ?? items.length;
+  return {
+    items,
+    nextCursor: null,
+    counts: { total: all, byGateType: {}, byStatus: all === 0 ? {} : { Pending: all } },
+  };
+}
+
+/** The server reads the overview's numbers and decisions come from. By default they agree with the snapshot. */
+type ServerReads = {
+  readonly shell?: WorkspaceShell;
+  readonly pendingPage?: DecisionsPage;
+  readonly taskPage?: TasksPage;
+};
+
 /**
  * The route's own loader and selects run against the stored snapshot and pages. Only the open-PR read is stored, so a
  * route that asked the server for any other PR query would fail to load. The feed asks the mocked `listUpdates`, so a
- * test can read what the feed sent.
+ * test can read what the feed sent. The task reads ask the mocked `listTasks`, which serves the snapshot's tasks, or
+ * `reads.taskPage` for every task read.
  */
 async function renderOverview(
   raw: Workspace,
   openPrs: GithubPrsPage = NO_PRS,
   url = "/",
   updates: UpdatesPage = NO_UPDATES,
+  reads: ServerReads = {},
 ) {
   server.listUpdates.mockResolvedValue(updates);
+  if (reads.taskPage === undefined) serveTasks(raw.tasks);
+  else server.listTasks.mockResolvedValue(reads.taskPage);
+  const pendingPage = reads.pendingPage ?? pendingPageOf(raw.decisions);
+  const shell =
+    reads.shell ??
+    shellWith({
+      agents: raw.agents,
+      statusLabels: raw.statusLabels,
+      tasks: raw.tasks,
+      pendingDecisions: pendingPage.counts.total,
+    });
   return renderApp(url, {
     heading: "Overview",
     seed: [
-      [["task-workspace"], raw],
+      [["workspace-shell"], shell],
+      [["decisions", "overview", { status: "Pending", limit: 100 }], pendingPage],
       [["prs", "list", { state: "open" }], { pages: [openPrs], pageParams: [undefined] }],
     ],
   });
@@ -134,6 +196,7 @@ async function renderOverview(
 
 afterEach(() => {
   server.listUpdates.mockReset();
+  server.listTasks.mockReset();
 });
 
 function section(name: string) {
@@ -203,6 +266,63 @@ describe("the overview's open tasks", () => {
       "Close the benchmark run",
     ]);
     expect(open.heading).toBe("Open tasks 5");
+  });
+
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      task({ id: `IRP-${100 + i}`, title: `Open task ${String(i).padStart(2, "0")}` }),
+    );
+
+  it("shows the first page of 20 and fetches the next page with the cursor on Show more", async () => {
+    await renderOverview(workspace({ tasks: many(25) }));
+
+    const region = screen.getByRole("region", { name: /^Open tasks/ });
+    expect(section("Open tasks").taskTitles).toHaveLength(20);
+    expect(section("Open tasks").heading).toBe("Open tasks 25");
+    expect(region).toHaveTextContent("Showing 20 of 25 tasks.");
+
+    await act(async () => {
+      fireEvent.click(within(region).getByRole("button", { name: "Show more" }));
+    });
+    expect(await within(region).findByText("Showing all 25 tasks.")).toBeInTheDocument();
+    expect(section("Open tasks").taskTitles).toHaveLength(25);
+    expect(server.listTasks).toHaveBeenCalledWith({ data: { open: true, cursor: "20" } });
+  });
+
+  it("keeps the server's order, so a blocked task the server returns first leads its group", async () => {
+    const calm = task({ id: "IRP-40", title: "Tune the shadow thresholds" });
+    const stuck = task({
+      id: "IRP-41",
+      title: "Wire the eval dashboard",
+      blocked_on: "dependency",
+      attention: ["blocked"],
+    });
+    await renderOverview(workspace({ tasks: [calm, stuck] }), NO_PRS, "/", NO_UPDATES, {
+      taskPage: tasksPageWith([stuck, calm]),
+    });
+
+    expect(section("Open tasks").taskTitles).toEqual([
+      "Wire the eval dashboard",
+      "Tune the shadow thresholds",
+    ]);
+  });
+
+  it("counts the attention chips with the server's byAttention", async () => {
+    const page = tasksPageWith(many(3));
+    await renderOverview(workspace({ tasks: many(3) }), NO_PRS, "/", NO_UPDATES, {
+      taskPage: {
+        ...page,
+        counts: { ...page.counts, total: 9, byAttention: { blocked: 7, owner: 4, stale: 2 } },
+      },
+    });
+
+    const facet = within(screen.getByRole("group", { name: "Needs attention" }));
+    expect(facet.getAllByRole("link").map((chip) => chip.textContent)).toEqual([
+      "Blocked7",
+      "Waiting on the owner4",
+      "Stale commit2",
+    ]);
+    expect(section("Open tasks").heading).toBe("Open tasks 9");
   });
 });
 
@@ -374,7 +494,43 @@ describe("the overview's needs-attention filter", () => {
     await renderOverview(workspace({ tasks: blocked }), NO_PRS, "/?attention=blocked");
 
     expect(section("Open tasks").heading).toBe("Open tasks 101");
+    expect(server.listTasks).toHaveBeenCalledWith({
+      data: { open: true, attention: "blocked", limit: 100 },
+    });
     expect(feedRequests()).toEqual([{ data: { attention: "blocked" } }]);
+  });
+
+  it("asks for the chosen task alone only while the reason's 100-row page holds every one of its tasks", async () => {
+    const blocked = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        task({
+          id: `IRP-${200 + i}`,
+          title: `Blocked task ${i}`,
+          blocked_on: "dependency",
+          attention: ["blocked"],
+        }),
+      );
+    await renderOverview(
+      workspace({ tasks: blocked(100) }),
+      NO_PRS,
+      "/?attention=blocked&task=IRP-299",
+    );
+    expect(feedRequests()).toEqual([{ data: { taskId: "IRP-299" } }]);
+  });
+
+  it("sends no feed request for a chosen task when more than 100 open tasks need attention for the reason", async () => {
+    const blocked = Array.from({ length: 101 }, (_, i) =>
+      task({
+        id: `IRP-${200 + i}`,
+        title: `Blocked task ${i}`,
+        blocked_on: "dependency",
+        attention: ["blocked"],
+      }),
+    );
+    await renderOverview(workspace({ tasks: blocked }), NO_PRS, "/?attention=blocked&task=IRP-201");
+    expect(section("Open tasks").heading).toBe("Open tasks 101");
+    expect(section("Latest updates").empty).toBe("No updates match these filters.");
+    expect(feedRequests()).toEqual([]);
   });
 
   it("lets the server answer when no open task needs attention for the reason", async () => {
@@ -478,7 +634,7 @@ describe("the overview's needs-attention filter", () => {
     },
   );
 
-  it("follows the reason's tasks when a workspace refresh changes them", async () => {
+  it("follows the reason's tasks when a refresh of the task reads changes them", async () => {
     const calm = task({ id: "IRP-73", title: "Wire the eval dashboard" });
     const router = await renderOverview(
       workspace({ tasks: [calm] }),
@@ -493,11 +649,9 @@ describe("the overview's needs-attention filter", () => {
       nextCursor: null,
       counts: { total: 1, byAgent: { atlas: 1 }, byTask: { "IRP-73": 1 }, bySource: { api: 1 } },
     });
-    act(() => {
-      router.options.context.queryClient.setQueryData(
-        ["task-workspace"],
-        workspace({ tasks: [{ ...calm, blocked_on: "dependency", attention: ["blocked"] }] }),
-      );
+    serveTasks([{ ...calm, blocked_on: "dependency", attention: ["blocked"] }]);
+    await act(async () => {
+      await router.options.context.queryClient.invalidateQueries({ queryKey: ["tasks"] });
     });
 
     const feed = screen.getByRole("region", { name: /^Latest updates/ });
@@ -599,6 +753,95 @@ describe("the overview's number widgets", () => {
       "Waiting on the owner3",
       "Pending decisions3",
       "Open pull requests2",
+    ]);
+  });
+
+  // 250 tasks on the server, of which the page holds only SEED_LIKE's seven rows. Complete comes first to show the done
+  // labels still go last.
+  const SERVER_COUNTS = (() => {
+    const shell = shellWith({ agents: AGENTS, statusLabels: STATUSES, pendingDecisions: 42 });
+    return {
+      ...shell,
+      counts: {
+        ...shell.counts,
+        tasks: {
+          total: 250,
+          open: 180,
+          blocked: 12,
+          owner: 7,
+          byStatus: { Complete: 70, Waiting: 100, "In progress": 80 },
+        },
+      },
+    };
+  })();
+
+  it("reads every number from the server's counts, not from the task rows the page holds", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, {
+      shell: SERVER_COUNTS,
+      pendingPage: pendingPageOf(SEED_LIKE.decisions, 42),
+    });
+
+    expect(widgets()).toEqual([
+      "Open tasks180",
+      "Blocked12",
+      "Waiting on the owner7",
+      "Pending decisions42",
+      "Open pull requests2",
+    ]);
+  });
+
+  it("shows one pending count, the Pending page's total, when the shell's count disagrees", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, {
+      shell: shellWith({ agents: AGENTS, statusLabels: STATUSES, pendingDecisions: 9 }),
+      pendingPage: pendingPageOf(SEED_LIKE.decisions, 4),
+    });
+
+    expect(widgets()[3]).toBe("Pending decisions4");
+    expect(section("Needs your decision").heading).toBe("Needs your decision 4");
+  });
+
+  it("shows the server's tasks by status, open labels first, with each label's share", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, { shell: SERVER_COUNTS });
+
+    const heading = screen.getByRole("heading", { level: 3, name: /^Tasks by status/ });
+    expect(heading.textContent).toBe("Tasks by status 250");
+    const widget = within(heading.closest(".status-widget") as HTMLElement);
+    expect(widget.getByRole("img").getAttribute("aria-label")).toBe(
+      "Waiting 100, In progress 80, Complete 70",
+    );
+    expect(widget.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Waiting10040%",
+      "In progress8032%",
+      "Complete7028%",
+    ]);
+  });
+
+  it("orders tasks by status by the status directory, not by the order the server's counts arrive in", async () => {
+    const shell = shellWith({ agents: AGENTS, statusLabels: STATUSES });
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, {
+      shell: {
+        ...shell,
+        counts: {
+          ...shell.counts,
+          tasks: {
+            total: 100,
+            open: 90,
+            blocked: 0,
+            owner: 0,
+            byStatus: { Zeta: 6, Complete: 10, "In progress": 30, Alpha: 4, Waiting: 50 },
+          },
+        },
+      },
+    });
+
+    const heading = screen.getByRole("heading", { level: 3, name: /^Tasks by status/ });
+    const widget = within(heading.closest(".status-widget") as HTMLElement);
+    expect(widget.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Waiting5050%",
+      "In progress3030%",
+      "Alpha44%",
+      "Zeta66%",
+      "Complete1010%",
     ]);
   });
 
@@ -729,5 +972,33 @@ describe("the overview's decisions", () => {
       "Assign the dashboard review?",
     ]);
     expect(pending.heading).toBe("Needs your decision 3");
+  });
+
+  it("ranks the loaded Pending page and counts every pending decision the server holds", async () => {
+    const loaded = [0, 3, 1, 5, 2, 4, 0].map((blocking, i) =>
+      decision({
+        id: `D-3${i}`,
+        question: `Gate ${i} blocks ${blocking}?`,
+        blocks: Array.from({ length: blocking }, (_, n) => `IRP-${n}`),
+        requested_at: `2026-11-0${i + 1}T09:00:00.123456+00:00`,
+      }),
+    );
+    await renderOverview(workspace({ decisions: [] }), NO_PRS, "/", NO_UPDATES, {
+      pendingPage: pendingPageOf(loaded, 130),
+    });
+
+    const pending = section("Needs your decision");
+    expect(pending.rowTitles).toEqual([
+      "Gate 3 blocks 5?",
+      "Gate 5 blocks 4?",
+      "Gate 1 blocks 3?",
+      "Gate 4 blocks 2?",
+      "Gate 2 blocks 1?",
+    ]);
+    expect(pending.heading).toBe("Needs your decision 130");
+    expect(screen.getByRole("link", { name: "All 130 pending decisions" })).toHaveAttribute(
+      "href",
+      "/decisions",
+    );
   });
 });

@@ -2,25 +2,42 @@ import { useCallback, useId, type ReactNode } from "react";
 import { ChartGantt, SquareKanban, Table2 } from "lucide-react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
+  useQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { adaptUpdatePages, adaptWorkspace, toAppError } from "@/components/adapt";
+import {
+  adaptShell,
+  adaptTaskDetail,
+  adaptTaskPages,
+  adaptUpdatePages,
+  toAppError,
+} from "@/components/adapt";
 import { detailFrom } from "@/components/detail";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
-import type { Directory } from "@/components/model";
+import type { Directory, TaskView } from "@/components/model";
 import { useOpenRecord } from "@/components/open-record";
-import type { UpdatesPage } from "@/components/server-types";
+import type { TaskDetail as TaskRead, TasksPage, UpdatesPage } from "@/components/server-types";
 import { KanbanBoard, TaskDetail, TaskTable, UPDATE_LOG_ID } from "@/components/task";
 import { TaskTimeline } from "@/components/timeline";
 import { UpdateList } from "@/components/update-item";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
-import { tasksQuery, updatePages, type UpdateQuery } from "@/lib/task-data";
+import {
+  shellQuery,
+  taskById,
+  taskPages,
+  updatePages,
+  type TaskQuery,
+  type UpdateQuery,
+} from "@/lib/task-data";
 
-const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
+const directoryQuery = { ...shellQuery, select: adaptShell };
+
+/** The loader's dependencies: the board's task read and the update log's read, both from the URL's filters. */
+type TasksDeps = { readonly board: TaskQuery; readonly log: UpdateQuery };
 
 type TasksSearch = ReturnType<typeof lists.board.validate> &
   ReturnType<typeof lists.updateLog.validate> & { view?: "kanban" | "timeline" | undefined };
@@ -40,21 +57,27 @@ export const Route = createFileRoute("/tasks")({
     ...lists.updateLog.validate(raw),
     ...(raw["view"] === "kanban" || raw["view"] === "timeline" ? { view: raw["view"] } : {}),
   }),
-  // The three views filter the workspace in the browser, so only the update log's query is a dependency.
-  loaderDeps: ({ search }): UpdateQuery => {
+  // The server filters the board and the update log, so both reads' filters are dependencies. The board sends no `open`
+  // filter, because it shows done tasks too.
+  loaderDeps: ({ search }): TasksDeps => {
+    const board = lists.board.filters(search);
     const log = lists.updateLog.filters(search);
     return {
-      agentId: lists.board.filters(search).agent,
-      taskId: log.task,
-      source: log.source,
-      since: log.posted?.since,
-      until: log.posted?.until,
+      board: { agentId: board.agent, repo: board.repo },
+      log: {
+        agentId: board.agent,
+        taskId: log.task,
+        source: log.source,
+        since: log.posted?.since,
+        until: log.posted?.until,
+      },
     };
   },
   loader: async ({ context: { queryClient }, deps }) => {
     await Promise.all([
-      queryClient.ensureQueryData(tasksQuery),
-      queryClient.ensureInfiniteQueryData(updatePages(deps)),
+      queryClient.ensureQueryData(shellQuery),
+      queryClient.ensureInfiniteQueryData(taskPages(deps.board)),
+      queryClient.ensureInfiniteQueryData(updatePages(deps.log)),
     ]);
   },
   head: () => ({
@@ -76,39 +99,82 @@ export const Route = createFileRoute("/tasks")({
 });
 
 function TasksPage(): ReactNode {
-  const search = Route.useSearch();
-  const { data: ws } = useSuspenseQuery(workspaceQuery);
+  const { data: dir } = useSuspenseQuery(directoryQuery);
   const record = useOpenRecord();
-  const boardFilters = lists.board.filters(search);
-  const board = lists.board.local(ws.tasks, boardFilters, {
-    agent: (t) => t.assignee?.id ?? null,
-    repo: (t) => t.repository,
-  });
-  const view = search.view;
+  const selectTask = useCallback(
+    (t: TaskRead | null) => (t === null ? null : adaptTaskDetail(t, dir)),
+    [dir],
+  );
+  // List rows carry no requirements, so the sheet always reads its task by id, even one on the loaded page.
+  const byId = useQuery({ ...taskById(record.id), select: selectTask });
 
   return (
     <Workspace page="Tasks" description={DESCRIPTION} views={<ViewTabs />}>
+      <Board dir={dir} />
+      <UpdateLog dir={dir} />
+      <TaskDetail detail={detailFrom(record.id, [], byId)} onClose={record.close} />
+    </Workspace>
+  );
+}
+
+/** Start date, missing dates last, then id: a Gantt reads by date, while the server's order puts blocked tasks first. */
+function byStartDate(a: TaskView, b: TaskView): number {
+  if (a.start_date !== b.start_date) {
+    if (a.start_date === null) return 1;
+    if (b.start_date === null) return -1;
+    return a.start_date < b.start_date ? -1 : 1;
+  }
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? -1 : 1;
+}
+
+/** The table, kanban and timeline show the same loaded tasks, so one Show more serves all three. */
+function Board({ dir }: { dir: Directory }): ReactNode {
+  const view = Route.useSearch({ select: (search) => search.view });
+  const { board: query } = Route.useLoaderDeps();
+  const select = useCallback(
+    (data: InfiniteData<TasksPage, string | undefined>) => adaptTaskPages(data.pages, dir),
+    [dir],
+  );
+  const pages = useSuspenseInfiniteQuery({ ...taskPages(query), select });
+  const { items, counts } = pages.data;
+
+  return (
+    <>
       <div className="board-toolbar">
         <FilterBar
           search={lists.board}
-          counts={board.counts}
+          counts={{ agent: counts?.byAgent ?? {}, repo: counts?.byRepo ?? {} }}
           label="Filter tasks"
-          agents={ws.agents}
+          agents={dir.agents}
         />
       </div>
-      {board.items.length === 0 ? (
-        <EmptyState>No tasks match these filters.</EmptyState>
-      ) : view === "kanban" ? (
-        <KanbanBoard tasks={board.items} />
-      ) : view === "timeline" ? (
-        <TaskTimeline tasks={board.items} />
-      ) : (
-        <TaskTable tasks={board.items} />
-      )}
-      <UpdateLog dir={ws} />
-      <TaskDetail detail={detailFrom(record.id, ws.tasks)} onClose={record.close} />
-    </Workspace>
+      <BoardView view={view} tasks={items} />
+      <ShowMore
+        shown={items.length}
+        total={counts?.total}
+        noun="tasks"
+        hasMore={pages.hasNextPage}
+        pending={pages.isFetchingNextPage}
+        error={pages.isFetchNextPageError ? toAppError(pages.error) : null}
+        onShowMore={() => void pages.fetchNextPage()}
+      />
+    </>
   );
+}
+
+/** The chosen view of the loaded tasks; the main table when `view` is unset. */
+function BoardView({
+  view,
+  tasks,
+}: {
+  view: TasksSearch["view"];
+  tasks: readonly TaskView[];
+}): ReactNode {
+  if (tasks.length === 0) return <EmptyState>No tasks match these filters.</EmptyState>;
+  if (view === "kanban") return <KanbanBoard tasks={tasks} />;
+  if (view === "timeline") return <TaskTimeline tasks={[...tasks].sort(byStartDate)} />;
+  return <TaskTable tasks={tasks} />;
 }
 
 function ViewTabs(): ReactNode {
@@ -137,7 +203,7 @@ function ViewTabs(): ReactNode {
 
 function UpdateLog({ dir }: { dir: Directory }): ReactNode {
   const headingId = useId();
-  const query = Route.useLoaderDeps();
+  const { log: query } = Route.useLoaderDeps();
   const select = useCallback(
     (data: InfiniteData<UpdatesPage, string | undefined>) => adaptUpdatePages(data.pages, dir),
     [dir],

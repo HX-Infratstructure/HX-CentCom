@@ -28,13 +28,16 @@ function pr(id: number, repo: string, state: string): PullRequest {
   };
 }
 
+/** The first 12 stored PRs are open, the next 9 merged and the last 4 closed, as `ALL_COUNTS` says. */
+function stateAt(i: number): string {
+  if (i < 12) return "open";
+  if (i < 21) return "merged";
+  return "closed";
+}
+
 /** 25 stored PRs, newest id first, as the server pages them: 20 a page unless the request names a limit. */
 const STORED: readonly PullRequest[] = Array.from({ length: 25 }, (_, i) =>
-  pr(
-    3_000_100 - i,
-    i % 3 === 0 ? LITELLM : CENTCOM,
-    i < 12 ? "open" : i < 21 ? "merged" : "closed",
-  ),
+  pr(3_000_100 - i, i % 3 === 0 ? LITELLM : CENTCOM, stateAt(i)),
 );
 const ALL_COUNTS = {
   total: 25,

@@ -17,7 +17,13 @@ import {
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Db, Tx } from "@/server/db/client";
-import { agents, engineeringTasks, ownerDecisions, type Json } from "@/server/db/schema";
+import {
+  agents,
+  engineeringTasks,
+  ownerDecisions,
+  type BlockedOn,
+  type Json,
+} from "@/server/db/schema";
 import {
   BLOCKING_REF_PATTERN,
   formatRaidId,
@@ -484,15 +490,17 @@ function leftTask(before: DependencyState, after: DependencyState): string | nul
 /** The tasks a dependency write affects: a create's task, both tasks of a move, and the task of a close or reopen. */
 function affectedTasks(before: DependencyState | null, after: DependencyState): string[] {
   if (after.type !== "dependency") return [];
-  const tasks =
-    before === null
-      ? [after.blocked_task_id]
-      : before.blocked_task_id !== after.blocked_task_id
-        ? [before.blocked_task_id, after.blocked_task_id]
-        : (before.status === "closed") !== (after.status === "closed")
-          ? [after.blocked_task_id]
-          : [];
-  return tasks.filter((t): t is string => t !== null);
+  return touchedTasks(before, after).filter((t): t is string => t !== null);
+}
+
+/** The `blocked_task_id` of each side a dependency write touches; null where that side is on no task. */
+function touchedTasks(before: DependencyState | null, after: DependencyState): (string | null)[] {
+  if (before === null) return [after.blocked_task_id];
+  if (before.blocked_task_id !== after.blocked_task_id) {
+    return [before.blocked_task_id, after.blocked_task_id];
+  }
+  if ((before.status === "closed") !== (after.status === "closed")) return [after.blocked_task_id];
+  return [];
 }
 
 /**
@@ -593,13 +601,7 @@ async function releaseTask(
     : (
         await tx.select({ id: raidItems.id }).from(raidItems).where(stillOpen).orderBy(raidItems.id)
       ).map((r) => r.id);
-  const outcome = unblocked
-    ? `${taskId} is unblocked`
-    : task.blocked_on === "none"
-      ? `${taskId} is not blocked`
-      : open.length > 0
-        ? `${taskId} stays blocked: ${open.join(", ")} still open`
-        : `${taskId} stays blocked on ${task.blocked_on}`;
+  const outcome = releaseOutcome(taskId, task.blocked_on, unblocked !== undefined, open);
   const systemUpdates = await ctx.insertUpdates([
     {
       task_id: taskId,
@@ -611,6 +613,19 @@ async function releaseTask(
     },
   ]);
   return { systemUpdates, unblocked: unblocked ?? null };
+}
+
+/** What a release did to its task: unblocked it, found it not blocked, or left it blocked by `open` or `blockedOn`. */
+function releaseOutcome(
+  taskId: string,
+  blockedOn: BlockedOn,
+  unblocked: boolean,
+  open: readonly string[],
+): string {
+  if (unblocked) return `${taskId} is unblocked`;
+  if (blockedOn === "none") return `${taskId} is not blocked`;
+  if (open.length > 0) return `${taskId} stays blocked: ${open.join(", ")} still open`;
+  return `${taskId} stays blocked on ${blockedOn}`;
 }
 
 /**

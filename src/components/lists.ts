@@ -20,8 +20,8 @@ export const lists = {
   overviewFeed: listSearch({
     facets: { agent: facet.agent(), task: facet.open("Task") },
   }),
-  // The overview's open tasks, which the workspace holds in full, so the route filters and counts them itself. The
-  // route also narrows the feed to the ids of the rows this facet keeps.
+  // The overview's open tasks, which the server filters and counts. The route also narrows the feed to the ids of the
+  // rows this facet keeps.
   openTasks: listSearch({
     facets: { attention: facet.closed("Needs attention", ATTENTION_LABELS) },
   }),

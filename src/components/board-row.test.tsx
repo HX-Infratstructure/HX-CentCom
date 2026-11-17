@@ -1,14 +1,21 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp, type Seed } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith, tasksPageWith } from "@/test/ui-fixtures";
 import type { Agent, Decision, DecisionsPage, RaidItem, RaidPage, Task } from "./server-types";
 
-const server = vi.hoisted(() => ({ getDecision: vi.fn(), getRaidItem: vi.fn() }));
+const server = vi.hoisted(() => ({
+  getDecision: vi.fn(),
+  getRaidItem: vi.fn(),
+  listTasks: vi.fn(),
+  getTask: vi.fn(),
+}));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   getDecision: server.getDecision,
   getRaidItem: server.getRaidItem,
+  listTasks: server.listTasks,
+  getTask: server.getTask,
 }));
 
 const REPO = "HX-Infratstructure/HX-CentCom";
@@ -95,9 +102,9 @@ const RAID_ITEM: RaidItem = {
   updated_at: AT,
 };
 
-const WORKSPACE = workspaceWith({
+const SHELL = shellWith({
   tasks: [TASK],
-  decisions: [DECISION],
+  pendingDecisions: 1,
   agents: AGENTS,
   statusLabels: [{ id: "In progress", label: "In progress", is_done: false, color: null }],
 });
@@ -114,14 +121,14 @@ const RAID: RaidPage = {
   counts: { total: 1, byType: { risk: 1 }, bySeverity: {}, byStatus: {}, byOwner: {}, byTask: {} },
 };
 
-const NO_UPDATES = { items: [], nextCursor: null, counts: WORKSPACE.counts.updates };
+const NO_UPDATES = { items: [], nextCursor: null, counts: SHELL.counts.updates };
 
 function pages(page: unknown) {
   return { pages: [page], pageParams: [undefined] };
 }
 
 const SEED: Seed = [
-  [["task-workspace"], WORKSPACE],
+  [["workspace-shell"], SHELL],
   [["updates", {}], pages(NO_UPDATES)],
   [["decisions", "counts", {}], DECISIONS],
   [["decisions", "list", { status: "Pending" }], pages(DECISIONS)],
@@ -146,12 +153,16 @@ function cell(row: string, column: string): HTMLElement {
 beforeEach(() => {
   server.getDecision.mockResolvedValue(null);
   server.getRaidItem.mockResolvedValue(null);
+  server.listTasks.mockResolvedValue(tasksPageWith([TASK]));
+  server.getTask.mockResolvedValue({ task: TASK, requirements: [], decisions: [] });
 });
 
 afterEach(() => {
   window.getSelection()?.removeAllRanges();
   server.getDecision.mockReset();
   server.getRaidItem.mockReset();
+  server.listTasks.mockReset();
+  server.getTask.mockReset();
 });
 
 describe("a click anywhere on a board row opens its record", () => {

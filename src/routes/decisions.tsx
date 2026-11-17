@@ -10,7 +10,7 @@ import {
   useSuspenseQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { adaptDecision, adaptDecisionPages, adaptWorkspace, toAppError } from "@/components/adapt";
+import { adaptDecision, adaptDecisionPages, adaptShell, toAppError } from "@/components/adapt";
 import { BoardGroup } from "@/components/board";
 import { DecisionDetail, DecisionTable } from "@/components/decision";
 import { detailFrom } from "@/components/detail";
@@ -21,6 +21,7 @@ import {
   DECISION_STATUS_LABELS,
   splitInbox,
   type AgentDirectory,
+  type DecisionView,
 } from "@/components/model";
 import { useOpenRecord } from "@/components/open-record";
 import type { Decision, DecisionsPage, DecisionStatus, GateType } from "@/components/server-types";
@@ -28,14 +29,14 @@ import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { useOwnerActions } from "@/lib/owner-actions";
 import { getDecision, listDecisions } from "@/lib/tasks.functions";
-import { tasksQuery } from "@/lib/task-data";
+import { shellQuery } from "@/lib/task-data";
 
 type DecisionQuery = {
   readonly gateType?: GateType | undefined;
   readonly status?: DecisionStatus | "not_pending" | undefined;
 };
 
-const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
+const directoryQuery = { ...shellQuery, select: adaptShell };
 
 /** Facet counts for the filter bar: every filter applies except the facet's own (DecisionCounts). */
 function countsQuery(query: DecisionQuery) {
@@ -47,9 +48,9 @@ function countsQuery(query: DecisionQuery) {
 }
 
 /**
- * The open sheet's decision when the workspace does not hold it: a decided one from History, a "Superseded by" or
- * RAID link, or a deep link. null is a miss. It runs whenever a sheet is open, so its data is already cached when a
- * decision the owner just decided leaves the workspace.
+ * The open sheet's decision when no loaded page holds it: a decided one from History, a "Superseded by" or RAID link,
+ * or a deep link. null is a miss. It runs whenever a sheet is open, so its data is already cached when a decision the
+ * owner just decided leaves the Pending page.
  */
 function decisionById(id: string | undefined) {
   return queryOptions({
@@ -74,7 +75,7 @@ export const Route = createFileRoute("/decisions")({
   loaderDeps: ({ search }) => lists.decisions.filters(search),
   loader: async ({ context: { queryClient }, deps }) => {
     await Promise.all([
-      queryClient.ensureQueryData(tasksQuery),
+      queryClient.ensureQueryData(shellQuery),
       queryClient.ensureQueryData(countsQuery({ gateType: deps.type, status: deps.status })),
       queryClient.ensureInfiniteQueryData(
         decisionPages({ gateType: deps.type, status: deps.status ?? "Pending" }),
@@ -101,15 +102,17 @@ export const Route = createFileRoute("/decisions")({
 
 function DecisionsPage(): ReactNode {
   const filters = Route.useLoaderDeps();
-  const { data: ws } = useSuspenseQuery(workspaceQuery);
+  const { data: shell } = useSuspenseQuery(directoryQuery);
+  const agents = shell.agents;
   const { data: counts } = useSuspenseQuery(
     countsQuery({ gateType: filters.type, status: filters.status }),
   );
   const owner = useOwnerActions();
   const record = useOpenRecord();
+  const loaded = useLoadedDecisions({ gateType: filters.type, status: filters.status }, agents);
   const selectDecision = useCallback(
-    (d: Decision | null) => (d === null ? null : adaptDecision(d, ws.agents)),
-    [ws.agents],
+    (d: Decision | null) => (d === null ? null : adaptDecision(d, agents)),
+    [agents],
   );
   const byId = useQuery({ ...decisionById(record.id), select: selectDecision });
   const filtered = lists.decisions.active(filters);
@@ -127,7 +130,7 @@ function DecisionsPage(): ReactNode {
             <DecisionSection
               title="Pending"
               query={{ gateType: filters.type, status: "Pending" }}
-              agents={ws.agents}
+              agents={agents}
               empty={
                 filtered ? "No pending decisions of this type." : "No decision is waiting on you."
               }
@@ -135,7 +138,7 @@ function DecisionsPage(): ReactNode {
             <HistorySection
               gateType={filters.type}
               total={counts.total - (counts.byStatus.Pending ?? 0)}
-              agents={ws.agents}
+              agents={agents}
               filtered={filtered}
             />
           </>
@@ -143,18 +146,41 @@ function DecisionsPage(): ReactNode {
           <DecisionSection
             title={DECISION_STATUS_LABELS[filters.status]}
             query={{ gateType: filters.type, status: filters.status }}
-            agents={ws.agents}
+            agents={agents}
             empty="No decisions match these filters."
           />
         )}
       </div>
       <DecisionDetail
-        detail={detailFrom(record.id, ws.decisions, byId)}
+        detail={detailFrom(record.id, loaded, byId)}
         owner={owner}
         onClose={record.close}
       />
     </Workspace>
   );
+}
+
+/**
+ * The decisions the sections have loaded: the Pending or status section's pages, then History's once it is opened. It
+ * observes their cached pages and never fetches.
+ */
+function useLoadedDecisions(query: DecisionQuery, agents: AgentDirectory): readonly DecisionView[] {
+  const select = useCallback(
+    (data: InfiniteData<DecisionsPage, string | undefined>) =>
+      adaptDecisionPages(data.pages, agents).items,
+    [agents],
+  );
+  const shown = useInfiniteQuery({
+    ...decisionPages({ gateType: query.gateType, status: query.status ?? "Pending" }),
+    select,
+    enabled: false,
+  });
+  const history = useInfiniteQuery({
+    ...decisionPages({ gateType: query.gateType, status: "not_pending" }),
+    select,
+    enabled: false,
+  });
+  return [...(shown.data ?? []), ...(query.status === undefined ? (history.data ?? []) : [])];
 }
 
 function DecisionSection({

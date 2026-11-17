@@ -81,6 +81,53 @@ describe("listWorkspace", () => {
   });
 });
 
+describe("counts.tasks and listWorkspaceShell", () => {
+  const tally = (keys: readonly string[]) =>
+    keys.reduce<Record<string, number>>((acc, k) => ({ ...acc, [k]: (acc[k] ?? 0) + 1 }), {});
+
+  beforeEach(async () => {
+    await h.svc.postProgress(h.as.CC2, "IRP-04", {
+      note: "Run 2 passed.",
+      status: "Complete",
+      source: "api",
+    });
+  });
+
+  it("counts every task, the open ones and the blocked and owner-waiting ones as the whole task set does", async () => {
+    const ws = await h.svc.listWorkspace();
+    const doneAndBlocked = ws.tasks.find((t) => t.id === "IRP-04");
+    expect(doneAndBlocked, "IRP-04 is done but still blocked, so it is open").toMatchObject({
+      status: "Complete",
+      open: true,
+    });
+    expect(
+      ws.tasks.some((t) => !t.open),
+      "the state has a closed task",
+    ).toBe(true);
+    expect(new Set(ws.tasks.map((t) => t.status)).size).toBeGreaterThan(1);
+
+    const attending = (reason: "blocked" | "owner") =>
+      ws.tasks.filter((t) => t.attention.includes(reason)).length;
+    expect(attending("blocked")).toBeGreaterThan(0);
+    expect(attending("owner")).toBeGreaterThan(0);
+    expect(ws.counts.tasks).toEqual({
+      total: ws.tasks.length,
+      open: ws.tasks.filter((t) => t.open).length,
+      blocked: attending("blocked"),
+      owner: attending("owner"),
+      byStatus: tally(ws.tasks.map((t) => t.status)),
+    });
+  });
+
+  it("is the workspace without its tasks, requirements and decisions", async () => {
+    const shell = await h.svc.listWorkspaceShell();
+    const { tasks, requirements, decisions, ...rest } = await h.svc.listWorkspace();
+    expect(tasks.length + requirements.length + decisions.length).toBeGreaterThan(0);
+    expect(shell).toEqual(rest);
+    for (const key of ["tasks", "requirements", "decisions"]) expect(shell).not.toHaveProperty(key);
+  });
+});
+
 describe("getTask", () => {
   it("keeps every decision that blocks a done task, whatever its status, and REST and MCP return it unchanged", async () => {
     const detail = await h.svc.getTask("IRP-05");

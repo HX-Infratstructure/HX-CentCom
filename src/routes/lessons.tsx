@@ -10,7 +10,7 @@ import {
   useSuspenseQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { adaptLessons, adaptWorkspace, toAppError } from "@/components/adapt";
+import { adaptLessons, adaptShell, toAppError } from "@/components/adapt";
 import { detailFrom } from "@/components/detail";
 import { LessonBoard, LessonDetail } from "@/components/lesson";
 import { EmptyState, ShowMore } from "@/components/list-states";
@@ -18,7 +18,7 @@ import { lists } from "@/components/lists";
 import { useOpenRecord } from "@/components/open-record";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
-import { tasksQuery } from "@/lib/task-data";
+import { shellQuery } from "@/lib/task-data";
 import { getLesson } from "@/lib/tasks.functions";
 import type { Lesson, LessonQueryInput, LessonsPage } from "@/server/services";
 
@@ -27,7 +27,7 @@ const listLessonsPage = createServerFn({ method: "GET" })
   .validator((data: LessonQueryInput) => data)
   .handler(({ context, data }) => context.services.listLessons(data));
 
-const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
+const directoryQuery = { ...shellQuery, select: adaptShell };
 
 type LessonFilters = ReturnType<typeof lists.lessons.filters>;
 
@@ -60,7 +60,7 @@ export const Route = createFileRoute("/lessons")({
   loaderDeps: ({ search }) => lists.lessons.filters(search),
   loader: async ({ context: { queryClient }, deps }) => {
     await Promise.all([
-      queryClient.ensureQueryData(tasksQuery),
+      queryClient.ensureQueryData(shellQuery),
       queryClient.ensureInfiniteQueryData(lessonPages(lessonQuery(deps))),
     ]);
   },
@@ -84,23 +84,23 @@ export const Route = createFileRoute("/lessons")({
 
 function LessonsLog(): ReactNode {
   const filters = Route.useLoaderDeps();
-  const { data: ws } = useSuspenseQuery(workspaceQuery);
+  const { data: shell } = useSuspenseQuery(directoryQuery);
   const select = useCallback(
     (data: InfiniteData<LessonsPage, string | undefined>) => ({
       items: adaptLessons(
         data.pages.flatMap((page) => page.items),
-        ws.agents,
+        shell.agents,
       ),
       counts: data.pages[0]?.counts ?? null,
     }),
-    [ws.agents],
+    [shell.agents],
   );
   const pages = useSuspenseInfiniteQuery({ ...lessonPages(lessonQuery(filters)), select });
   const record = useOpenRecord();
   const selectLesson = useCallback(
     (lesson: Lesson | null) =>
-      lesson === null ? null : (adaptLessons([lesson], ws.agents)[0] ?? null),
-    [ws.agents],
+      lesson === null ? null : (adaptLessons([lesson], shell.agents)[0] ?? null),
+    [shell.agents],
   );
   const byId = useQuery({ ...lessonById(record.id), select: selectLesson });
   const { items, counts } = pages.data;

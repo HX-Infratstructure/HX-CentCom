@@ -1,5 +1,5 @@
 import { Children, type ReactNode } from "react";
-import { CircleHelp, ShieldCheck, Terminal } from "lucide-react";
+import { CircleHelp, ShieldCheck, Terminal, type LucideIcon } from "lucide-react";
 import { formatUtc, formatUtcDay, initials, relativeAge } from "./format";
 import { assertNever, type AgentRef, type Coverage, type Instant, type SourceRef } from "./model";
 
@@ -33,8 +33,7 @@ export function AgentBadge({
       </span>
     );
   }
-  const Mark =
-    agent.role === "owner" ? ShieldCheck : agent.role === "agent" ? Terminal : CircleHelp;
+  const Mark = roleMark(agent.role);
   return (
     <span className="agent-badge" data-tone={agent.tone ?? undefined} title={title}>
       <span className="agent-mark" aria-hidden="true">
@@ -43,6 +42,13 @@ export function AgentBadge({
       <span className="agent-name">{agent.name}</span>
     </span>
   );
+}
+
+/** An id that is not in the agents table gets the question mark. */
+function roleMark(role: AgentRef["role"]): LucideIcon {
+  if (role === "owner") return ShieldCheck;
+  if (role === "agent") return Terminal;
+  return CircleHelp;
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   type ActivityQueryInput,
   type DecisionQueryInput,
   type GithubPrQueryInput,
+  type TaskQueryInput,
   type UpdateQueryInput,
 } from "@/server/services";
 
@@ -13,9 +14,13 @@ const typesOnly =
   (input: T): T =>
     input;
 
-export const listWorkspace = createServerFn({ method: "GET" }).handler(({ context }) =>
-  context.services.listWorkspace(),
+export const listWorkspaceShell = createServerFn({ method: "GET" }).handler(({ context }) =>
+  context.services.listWorkspaceShell(),
 );
+
+export const listTasks = createServerFn({ method: "GET" })
+  .validator(typesOnly<TaskQueryInput>())
+  .handler(({ context, data }) => context.services.listTasks(data));
 
 export const listUpdates = createServerFn({ method: "GET" })
   .validator(typesOnly<UpdateQueryInput>())
@@ -37,37 +42,27 @@ export const listGithubPrs = createServerFn({ method: "GET" })
  * A miss is null, never a thrown not_found: a server function's error reaches the browser as its message alone, and
  * the sheet would show a failure instead of "missing". Any other error still throws.
  */
+const missAsNull = async <T>(read: () => Promise<T>): Promise<T | null> => {
+  try {
+    return await read();
+  } catch (error) {
+    if (isServiceError(error) && error.code === "not_found") return null;
+    throw error;
+  }
+};
+
 export const getDecision = createServerFn({ method: "GET" })
   .validator(typesOnly<{ readonly id: string }>())
-  .handler(async ({ context, data }) => {
-    try {
-      return await context.services.getDecision(data.id);
-    } catch (error) {
-      if (isServiceError(error) && error.code === "not_found") return null;
-      throw error;
-    }
-  });
+  .handler(({ context, data }) => missAsNull(() => context.services.getDecision(data.id)));
 
-/** As getDecision: a miss is null, so the sheet shows "missing". */
+export const getTask = createServerFn({ method: "GET" })
+  .validator(typesOnly<{ readonly id: string }>())
+  .handler(({ context, data }) => missAsNull(() => context.services.getTask(data.id)));
+
 export const getRaidItem = createServerFn({ method: "GET" })
   .validator(typesOnly<{ readonly id: string }>())
-  .handler(async ({ context, data }) => {
-    try {
-      return await context.services.getRaidItem(data.id);
-    } catch (error) {
-      if (isServiceError(error) && error.code === "not_found") return null;
-      throw error;
-    }
-  });
+  .handler(({ context, data }) => missAsNull(() => context.services.getRaidItem(data.id)));
 
-/** As getDecision: a miss is null, so the sheet shows "missing". */
 export const getLesson = createServerFn({ method: "GET" })
   .validator(typesOnly<{ readonly id: string }>())
-  .handler(async ({ context, data }) => {
-    try {
-      return await context.services.getLesson(data.id);
-    } catch (error) {
-      if (isServiceError(error) && error.code === "not_found") return null;
-      throw error;
-    }
-  });
+  .handler(({ context, data }) => missAsNull(() => context.services.getLesson(data.id)));

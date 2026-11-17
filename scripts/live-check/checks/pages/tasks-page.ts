@@ -35,10 +35,6 @@ export class TasksPage {
     );
   }
 
-  rowCount(): Promise<number> {
-    return this.#session.page.locator(BOARD_ROWS).count();
-  }
-
   async statusLabels(): Promise<string[]> {
     const labels = await this.#session.page.locator(STATUS_CELLS).allInnerTexts();
     return [...new Set(labels.map((label) => label.trim()).filter(Boolean))];

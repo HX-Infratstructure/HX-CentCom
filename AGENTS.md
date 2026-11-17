@@ -31,6 +31,18 @@ These rules apply HX's object-oriented design policy to this repository. The pol
 - **Tests go through public contracts.** They call the services index, the HTTP routes, the MCP tools, or the CLI executables. They never call another component's private helpers.
 - **CC1 runs the author self-check before each pull request.** Each responsibility has one owner, callers avoid private internals, failure and resource lifetimes match the contract, and unrelated behavior is unchanged. This check is the author's. CC1 does not give it to reviewers, whose briefs name only the target.
 
+## Code standards
+
+Every change follows these rules when it is written. Reviews check them afterwards; they are not where defects are meant to be found. The owner set them on 2026-11-17, after OCR's first review of PR #18 found 27 issues, most of them breaches of the rules below.
+
+- **Reuse before you write.** Search the code (`xerj search`, `git grep`) for an existing validator, constant, helper, or rule, and use it. A second copy of a rule is a defect, even when both copies agree today.
+- **One home per rule.** A rule, constant, or order is defined in one place. Other code imports it, and docs link to it instead of restating it.
+- **Refuse bad input with 400, never 500.** Parse every new query parameter, body field, and cursor with the validators in `src/server/services/inputs.ts`, including calendar dates and instants that PostgreSQL would refuse.
+- **Follow a changed value to every consumer.** When a field, shape, or rule changes, update and test each place that reads it: the services, REST, MCP, the pages, the live checker, the CLI, and the docs. Running only the tests of the files you edited is not enough.
+- **Keep code flat.** No nested ternaries (`no-nested-ternary` is an eslint error); use early returns or a small named function. Do not change a function's arguments in place; sort or edit a copy.
+- **Prove it end to end before every push.** Run one end-to-end check on real-shaped data, such as a migrated and seeded database driven through the API and the page, besides the unit tests.
+- **Report against this list.** An agent's hand-back states, for each rule above, how its diff meets it. A finding that repeats becomes a rule here or a lint rule, so it cannot come back.
+
 ## Secrets and data
 
 - Never put a secret in the repository, a brief, an issue, or a report. Name the file and line instead. On HX-15, the database URL is in `~/.config/hx-centcom/app.env`, agent keys are in `~/.config/hx-centcom/keys/`, and the GitHub token is in the file that `GITHUB_TOKEN_FILE` names. `.env.example` lists variable names only.
