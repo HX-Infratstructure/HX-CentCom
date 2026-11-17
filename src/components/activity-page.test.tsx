@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
 import { shellWith } from "@/test/ui-fixtures";
@@ -527,6 +527,72 @@ describe("what each activity row changed", () => {
 
     expect(changesOf("Task IRP-07")).toEqual(["commit sha 4d1e9b2 → a07c3f5"]);
     expect(changesOf("Task IRP-08")).toEqual(["commit sha none → a07c3f5"]);
+  });
+});
+
+describe("the owner key prompt on the activity page", () => {
+  const PROMPT = "Revert needs the owner key.";
+
+  it("says once, above the list, that Revert needs the owner key, and offers Revert once a key is stored", async () => {
+    server.listActivity.mockResolvedValue(page(EVERY_ACTION));
+    await renderActivity("/activity", false);
+
+    expect(await screen.findAllByText(PROMPT)).toHaveLength(1);
+    const prompt = screen.getByText(PROMPT);
+    expect(
+      prompt.compareDocumentPosition(screen.getAllByRole("article")[0]!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter owner key" }));
+    const keyDialog = await screen.findByRole("dialog", { name: "Owner key" });
+    fireEvent.change(within(keyDialog).getByLabelText("Owner key"), {
+      target: { value: OWNER_KEY },
+    });
+    await act(async () => {
+      fireEvent.click(within(keyDialog).getByRole("button", { name: "Use key" }));
+    });
+
+    expect(window.sessionStorage.getItem("hx-centcom.owner-key")).toBe(OWNER_KEY);
+    expect(await screen.findAllByRole("button", { name: "Revert" })).toHaveLength(5);
+    expect(screen.queryByText(PROMPT)).toBeNull();
+  });
+
+  it("moves focus to the activity list once a key is stored", async () => {
+    server.listActivity.mockResolvedValue(page(EVERY_ACTION));
+    await renderActivity("/activity", false);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Enter owner key" }));
+    const keyDialog = await screen.findByRole("dialog", { name: "Owner key" });
+    fireEvent.change(within(keyDialog).getByLabelText("Owner key"), {
+      target: { value: OWNER_KEY },
+    });
+    await act(async () => {
+      fireEvent.click(within(keyDialog).getByRole("button", { name: "Use key" }));
+    });
+
+    await screen.findAllByRole("button", { name: "Revert" });
+    const list = screen.getAllByRole("article")[0]!.closest("ul");
+    await waitFor(() => expect(document.activeElement).toBe(list));
+  });
+
+  it("shows no prompt when no listed row can be reverted", async () => {
+    server.listActivity.mockResolvedValue(page([OPENED_DECISION, CLOSED_DEPENDENCY]));
+    await renderActivity("/activity", false);
+
+    expect(await screen.findAllByRole("article")).toHaveLength(2);
+    expect(screen.queryByText(PROMPT)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enter owner key" })).toBeNull();
+  });
+
+  it("shows no prompt in owner mode", async () => {
+    server.listActivity.mockResolvedValue(page(EVERY_ACTION));
+    await renderActivity("/activity", true);
+
+    expect(await screen.findAllByRole("button", { name: "Revert" })).toHaveLength(5);
+    expect(screen.queryByText(PROMPT)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enter owner key" })).toBeNull();
   });
 });
 

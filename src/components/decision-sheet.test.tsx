@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
 import { shellWith } from "@/test/ui-fixtures";
@@ -154,6 +154,72 @@ describe("the decision detail", () => {
     const section = await screen.findByRole("region", { name: "Description" });
     expect(description.length).toBeGreaterThan(140);
     expect(section.textContent).toBe(`Description${description}`);
+  });
+});
+
+describe("the owner key prompt on a decision", () => {
+  const PROMPT = "Deciding needs the owner key.";
+
+  it("asks for the owner key on a pending decision in public mode, then shows the decide form once a key is stored", async () => {
+    serve(() => [decision({ id: "D-15", question: "Merge the shadow hook PR?" })]);
+    await renderDecisions("/decisions?item=D-15");
+
+    const sheet = await screen.findByRole("dialog", { name: "Merge the shadow hook PR?" });
+    expect(within(sheet).getByText(PROMPT)).toBeInTheDocument();
+    expect(within(sheet).queryByRole("form", { name: "Record your decision" })).toBeNull();
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Enter owner key" }));
+    const keyDialog = await screen.findByRole("dialog", { name: "Owner key" });
+    fireEvent.change(within(keyDialog).getByLabelText("Owner key"), {
+      target: { value: OWNER_KEY },
+    });
+    await act(async () => {
+      fireEvent.click(within(keyDialog).getByRole("button", { name: "Use key" }));
+    });
+
+    expect(window.sessionStorage.getItem("hx-centcom.owner-key")).toBe(OWNER_KEY);
+    expect(
+      await within(sheet).findByRole("form", { name: "Record your decision" }),
+    ).toBeInTheDocument();
+    expect(within(sheet).queryByText(PROMPT)).toBeNull();
+  });
+
+  it("moves focus to the decide form's first choice once a key is stored", async () => {
+    serve(() => [decision({ id: "D-15", question: "Merge the shadow hook PR?" })]);
+    await renderDecisions("/decisions?item=D-15");
+
+    const sheet = await screen.findByRole("dialog", { name: "Merge the shadow hook PR?" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Enter owner key" }));
+    const keyDialog = await screen.findByRole("dialog", { name: "Owner key" });
+    fireEvent.change(within(keyDialog).getByLabelText("Owner key"), {
+      target: { value: OWNER_KEY },
+    });
+    await act(async () => {
+      fireEvent.click(within(keyDialog).getByRole("button", { name: "Use key" }));
+    });
+
+    const firstChoice = await within(sheet).findByRole("radio", { name: "Decided" });
+    await waitFor(() => expect(document.activeElement).toBe(firstChoice));
+  });
+
+  it("shows no prompt on a decided decision, only the owner's outcome", async () => {
+    serve(() => []);
+    server.getDecision.mockResolvedValue(DECIDED);
+    await renderDecisions("/decisions?item=D-14");
+
+    const outcome = await screen.findByRole("region", { name: "Owner decision" });
+    expect(outcome).toHaveTextContent("Deploy after the smoke test passes.");
+    expect(screen.queryByText(PROMPT)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enter owner key" })).toBeNull();
+  });
+
+  it("shows no prompt in owner mode, only the decide form", async () => {
+    serve(() => [decision({ id: "D-15", question: "Merge the shadow hook PR?" })]);
+    await renderDecisions("/decisions?item=D-15", { owner: true });
+
+    expect(await screen.findByRole("form", { name: "Record your decision" })).toBeInTheDocument();
+    expect(screen.queryByText(PROMPT)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enter owner key" })).toBeNull();
   });
 });
 
