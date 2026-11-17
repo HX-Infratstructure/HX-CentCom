@@ -29,8 +29,9 @@ export function taskCountsOf(tasks: readonly Task[]): WorkspaceTaskCounts {
 }
 
 /**
- * The pages' bounded read. `tasks` only sets `counts.tasks`; the shell carries no task rows. The decision count is
- * `pendingDecisions` Pending decisions.
+ * The pages' bounded read. `tasks` only sets `counts.tasks`; the shell carries no task rows. `counts.decisions` models
+ * only the Pending count the Overview reads, `pendingDecisions` Pending decisions. The server's `counts.decisions.total`
+ * counts every decision, whatever its status.
  */
 export function shellWith(
   fields: Partial<Omit<WorkspaceShell, "counts">> & {
@@ -59,7 +60,12 @@ export function shellWith(
   };
 }
 
-/** One page of the task read holding `items`, with counts over `all` (the whole filtered set, default `items`). */
+/**
+ * One page of the task read holding `items`, with counts over `all` (default `items`). `all` is the set before the
+ * agent and repo filters, so the counts match the server's only while neither filter is active; the server counts
+ * `byAgent` without the agent filter and `byRepo` without the repo filter. A test that filters by agent or repo sets the
+ * counts it needs on the page.
+ */
 export function tasksPageWith(
   items: readonly Task[],
   {
@@ -80,20 +86,25 @@ export function tasksPageWith(
   return { items, nextCursor, counts };
 }
 
-/** The whole snapshot that REST and MCP still serve. The overview tests build the shell and task reads from it. */
+/**
+ * The whole snapshot that REST and MCP still serve. The overview tests build the shell and task reads from it.
+ * `counts.decisions` counts `decisions`, as `listDecisions({}).counts` does for those rows.
+ */
 export function workspaceWith(fields: Partial<Omit<Workspace, "counts">>): Workspace {
-  const decisions = fields.decisions ?? [];
-  const tasks = fields.tasks ?? [];
-  const shell = shellWith({ ...fields, tasks });
+  const { tasks = [], requirements = [], decisions = [], ...shellFields } = fields;
+  const shell = shellWith({ ...shellFields, tasks });
   return {
-    requirements: [],
-    ...fields,
     ...shell,
     tasks,
+    requirements,
     decisions,
     counts: {
       ...shell.counts,
-      decisions: { total: decisions.length, byGateType: {}, byStatus: {} },
+      decisions: {
+        total: decisions.length,
+        byGateType: tally(decisions.map((d) => d.gate_type)),
+        byStatus: tally(decisions.map((d) => d.status)),
+      },
     },
   };
 }
