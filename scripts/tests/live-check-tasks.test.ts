@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import { checks } from "../live-check/checks/tasks.ts";
 import { TasksPage } from "../live-check/checks/pages/tasks-page.ts";
 import type { ReadOnlySession } from "../live-check/session.ts";
-import type { Workspace, WorkspaceTask } from "../live-check/checks/shared.ts";
+import type { TaskItem, TaskList } from "../live-check/checks/shared.ts";
 import type { CheckContext } from "../live-check/types.ts";
 
-function tasksFor(counts: Record<string, number>): WorkspaceTask[] {
+const PAGE_SIZE = 20;
+
+function tasksFor(counts: Record<string, number>): TaskItem[] {
   return Object.entries(counts).flatMap(([repository, n]) =>
     Array.from({ length: n }, (_, i) => ({
       id: `${repository}-${i}`,
@@ -18,12 +20,34 @@ function tasksFor(counts: Record<string, number>): WorkspaceTask[] {
   );
 }
 
-function workspace(counts: Record<string, number>): Workspace {
-  return { tasks: tasksFor(counts), agents: [], statusLabels: [], updatesCursor: null };
+/** Answers like the API: the workspace holds every task, the task list its first page in order. */
+function taskApi(tasks: readonly TaskItem[], path: string): unknown {
+  if (path === "/api/v1/workspace") return { tasks };
+  const url = new URL(path, "http://centcom.test");
+  assert.equal(url.pathname, "/api/v1/tasks");
+  const repo = url.searchParams.get("repo");
+  const matched = repo === null ? tasks : tasks.filter((task) => task.repository === repo);
+  const byRepo: Record<string, number> = {};
+  for (const task of tasks) byRepo[task.repository] = (byRepo[task.repository] ?? 0) + 1;
+  const list: TaskList = {
+    items: matched.slice(0, PAGE_SIZE),
+    nextCursor: matched.length > PAGE_SIZE ? "next" : null,
+    counts: {
+      total: matched.length,
+      byAgent: {},
+      byRepo,
+      byAttention: {
+        blocked: 0,
+        owner: 0,
+        stale: matched.filter((task) => task.attention.includes("stale")).length,
+      },
+    },
+  };
+  return list;
 }
 
-/** Each `/api/v1/workspace` read returns the next snapshot; the page renders `rows` table rows. */
-function fakeContext(snapshots: Workspace[], rows: number): CheckContext {
+/** Each API read answers from the next snapshot of tasks; the page renders `rows` table rows. */
+function fakeContext(snapshots: Record<string, number>[], rows: number): CheckContext {
   const reads = [...snapshots];
   const session = {
     goto: async () => 200,
@@ -31,10 +55,9 @@ function fakeContext(snapshots: Workspace[], rows: number): CheckContext {
   };
   const api = {
     getJson: async (path: string) => {
-      assert.equal(path, "/api/v1/workspace");
       const next = reads.shift();
-      assert.ok(next, "the check read the workspace more often than the test expected");
-      return next;
+      assert.ok(next, "the check read the API more often than the test expected");
+      return taskApi(tasksFor(next), path);
     },
   };
   return {
@@ -49,24 +72,52 @@ assert.ok(filterCheck, "tasks-filter is exported");
 
 describe("tasks-filter", () => {
   test("a task count that moves between the API and page reads gives no data, not FAIL", async () => {
-    const before = workspace({ alpha: 1, beta: 3 });
-    const after = workspace({ alpha: 2, beta: 3 });
-    const outcome = await filterCheck.run(fakeContext([before, after], 2));
+    const outcome = await filterCheck.run(
+      fakeContext(
+        [
+          { alpha: 1, beta: 3 },
+          { alpha: 2, beta: 3 },
+        ],
+        2,
+      ),
+    );
     assert.equal(outcome.status, "LIVE_NOT_EXECUTED");
     assert.equal(outcome.reason, "the alpha task count moved from 1 to 2 during the check");
   });
 
   test("rows that differ while both API reads agree still FAIL", async () => {
     const counts = { alpha: 1, beta: 3 };
-    const outcome = await filterCheck.run(fakeContext([workspace(counts), workspace(counts)], 4));
+    const outcome = await filterCheck.run(fakeContext([counts, counts], 4));
     assert.equal(outcome.status, "FAIL");
     assert.equal(outcome.reason, "filtered rows differ from the API count");
   });
 
   test("rows that match a stable API count PASS", async () => {
     const counts = { alpha: 1, beta: 3 };
-    const outcome = await filterCheck.run(fakeContext([workspace(counts), workspace(counts)], 1));
+    const outcome = await filterCheck.run(fakeContext([counts, counts], 1));
     assert.equal(outcome.status, "PASS");
+  });
+
+  test("with more tasks than one page, the page shows the first page of the filtered list", async () => {
+    const counts = { alpha: 25, beta: 30 };
+    const firstPage = await filterCheck.run(fakeContext([counts, counts], PAGE_SIZE));
+    assert.equal(firstPage.status, "PASS", firstPage.reason);
+    const everyTask = await filterCheck.run(fakeContext([counts, counts], 25));
+    assert.equal(everyTask.status, "FAIL");
+  });
+
+  test("a count that moves with more tasks than one page still gives no data", async () => {
+    const outcome = await filterCheck.run(
+      fakeContext(
+        [
+          { alpha: 25, beta: 30 },
+          { alpha: 26, beta: 30 },
+        ],
+        PAGE_SIZE,
+      ),
+    );
+    assert.equal(outcome.status, "LIVE_NOT_EXECUTED");
+    assert.equal(outcome.reason, "the alpha task count moved from 25 to 26 during the check");
   });
 });
 
@@ -77,8 +128,8 @@ const { JSDOM } = createRequire(import.meta.url)("jsdom") as {
   JSDOM: new (html: string) => { readonly window: DomWindow };
 };
 
-/** The API answers `path` with `body`; the page's `evaluate` runs against `html` in a real DOM. */
-function domContext(path: string, body: unknown, html: string): CheckContext {
+/** The API answers a read with `answer`; the page's `evaluate` runs against `html` in a real DOM. */
+function domContext(answer: (path: string) => unknown, html: string): CheckContext {
   const { document } = new JSDOM(html).window;
   const session = {
     goto: async () => 200,
@@ -95,10 +146,7 @@ function domContext(path: string, body: unknown, html: string): CheckContext {
     },
   };
   const api = {
-    getJson: async (read: string) => {
-      assert.equal(read, path);
-      return body;
-    },
+    getJson: async (path: string) => answer(path),
   };
   return { session, api, screenshot: async (name: string) => name } as unknown as CheckContext;
 }
@@ -117,21 +165,34 @@ describe("stale-badge", () => {
   </tbody></table>`;
 
   test("a completed stale task, which the UI shows no badge for, is not expected to have one", async () => {
-    const tasks = [
+    const tasks: TaskItem[] = [
       { id: "OPEN-1", repository: "r", stale: true, attention: ["stale"] },
       { id: "DONE-1", repository: "r", stale: true, attention: [] },
     ];
-    const ctx = domContext("/api/v1/workspace", { tasks }, rows);
+    const ctx = domContext((path) => taskApi(tasks, path), rows);
     const outcome = await checkById("stale-badge").run(ctx);
     assert.equal(outcome.status, "PASS", outcome.reason);
   });
 
   test("a reworded badge tooltip still counts as the stale badge", async () => {
     const reworded = rows.replace(staleTitle, "Commit is behind its repository head.");
-    const tasks = [{ id: "OPEN-1", repository: "r", stale: true, attention: ["stale"] }];
+    const tasks: TaskItem[] = [
+      { id: "OPEN-1", repository: "r", stale: true, attention: ["stale"] },
+    ];
     const outcome = await checkById("stale-badge").run(
-      domContext("/api/v1/workspace", { tasks }, reworded),
+      domContext((path) => taskApi(tasks, path), reworded),
     );
+    assert.equal(outcome.status, "PASS", outcome.reason);
+  });
+
+  test("a stale task beyond the first page is not expected on the page", async () => {
+    const firstPage = tasksFor({ r: PAGE_SIZE });
+    const beyond: TaskItem = { id: "LATE-1", repository: "r", stale: true, attention: ["stale"] };
+    const html = `<table class="board-table"><tbody>${firstPage
+      .map((task) => `<tr><td><code class="record-id">${task.id}</code></td></tr>`)
+      .join("")}</tbody></table>`;
+    const ctx = domContext((path) => taskApi([...firstPage, beyond], path), html);
+    const outcome = await checkById("stale-badge").run(ctx);
     assert.equal(outcome.status, "PASS", outcome.reason);
   });
 });
@@ -180,21 +241,25 @@ describe("task-feed-badges", () => {
   </header></article>`;
   const feed = (...items: string[]) => `<section id="updates">${items.join("")}</section>`;
   const updates = { items: [{ task_id: "T-1" }] };
+  const updatesApi = (path: string) => {
+    assert.equal(path, "/api/v1/updates");
+    return updates;
+  };
 
   test("a feed of only system rows shows no agent badge, so it is no data, not PASS", async () => {
-    const ctx = domContext("/api/v1/updates", updates, feed(systemRow, systemRow));
+    const ctx = domContext(updatesApi, feed(systemRow, systemRow));
     const outcome = await checkById("task-feed-badges").run(ctx);
     assert.equal(outcome.status, "LIVE_NOT_EXECUTED");
   });
 
   test("an agent row without a badge FAILs even beside a system row", async () => {
-    const ctx = domContext("/api/v1/updates", updates, feed(systemRow, agentRow(false)));
+    const ctx = domContext(updatesApi, feed(systemRow, agentRow(false)));
     const outcome = await checkById("task-feed-badges").run(ctx);
     assert.equal(outcome.status, "FAIL");
   });
 
   test("agent rows with badges beside a system row PASS", async () => {
-    const ctx = domContext("/api/v1/updates", updates, feed(systemRow, agentRow(true)));
+    const ctx = domContext(updatesApi, feed(systemRow, agentRow(true)));
     const outcome = await checkById("task-feed-badges").run(ctx);
     assert.equal(outcome.status, "PASS", outcome.reason);
   });

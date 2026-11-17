@@ -4,9 +4,10 @@ import { TasksPage } from "./pages/tasks-page.ts";
 import {
   pickNarrowingValue,
   sameOrder,
+  type Facet,
+  type TaskList,
   type UpdateList,
   type Workspace,
-  type WorkspaceTask,
 } from "./shared.ts";
 
 async function labelsAndKanban(ctx: CheckContext): Promise<CheckOutcome> {
@@ -47,31 +48,28 @@ async function feedBadges(ctx: CheckContext): Promise<CheckOutcome> {
   });
 }
 
-function repoCounts(tasks: readonly WorkspaceTask[]): Map<string, number> {
-  const tally = new Map<string, number>();
-  for (const task of tasks) {
-    // The API stores an omitted repository as "" (docs/API.md), and "" is no repository to filter by.
-    if (task.repository !== "") tally.set(task.repository, (tally.get(task.repository) ?? 0) + 1);
-  }
-  return tally;
+function repoCounts(byRepo: Facet): [string, number][] {
+  // The API stores an omitted repository as "" (docs/API.md), and "" is no repository to filter by.
+  return Object.entries(byRepo).filter(([repo]) => repo !== "");
 }
 
 async function filterNarrows(ctx: CheckContext): Promise<CheckOutcome> {
-  const { tasks } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
-  const pick = pickNarrowingValue(repoCounts(tasks), tasks.length);
-  if (!pick) return verdict([noData("no repository narrows the tasks")], { tasks: tasks.length });
-  const [repo, expected] = pick;
+  const { counts } = await ctx.api.getJson<TaskList>("/api/v1/tasks");
+  const pick = pickNarrowingValue(repoCounts(counts.byRepo), counts.total);
+  if (!pick) return verdict([noData("no repository narrows the tasks")], { tasks: counts.total });
+  const [repo, total] = pick;
   const page = new TasksPage(ctx.session);
   await page.open({ repo });
   const rows = await page.rowCount();
-  const reread = await ctx.api.getJson<Workspace>("/api/v1/workspace");
-  const settled = repoCounts(reread.tasks).get(repo) ?? 0;
+  const reread = await ctx.api.getJson<TaskList>(`/api/v1/tasks?${new URLSearchParams({ repo })}`);
+  const settled = reread.counts.total;
+  const expected = reread.items.length;
   const screenshot = await ctx.screenshot("tasks-filter");
   const part =
-    settled === expected
+    settled === total
       ? checked(rows === expected, "filtered rows differ from the API count")
-      : noData(`the ${repo} task count moved from ${expected} to ${settled} during the check`);
-  return verdict([part], { repo, expected, settled, rows, screenshot });
+      : noData(`the ${repo} task count moved from ${total} to ${settled} during the check`);
+  return verdict([part], { repo, total, settled, expected, rows, screenshot });
 }
 
 async function updatesShowMore(ctx: CheckContext): Promise<CheckOutcome> {
@@ -90,12 +88,12 @@ async function updatesShowMore(ctx: CheckContext): Promise<CheckOutcome> {
 }
 
 async function staleBadge(ctx: CheckContext): Promise<CheckOutcome> {
-  const { tasks } = await ctx.api.getJson<Workspace>("/api/v1/workspace");
+  const { items } = await ctx.api.getJson<TaskList>("/api/v1/tasks");
   const page = new TasksPage(ctx.session);
   await page.open();
   const rows = await page.rows();
   const screenshot = await ctx.screenshot("stale-badge");
-  const expected = tasks
+  const expected = items
     .filter((task) => task.attention.includes("stale"))
     .map((task) => task.id)
     .sort();
