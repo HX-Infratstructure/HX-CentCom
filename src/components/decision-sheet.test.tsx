@@ -49,17 +49,18 @@ function decision(fields: Pick<Decision, "id" | "question"> & Partial<Decision>)
   };
 }
 
+/** The server's status filter: none, every decided status (`not_pending`), or one status. */
+function matchesStatus(d: Decision, status: string | undefined): boolean {
+  if (status === undefined) return true;
+  if (status === "not_pending") return d.status !== "Pending";
+  return d.status === status;
+}
+
 /** The decision reads answer from `register()`, read at each call, so a test changes what a refetch returns. */
 function serve(register: () => readonly Decision[]) {
   server.listDecisions.mockImplementation(
     async ({ data }: { data: { status?: string } }): Promise<DecisionsPage> => {
-      const items = register().filter((d) =>
-        data.status === undefined
-          ? true
-          : data.status === "not_pending"
-            ? d.status !== "Pending"
-            : d.status === data.status,
-      );
+      const items = register().filter((d) => matchesStatus(d, data.status));
       return {
         items,
         nextCursor: null,

@@ -124,7 +124,8 @@ function byStartDate(a: TaskView, b: TaskView): number {
     if (b.start_date === null) return -1;
     return a.start_date < b.start_date ? -1 : 1;
   }
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? -1 : 1;
 }
 
 /** The table, kanban and timeline show the same loaded tasks, so one Show more serves all three. */
@@ -148,15 +149,7 @@ function Board({ dir }: { dir: Directory }): ReactNode {
           agents={dir.agents}
         />
       </div>
-      {items.length === 0 ? (
-        <EmptyState>No tasks match these filters.</EmptyState>
-      ) : view === "kanban" ? (
-        <KanbanBoard tasks={items} />
-      ) : view === "timeline" ? (
-        <TaskTimeline tasks={[...items].sort(byStartDate)} />
-      ) : (
-        <TaskTable tasks={items} />
-      )}
+      <BoardView view={view} tasks={items} />
       <ShowMore
         shown={items.length}
         total={counts?.total}
@@ -168,6 +161,20 @@ function Board({ dir }: { dir: Directory }): ReactNode {
       />
     </>
   );
+}
+
+/** The chosen view of the loaded tasks; the main table when `view` is unset. */
+function BoardView({
+  view,
+  tasks,
+}: {
+  view: TasksSearch["view"];
+  tasks: readonly TaskView[];
+}): ReactNode {
+  if (tasks.length === 0) return <EmptyState>No tasks match these filters.</EmptyState>;
+  if (view === "kanban") return <KanbanBoard tasks={tasks} />;
+  if (view === "timeline") return <TaskTimeline tasks={[...tasks].sort(byStartDate)} />;
+  return <TaskTable tasks={tasks} />;
 }
 
 function ViewTabs(): ReactNode {
