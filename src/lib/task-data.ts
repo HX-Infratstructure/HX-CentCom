@@ -1,12 +1,25 @@
 import {
   infiniteQueryOptions,
   queryOptions,
+  skipToken,
   type DefaultOptions,
   type InfiniteData,
 } from "@tanstack/react-query";
 import { adaptPullRequestPages } from "@/components/adapt";
-import type { GithubPrQueryInput, GithubPrsPage, UpdateQueryInput } from "@/server/services";
-import { listGithubPrs, listUpdates, listWorkspace } from "./tasks.functions";
+import type {
+  GithubPrQueryInput,
+  GithubPrsPage,
+  TaskQueryInput,
+  UpdateQueryInput,
+} from "@/server/services";
+import {
+  getTask,
+  listGithubPrs,
+  listTasks,
+  listUpdates,
+  listWorkspace,
+  listWorkspaceShell,
+} from "./tasks.functions";
 
 /**
  * The query client's defaults, which the router and the tests share. Every active query re-checks the server every 60
@@ -26,6 +39,36 @@ export const tasksQuery = queryOptions({
   queryKey: ["task-workspace"],
   queryFn: () => listWorkspace(),
 });
+
+/** The pages' bounded workspace read: agents, status labels, repository heads, the latest updates and the counts. */
+export const shellQuery = queryOptions({
+  queryKey: ["workspace-shell"],
+  queryFn: () => listWorkspaceShell(),
+});
+
+/** The task read's filters. The cursor never enters the URL. */
+export type TaskQuery = Pick<
+  NonNullable<TaskQueryInput>,
+  "agentId" | "repo" | "attention" | "open"
+>;
+
+/** The one task read. Each route adapts the pages with its directory (`adaptTaskPages`), so there is no `select`. */
+export function taskPages(query: TaskQuery) {
+  return infiniteQueryOptions({
+    queryKey: ["tasks", "list", query],
+    queryFn: ({ pageParam }) => listTasks({ data: { ...query, cursor: pageParam } }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** One task with its requirements, for the task sheet. null is a miss. */
+export function taskById(id: string | undefined) {
+  return queryOptions({
+    queryKey: ["tasks", "one", id],
+    queryFn: id === undefined ? skipToken : () => getTask({ data: { id } }),
+  });
+}
 
 /** The update feed's filters. The cursor never enters the URL. */
 export type UpdateQuery = Pick<

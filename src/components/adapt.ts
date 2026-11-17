@@ -18,6 +18,7 @@ import {
   type PullRequestView,
   type RaidView,
   type RequirementView,
+  type ShellView,
   type SourceRef,
   type StatusDirectory,
   type StatusRef,
@@ -27,14 +28,24 @@ import {
   type WorkspaceView,
 } from "./model";
 
-/** Use it as a react-query `select`, so it runs once per fetched snapshot instead of once per render. */
-export function adaptWorkspace(ws: S.Workspace): WorkspaceView {
-  const dir: Directory = {
+/** The agents and status labels by id, which every other read resolves its rows against. */
+export function directoryOf(ws: S.WorkspaceShell): Directory {
+  return {
     agents: new Map(ws.agents.map((a) => [a.id, agentFromRow(a)] as const)),
     statuses: new Map(
       ws.statusLabels.map((s) => [s.id, { id: s.id, label: s.label, isDone: s.is_done }] as const),
     ),
   };
+}
+
+/** Use it as a react-query `select`, so it runs once per fetched shell instead of once per render. */
+export function adaptShell(ws: S.WorkspaceShell): ShellView {
+  return { ...directoryOf(ws), counts: ws.counts };
+}
+
+/** Use it as a react-query `select`, so it runs once per fetched snapshot instead of once per render. */
+export function adaptWorkspace(ws: S.Workspace): WorkspaceView {
+  const dir = directoryOf(ws);
   const requirements = new Map<string, RequirementView[]>();
   for (const r of ws.requirements) {
     const list = requirements.get(r.task_id) ?? [];
@@ -46,6 +57,29 @@ export function adaptWorkspace(ws: S.Workspace): WorkspaceView {
     tasks: ws.tasks.map((t) => taskView(t, dir, requirements.get(t.id) ?? [])),
     decisions: ws.decisions.map((d) => decisionView(d, dir.agents)),
   };
+}
+
+/**
+ * Pages of the task read, in the server's order, with the first page's counts. The list read returns no requirements,
+ * so every row's `requirements` is empty; the task sheet reads the task by id (`adaptTaskDetail`) for them.
+ */
+export function adaptTaskPages(
+  pages: readonly S.TasksPage[],
+  dir: Directory,
+): { readonly items: readonly TaskView[]; readonly counts: S.TaskCounts | null } {
+  return {
+    items: pages.flatMap((page) => page.items.map((t) => taskView(t, dir, []))),
+    counts: pages[0]?.counts ?? null,
+  };
+}
+
+/** One task with its requirements, for the task sheet's by-id read. */
+export function adaptTaskDetail(detail: S.TaskDetail, dir: Directory): TaskView {
+  return taskView(
+    detail.task,
+    dir,
+    detail.requirements.map((r) => requirementView(r, dir.agents)),
+  );
 }
 
 /** One decision, for the sheet's by-id read of a decision the workspace does not hold. */

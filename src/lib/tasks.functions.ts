@@ -4,6 +4,7 @@ import {
   type ActivityQueryInput,
   type DecisionQueryInput,
   type GithubPrQueryInput,
+  type TaskQueryInput,
   type UpdateQueryInput,
 } from "@/server/services";
 
@@ -16,6 +17,14 @@ const typesOnly =
 export const listWorkspace = createServerFn({ method: "GET" }).handler(({ context }) =>
   context.services.listWorkspace(),
 );
+
+export const listWorkspaceShell = createServerFn({ method: "GET" }).handler(({ context }) =>
+  context.services.listWorkspaceShell(),
+);
+
+export const listTasks = createServerFn({ method: "GET" })
+  .validator(typesOnly<TaskQueryInput>())
+  .handler(({ context, data }) => context.services.listTasks(data));
 
 export const listUpdates = createServerFn({ method: "GET" })
   .validator(typesOnly<UpdateQueryInput>())
@@ -42,6 +51,18 @@ export const getDecision = createServerFn({ method: "GET" })
   .handler(async ({ context, data }) => {
     try {
       return await context.services.getDecision(data.id);
+    } catch (error) {
+      if (isServiceError(error) && error.code === "not_found") return null;
+      throw error;
+    }
+  });
+
+/** As getDecision: a miss is null, so the sheet shows "missing". */
+export const getTask = createServerFn({ method: "GET" })
+  .validator(typesOnly<{ readonly id: string }>())
+  .handler(async ({ context, data }) => {
+    try {
+      return await context.services.getTask(data.id);
     } catch (error) {
       if (isServiceError(error) && error.code === "not_found") return null;
       throw error;

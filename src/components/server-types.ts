@@ -45,11 +45,16 @@ export type {
   Severity,
   StatusLabel,
   Task,
+  TaskCounts,
+  TaskDetail,
+  TasksPage,
   TaskUpdate,
   UpdateCounts,
   UpdatesPage,
   ValidationState,
   Workspace,
+  WorkspaceShell,
+  WorkspaceTaskCounts,
 } from "@/server/services";
 
 // The public surface exports rows, not the schema's closed unions, so each union is read off

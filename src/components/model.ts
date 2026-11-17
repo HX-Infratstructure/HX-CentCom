@@ -459,6 +459,9 @@ export type WorkspaceView = Directory & {
   readonly decisions: readonly DecisionView[];
 };
 
+/** The pages' bounded read: the directory and the shell's counts, with no task, requirement or decision. */
+export type ShellView = Directory & { readonly counts: S.WorkspaceShell["counts"] };
+
 type WithoutStatus<T> = T extends unknown ? Omit<T, "status"> : never;
 
 /**
