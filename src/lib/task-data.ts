@@ -17,7 +17,6 @@ import {
   listGithubPrs,
   listTasks,
   listUpdates,
-  listWorkspace,
   listWorkspaceShell,
 } from "./tasks.functions";
 
@@ -34,11 +33,6 @@ export const QUERY_DEFAULTS = {
   refetchIntervalInBackground: false,
   refetchOnWindowFocus: true,
 } satisfies DefaultOptions["queries"];
-
-export const tasksQuery = queryOptions({
-  queryKey: ["task-workspace"],
-  queryFn: () => listWorkspace(),
-});
 
 /** The pages' bounded workspace read: agents, status labels, repository heads, the latest updates and the counts. */
 export const shellQuery = queryOptions({
@@ -79,7 +73,7 @@ export type UpdateQuery = Pick<
 /**
  * The one update-feed read, for the overview's latest updates and the tasks page's update log. Each route adds its own
  * `select`, because adapting a page needs the workspace's directory. `refreshOn` joins only the key: the overview's
- * needs-attention feed passes the reason's open tasks, so a workspace refresh that changes them reads the feed again.
+ * needs-attention feed passes the reason's open tasks, so a task read that changes them reads the feed again.
  */
 export function updatePages(query: UpdateQuery, refreshOn?: readonly string[]) {
   return infiniteQueryOptions({

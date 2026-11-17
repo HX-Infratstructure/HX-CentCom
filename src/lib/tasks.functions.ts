@@ -14,10 +14,6 @@ const typesOnly =
   (input: T): T =>
     input;
 
-export const listWorkspace = createServerFn({ method: "GET" }).handler(({ context }) =>
-  context.services.listWorkspace(),
-);
-
 export const listWorkspaceShell = createServerFn({ method: "GET" }).handler(({ context }) =>
   context.services.listWorkspaceShell(),
 );

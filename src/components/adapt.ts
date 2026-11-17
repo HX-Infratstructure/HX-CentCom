@@ -25,7 +25,6 @@ import {
   type TaskView,
   type UpdateOrigin,
   type UpdateView,
-  type WorkspaceView,
 } from "./model";
 
 /** The agents and status labels by id, which every other read resolves its rows against. */
@@ -41,22 +40,6 @@ export function directoryOf(ws: S.WorkspaceShell): Directory {
 /** Use it as a react-query `select`, so it runs once per fetched shell instead of once per render. */
 export function adaptShell(ws: S.WorkspaceShell): ShellView {
   return { ...directoryOf(ws), counts: ws.counts };
-}
-
-/** Use it as a react-query `select`, so it runs once per fetched snapshot instead of once per render. */
-export function adaptWorkspace(ws: S.Workspace): WorkspaceView {
-  const dir = directoryOf(ws);
-  const requirements = new Map<string, RequirementView[]>();
-  for (const r of ws.requirements) {
-    const list = requirements.get(r.task_id) ?? [];
-    list.push(requirementView(r, dir.agents));
-    requirements.set(r.task_id, list);
-  }
-  return {
-    ...dir,
-    tasks: ws.tasks.map((t) => taskView(t, dir, requirements.get(t.id) ?? [])),
-    decisions: ws.decisions.map((d) => decisionView(d, dir.agents)),
-  };
 }
 
 /**
@@ -82,7 +65,7 @@ export function adaptTaskDetail(detail: S.TaskDetail, dir: Directory): TaskView 
   );
 }
 
-/** One decision, for the sheet's by-id read of a decision the workspace does not hold. */
+/** One decision, for the sheet's by-id read. */
 export function adaptDecision(d: S.Decision, agents: AgentDirectory): DecisionView {
   return decisionView(d, agents);
 }

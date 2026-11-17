@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { workspaceWith } from "@/test/ui-fixtures";
-import { adaptWorkspace } from "./adapt";
+import { shellWith } from "@/test/ui-fixtures";
+import { adaptDecisionPages, directoryOf } from "./adapt";
 import { splitInbox } from "./model";
-import type { Agent, Decision } from "./server-types";
+import type { Agent, Decision, DecisionsPage } from "./server-types";
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
@@ -38,8 +38,13 @@ function decision(fields: Pick<Decision, "id"> & Partial<Decision>): Decision {
 }
 
 function inbox(decisions: readonly Decision[]) {
-  const raw = workspaceWith({ decisions, agents: AGENTS });
-  const { pending, history } = splitInbox(adaptWorkspace(raw).decisions);
+  const { agents } = directoryOf(shellWith({ agents: AGENTS }));
+  const page: DecisionsPage = {
+    items: decisions,
+    nextCursor: null,
+    counts: { total: decisions.length, byGateType: {}, byStatus: {} },
+  };
+  const { pending, history } = splitInbox(adaptDecisionPages([page], agents).items);
   return { pending: pending.map((d) => d.id), history: history.map((d) => d.id) };
 }
 

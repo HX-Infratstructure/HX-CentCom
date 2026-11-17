@@ -264,15 +264,6 @@ export type TaskView = Omit<S.Task, "agent" | "status" | "source_url" | "updated
   readonly requirements: readonly RequirementView[];
 };
 
-/** Blocked tasks first, then the rest of the open tasks in workspace order. The server owns what open means. */
-export function openTasks(tasks: readonly TaskView[]): readonly TaskView[] {
-  const open = tasks.filter((t) => t.open);
-  return [
-    ...open.filter((t) => t.blocked_on !== "none"),
-    ...open.filter((t) => t.blocked_on === "none"),
-  ];
-}
-
 /** Every reason the task needs attention. The server owns the rule; the overview filter and the stale badge read it. */
 export function attentionOf(task: TaskView): readonly Attention[] {
   return task.attention;
@@ -452,11 +443,6 @@ export type ActivityView = Omit<S.ActivityEntry, "actor" | "before" | "after" | 
    */
   readonly opens: { readonly kind: RecordKind; readonly id: string } | null;
   readonly createdAt: Instant;
-};
-
-export type WorkspaceView = Directory & {
-  readonly tasks: readonly TaskView[];
-  readonly decisions: readonly DecisionView[];
 };
 
 /** The pages' bounded read: the directory and the shell's counts, with no task, requirement or decision. */

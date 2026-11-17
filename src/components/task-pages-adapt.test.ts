@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { workspaceWith } from "@/test/ui-fixtures";
-import { adaptTaskDetail, adaptTaskPages, adaptWorkspace, directoryOf } from "./adapt";
+import { shellWith } from "@/test/ui-fixtures";
+import { adaptTaskDetail, adaptTaskPages, directoryOf } from "./adapt";
 import type { Agent, Requirement, StatusLabel, Task, TaskCounts, TasksPage } from "./server-types";
 
 const AGENTS: readonly Agent[] = [
@@ -55,7 +55,7 @@ const REQUIREMENT: Requirement = {
   created_at: "2026-11-14T16:24:57.151Z",
 };
 
-const shell = () => workspaceWith({ agents: [...AGENTS], statusLabels: [...STATUSES] });
+const shell = () => shellWith({ agents: [...AGENTS], statusLabels: [...STATUSES] });
 
 describe("adaptTaskPages", () => {
   const first: TasksPage = {
@@ -114,8 +114,16 @@ describe("adaptTaskDetail", () => {
 });
 
 describe("directoryOf", () => {
-  it("equals the directory adaptWorkspace builds for the same agents and labels", () => {
-    const { agents, statuses } = adaptWorkspace(shell());
-    expect(directoryOf(shell())).toEqual({ agents, statuses });
+  it("maps each agent and status label by id", () => {
+    expect(directoryOf(shell())).toEqual({
+      agents: new Map([
+        ["atlas", { id: "atlas", name: "Atlas", tone: "green", role: "agent" }],
+        ["beacon", { id: "beacon", name: "Beacon", tone: "sky", role: "agent" }],
+      ]),
+      statuses: new Map([
+        ["In progress", { id: "In progress", label: "In progress", isDone: false }],
+        ["Complete", { id: "Complete", label: "Complete", isDone: true }],
+      ]),
+    });
   });
 });
