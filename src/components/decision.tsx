@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { BoardTable, PersonCell, StatusCell, type BoardColumn } from "./board";
 import type { Detail } from "./detail";
@@ -13,6 +13,7 @@ import {
   type DecisionView,
   type OwnerActions,
 } from "./model";
+import { OwnerKeyPrompt } from "./owner-session";
 import { AgentBadge, Fact, Facts, SourceLink, Time } from "./record-parts";
 import { RichText } from "./rich-text";
 import type { DecideInput, OwnerDecisionStatus } from "./server-types";
@@ -181,6 +182,7 @@ function DecisionBody({
   const descriptionId = useId();
   const optionsId = useId();
   const blocksId = useId();
+  const firstChoice = useRef<HTMLInputElement>(null);
   return (
     <>
       <div className="sheet-pills">
@@ -253,7 +255,11 @@ function DecisionBody({
       </Facts>
 
       {d.status === "Pending" ? (
-        owner !== null && <DecideForm key={d.id} decision={d} owner={owner} />
+        owner !== null ? (
+          <DecideForm key={d.id} decision={d} owner={owner} firstChoice={firstChoice} />
+        ) : (
+          <OwnerKeyPrompt focusAfter={firstChoice}>Deciding needs the owner key.</OwnerKeyPrompt>
+        )
       ) : (
         <OwnerOutcome decision={d} />
       )}
@@ -317,9 +323,11 @@ function formText(form: FormData, name: string): string {
 function DecideForm({
   decision,
   owner,
+  firstChoice,
 }: {
   decision: DecisionView;
   owner: OwnerActions;
+  firstChoice: RefObject<HTMLInputElement | null>;
 }): ReactNode {
   const [state, setState] = useState<FormState>({ phase: "editing" });
   const [seenVersion, setSeenVersion] = useState(decision.version);
@@ -383,9 +391,15 @@ function DecideForm({
       <fieldset className="field" aria-invalid={statusIssue !== undefined || undefined}>
         <legend>Outcome</legend>
         <div className="radio-row status-picker">
-          {OUTCOMES.map((outcome) => (
+          {OUTCOMES.map((outcome, i) => (
             <label key={outcome} className="radio" data-hue={DECISION_STATUS_HUES[outcome]}>
-              <input type="radio" name="status" value={outcome} required />
+              <input
+                ref={i === 0 ? firstChoice : undefined}
+                type="radio"
+                name="status"
+                value={outcome}
+                required
+              />
               {DECISION_STATUS_LABELS[outcome]}
             </label>
           ))}

@@ -1981,6 +1981,19 @@
   .owner-key-form button {
     justify-self: start;
   }
+  .owner-key-prompt {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+  }
+  .owner-key-prompt p {
+    margin: 0;
+  }
   .owner-mode {
     display: inline-flex;
     align-items: center;
