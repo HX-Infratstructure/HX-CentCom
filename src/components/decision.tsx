@@ -183,6 +183,12 @@ function DecisionBody({
   const optionsId = useId();
   const blocksId = useId();
   const firstChoice = useRef<HTMLInputElement>(null);
+  const pending =
+    owner === null ? (
+      <OwnerKeyPrompt focusAfter={firstChoice}>Deciding needs the owner key.</OwnerKeyPrompt>
+    ) : (
+      <DecideForm key={d.id} decision={d} owner={owner} firstChoice={firstChoice} />
+    );
   return (
     <>
       <div className="sheet-pills">
@@ -254,15 +260,7 @@ function DecisionBody({
         )}
       </Facts>
 
-      {d.status === "Pending" ? (
-        owner !== null ? (
-          <DecideForm key={d.id} decision={d} owner={owner} firstChoice={firstChoice} />
-        ) : (
-          <OwnerKeyPrompt focusAfter={firstChoice}>Deciding needs the owner key.</OwnerKeyPrompt>
-        )
-      ) : (
-        <OwnerOutcome decision={d} />
-      )}
+      {d.status === "Pending" ? pending : <OwnerOutcome decision={d} />}
     </>
   );
 }

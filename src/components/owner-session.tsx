@@ -80,7 +80,8 @@ function OwnerKeyDialog({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) setError(null);
+        if (next) stored.current = false;
+        else setError(null);
       }}
     >
       <DialogTrigger asChild>

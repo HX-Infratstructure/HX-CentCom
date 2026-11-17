@@ -1991,8 +1991,8 @@
     border-radius: var(--radius-md);
     background: var(--card);
   }
-  .owner-key-prompt p {
-    margin: 0;
+  .owner-key-prompt + .activity-log {
+    margin-top: 12px;
   }
   .owner-mode {
     display: inline-flex;
