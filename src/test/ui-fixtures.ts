@@ -30,8 +30,8 @@ export function taskCountsOf(tasks: readonly Task[]): WorkspaceTaskCounts {
 
 /**
  * The pages' bounded read. `tasks` only sets `counts.tasks`; the shell carries no task rows. `counts.decisions` models
- * only the Pending count the Overview reads, `pendingDecisions` Pending decisions. The server's `counts.decisions.total`
- * counts every decision, whatever its status.
+ * only the Pending count, `pendingDecisions` Pending decisions; no page reads it now, because the Overview takes its
+ * pending count from the Pending page. The server's `counts.decisions.total` counts every decision, whatever its status.
  */
 export function shellWith(
   fields: Partial<Omit<WorkspaceShell, "counts">> & {
@@ -62,9 +62,9 @@ export function shellWith(
 
 /**
  * One page of the task read holding `items`, with counts over `all` (default `items`). `all` is the set before the
- * agent and repo filters, so the counts match the server's only while neither filter is active; the server counts
- * `byAgent` without the agent filter and `byRepo` without the repo filter. A test that filters by agent or repo sets the
- * counts it needs on the page.
+ * agent, repo and attention filters, so the counts match the server's only while none of them is active; the server
+ * counts `byAgent`, `byRepo` and `byAttention` each without its own filter. A test that filters by agent, repo or
+ * attention sets the counts it needs on the page.
  */
 export function tasksPageWith(
   items: readonly Task[],
