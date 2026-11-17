@@ -33,6 +33,8 @@ export default tseslint.config(
         },
       ],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // AGENTS.md "Code standards": keep code flat; a nested ternary fails the check when it is written.
+      "no-nested-ternary": "error",
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
