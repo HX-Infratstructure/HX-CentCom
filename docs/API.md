@@ -100,7 +100,7 @@ Every 401 response, from REST or from `/mcp`, carries the header `WWW-Authentica
 
 ## Lists and pagination
 
-`GET /api/v1/updates`, `GET /api/v1/activity`, `GET /api/v1/decisions`, `GET /api/v1/raid`, `GET /api/v1/lessons`, and `GET /api/v1/github/prs` return one page at a time:
+`GET /api/v1/tasks`, `GET /api/v1/updates`, `GET /api/v1/activity`, `GET /api/v1/decisions`, `GET /api/v1/raid`, `GET /api/v1/lessons`, and `GET /api/v1/github/prs` return one page at a time:
 
 - `limit` is 1 to 100, and 20 by default. A value outside that range fails with 400.
 - `nextCursor` is an opaque string, and null on the last page. Pass it back as `cursor` with the same filters to get the next page. A cursor from anywhere else fails with 400 at the path `cursor`.
@@ -113,6 +113,7 @@ Every 401 response, from REST or from `/mcp`, carries the header `WWW-Authentica
 | Method and path                      | Key                                   | Purpose                                                       |
 | ------------------------------------ | ------------------------------------- | ------------------------------------------------------------- |
 | `GET /api/v1/workspace`              | None                                  | The whole workspace in one snapshot                           |
+| `GET /api/v1/tasks`                  | None                                  | Tasks, a page at a time                                       |
 | `POST /api/v1/tasks`                 | Any (an agent only for itself)        | Register a task                                               |
 | `GET /api/v1/tasks/:id`              | None                                  | One task with its requirements and blocking decisions         |
 | `POST /api/v1/tasks/:id/updates`     | Task's agent or owner                 | Post an update to a task                                      |
@@ -139,22 +140,26 @@ Each GET route also answers HEAD. A method that a route does not list fails with
 
 Returns one consistent snapshot:
 
-| Field           | Value                                                                                        |
-| --------------- | -------------------------------------------------------------------------------------------- |
-| `tasks`         | Every task, with `progress: {proven, total, percent}`, `open`, `stale`, and `attention`      |
-| `updates`       | The latest 20 updates                                                                        |
-| `updatesCursor` | The cursor for the next page of updates, as `GET /api/v1/updates` takes it                   |
-| `requirements`  | Every requirement                                                                            |
-| `decisions`     | Every pending decision, and every decision whose `blocks` list holds an open task            |
-| `agents`        | Every agent: `id`, `display_name`, `role`, `color`, `active`                                 |
-| `statusLabels`  | Every status label: `id`, `label`, `is_done`, `color`                                        |
-| `repos`         | The repository heads from the GitHub sync. The pull requests are in `GET /api/v1/github/prs` |
-| `counts`        | `{updates, decisions}`, the same counts as the two list routes return without filters        |
-| `actor`         | `{agentId, role}` when the `Authorization` header holds a valid key, or null                 |
+| Field           | Value                                                                                                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tasks`         | Every task, with `progress: {proven, total, percent}`, `open`, `stale`, and `attention`                                                                                   |
+| `updates`       | The latest 20 updates                                                                                                                                                     |
+| `updatesCursor` | The cursor for the next page of updates, as `GET /api/v1/updates` takes it                                                                                                |
+| `requirements`  | Every requirement                                                                                                                                                         |
+| `decisions`     | Every pending decision, and every decision whose `blocks` list holds an open task                                                                                         |
+| `agents`        | Every agent: `id`, `display_name`, `role`, `color`, `active`                                                                                                              |
+| `statusLabels`  | Every status label: `id`, `label`, `is_done`, `color`                                                                                                                     |
+| `repos`         | The repository heads from the GitHub sync. The pull requests are in `GET /api/v1/github/prs`                                                                              |
+| `counts`        | `{updates, decisions, tasks}`. `updates` and `decisions` are the counts that the two list routes return without filters. The paragraph after this table describes `tasks` |
+| `actor`         | `{agentId, role}` when the `Authorization` header holds a valid key, or null                                                                                              |
 
 `centcom whoami` reads `actor` to show which agent a key belongs to.
 
 Each task's `open` is `true` or `false`. Its `stale` is `true`, `false`, or null. Its `attention` is the list of reasons it needs attention, from `blocked`, `owner`, and `stale`, and is empty when it needs none. [ARCHITECTURE.md](ARCHITECTURE.md#computed-values) defines an open task and describes how the server computes all three fields.
+
+`counts.tasks` is `{total, open, blocked, owner, byStatus}`, counted over every task. `open` counts the tasks whose `open` is true. `blocked` and `owner` count the tasks whose `attention` holds that reason. `byStatus` is keyed by status label id and leaves out a status that no task has.
+
+This snapshot stays whole for agents, such as `centcom whoami`, the live checker, and `deploy/hx15/verify.sh`. The pages read a bounded version instead. It holds `agents`, `statusLabels`, `repos`, `updates`, `updatesCursor`, and `counts`, and no `tasks`, `requirements`, or `decisions`. The pages read tasks a page at a time through the service behind [GET /api/v1/tasks](#get-apiv1tasks). [ARCHITECTURE.md](ARCHITECTURE.md#boundary-exceptions) describes these reads.
 
 ### POST /api/v1/tasks
 
@@ -255,6 +260,36 @@ Adds a requirement to a task or sets an existing one. The same task rule applies
 | `proofUrl`      | For `PASS`     | An http or https URL. Leaving it out stores null, which clears an earlier proof                                                        |
 
 Returns 201 when it adds a requirement and 200 when it sets one. The body is `{requirement, task: {id, version, progress}}`, with the task's progress after the write.
+
+### GET /api/v1/tasks
+
+| Parameter         | Rule                                                                                                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agentId`         | Only tasks of this agent                                                                                                                                        |
+| `repo`            | Only tasks in this repository                                                                                                                                   |
+| `attention`       | Only the open tasks that need attention for this reason: `blocked`, `owner`, or `stale`. [ARCHITECTURE.md](ARCHITECTURE.md#computed-values) defines each reason |
+| `open`            | `true` for only the open tasks, and `false` for only the tasks that are not open. Any other value fails with 400                                                |
+| `limit`, `cursor` | See [Lists and pagination](#lists-and-pagination)                                                                                                               |
+
+Returns `{items, nextCursor, counts}`. Each item is a task as `GET /api/v1/workspace` returns it, with `progress`, `open`, `stale`, and `attention`. The list carries no requirements. [GET /api/v1/tasks/:id](#get-apiv1tasksid) returns them for one task.
+
+`items` lists the blocked tasks first, those whose `blocked_on` is not `none`. Then it lists the earliest `start_date` first, with a task that has no start date last, and then the lowest id.
+
+`counts` is `{total, byAgent, byRepo, byAttention}`:
+
+- `byAgent` is keyed by agent id and leaves out a task with no agent.
+- `byRepo` is keyed by repository.
+- `byAttention` is `{blocked, owner, stale}`: the number of open tasks that need attention for each reason. A task with two reasons counts under both.
+
+`agentId`, `repo`, and `attention` are facets, and each facet count ignores its own filter. `open` is not a facet, so it applies to every count. No count depends on the cursor. An unknown `agentId` or `repo` is not an error. It selects no tasks.
+
+The read fails with `invalid` (400) in these cases:
+
+- `open` is not `true` or `false`, as in `open=yes`. The issue is at `open`.
+- `attention` is not `blocked`, `owner`, or `stale`.
+- `agentId` or `repo` is empty, or longer than 100 characters.
+- `limit` is outside 1 to 100, as in `limit=101`.
+- `cursor` did not come from this list. A cursor from another list, such as `GET /api/v1/decisions`, fails at `cursor`.
 
 ### GET /api/v1/updates
 
