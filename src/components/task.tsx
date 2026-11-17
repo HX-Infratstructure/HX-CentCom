@@ -13,6 +13,7 @@ import {
   attentionOf,
   statusHue,
   type Coverage,
+  type StatusDirectory,
   type StatusRef,
   type TaskView,
 } from "./model";
@@ -154,7 +155,7 @@ function GroupTable({ group, tasks }: { group: TaskGroup; tasks: readonly TaskVi
             <tr>
               <td colSpan={2} />
               <td className="battery-cell">
-                <StatusBattery tasks={tasks} />
+                <StatusBattery parts={rowStatusParts(tasks)} />
               </td>
               <td colSpan={4} />
             </tr>
@@ -234,30 +235,70 @@ function ProvenCount({ progress }: { progress: Coverage }): ReactNode {
   );
 }
 
-/** How tasks split across status labels: open labels first, then done ones, each in the order it first appears. */
-function statusParts(tasks: readonly TaskView[]): readonly { status: StatusRef; count: number }[] {
+type StatusPart = { readonly status: StatusRef; readonly count: number };
+
+/**
+ * Open labels first, then done ones. Within each, by `rank`; a status with no rank (one the directory does not know)
+ * goes last, and ties go in id order.
+ */
+function ordered(parts: StatusPart[], rank: (id: string) => number): readonly StatusPart[] {
+  return parts.sort(
+    (a, b) =>
+      Number(a.status.isDone) - Number(b.status.isDone) ||
+      rank(a.status.id) - rank(b.status.id) ||
+      (a.status.id < b.status.id ? -1 : a.status.id > b.status.id ? 1 : 0),
+  );
+}
+
+/**
+ * How a table's rows split across status labels. The table has no directory, so every label ranks the same and goes in
+ * id order, which is the directory's order: the server reads the labels sorted by id.
+ */
+function rowStatusParts(tasks: readonly TaskView[]): readonly StatusPart[] {
   const counts = new Map<string, { status: StatusRef; count: number }>();
   for (const { statusLabel } of tasks) {
     const entry = counts.get(statusLabel.id) ?? { status: statusLabel, count: 0 };
     entry.count += 1;
     counts.set(statusLabel.id, entry);
   }
-  return [...counts.values()].sort((a, b) => Number(a.status.isDone) - Number(b.status.isDone));
+  return ordered([...counts.values()], () => 0);
+}
+
+/** The server's counts by status, in the directory's order. A status it does not know shows its id as an open label. */
+function countStatusParts(
+  byStatus: Readonly<Record<string, number>>,
+  statuses: StatusDirectory,
+): readonly StatusPart[] {
+  const position = new Map([...statuses.keys()].map((id, i) => [id, i]));
+  return ordered(
+    Object.entries(byStatus).map(([id, count]) => ({
+      status: statuses.get(id) ?? { id, label: id, isDone: false },
+      count,
+    })),
+    (id) => position.get(id) ?? Number.POSITIVE_INFINITY,
+  );
 }
 
 /** Every task by status: one wide battery and a legend with each label's count and share. */
-export function StatusOverview({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
-  const parts = statusParts(tasks);
+export function StatusOverview({
+  byStatus,
+  statuses,
+}: {
+  byStatus: Readonly<Record<string, number>>;
+  statuses: StatusDirectory;
+}): ReactNode {
+  const parts = countStatusParts(byStatus, statuses);
+  const total = parts.reduce((sum, p) => sum + p.count, 0);
   return (
     <div className="status-overview">
-      <StatusBattery tasks={tasks} />
+      <StatusBattery parts={parts} />
       <ul className="battery-legend">
         {parts.map((p) => (
           <li key={p.status.id} data-hue={statusHue(p.status)}>
             <span className="legend-swatch" aria-hidden="true" />
             {p.status.label}
             <span className="legend-count">{p.count}</span>
-            <span className="quiet">{Math.round((p.count / tasks.length) * 100)}%</span>
+            <span className="quiet">{Math.round((p.count / total) * 100)}%</span>
           </li>
         ))}
       </ul>
@@ -265,8 +306,7 @@ export function StatusOverview({ tasks }: { tasks: readonly TaskView[] }): React
   );
 }
 
-function StatusBattery({ tasks }: { tasks: readonly TaskView[] }): ReactNode {
-  const parts = statusParts(tasks);
+function StatusBattery({ parts }: { parts: readonly StatusPart[] }): ReactNode {
   const summary = parts.map((p) => `${p.status.label} ${p.count}`).join(", ");
   return (
     <span className="battery" role="img" aria-label={summary} title={summary}>

@@ -1,10 +1,11 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith, workspaceWith } from "@/test/ui-fixtures";
 import type {
   Agent,
   Decision,
+  DecisionsPage,
   GithubPrsPage,
   PullRequest,
   StatusLabel,
@@ -12,6 +13,7 @@ import type {
   TaskUpdate,
   UpdatesPage,
   Workspace,
+  WorkspaceShell,
 } from "./server-types";
 
 const server = vi.hoisted(() => ({ listUpdates: vi.fn() }));
@@ -111,6 +113,19 @@ function pr(fields: Pick<PullRequest, "number" | "state"> & Partial<PullRequest>
 const workspace = (rows: Partial<Pick<Workspace, "tasks" | "decisions">>) =>
   workspaceWith({ agents: AGENTS, statusLabels: STATUSES, ...rows });
 
+function pendingPageOf(decisions: readonly Decision[], total?: number): DecisionsPage {
+  const items = decisions.filter((d) => d.status === "Pending");
+  const all = total ?? items.length;
+  return {
+    items,
+    nextCursor: null,
+    counts: { total: all, byGateType: {}, byStatus: all === 0 ? {} : { Pending: all } },
+  };
+}
+
+/** The server reads the overview's numbers and decisions come from. By default they agree with the snapshot. */
+type ServerReads = { readonly shell?: WorkspaceShell; readonly pendingPage?: DecisionsPage };
+
 /**
  * The route's own loader and selects run against the stored snapshot and pages. Only the open-PR read is stored, so a
  * route that asked the server for any other PR query would fail to load. The feed asks the mocked `listUpdates`, so a
@@ -121,12 +136,24 @@ async function renderOverview(
   openPrs: GithubPrsPage = NO_PRS,
   url = "/",
   updates: UpdatesPage = NO_UPDATES,
+  reads: ServerReads = {},
 ) {
   server.listUpdates.mockResolvedValue(updates);
+  const pendingPage = reads.pendingPage ?? pendingPageOf(raw.decisions);
+  const shell =
+    reads.shell ??
+    shellWith({
+      agents: raw.agents,
+      statusLabels: raw.statusLabels,
+      tasks: raw.tasks,
+      pendingDecisions: pendingPage.counts.total,
+    });
   return renderApp(url, {
     heading: "Overview",
     seed: [
       [["task-workspace"], raw],
+      [["workspace-shell"], shell],
+      [["decisions", "overview", { status: "Pending", limit: 100 }], pendingPage],
       [["prs", "list", { state: "open" }], { pages: [openPrs], pageParams: [undefined] }],
     ],
   });
@@ -602,6 +629,82 @@ describe("the overview's number widgets", () => {
     ]);
   });
 
+  // 250 tasks on the server, of which the page holds only SEED_LIKE's seven rows. Complete comes first to show the done
+  // labels still go last.
+  const SERVER_COUNTS = (() => {
+    const shell = shellWith({ agents: AGENTS, statusLabels: STATUSES, pendingDecisions: 42 });
+    return {
+      ...shell,
+      counts: {
+        ...shell.counts,
+        tasks: {
+          total: 250,
+          open: 180,
+          blocked: 12,
+          owner: 7,
+          byStatus: { Complete: 70, Waiting: 100, "In progress": 80 },
+        },
+      },
+    };
+  })();
+
+  it("reads every number from the server's counts, not from the task rows the page holds", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, { shell: SERVER_COUNTS });
+
+    expect(widgets()).toEqual([
+      "Open tasks180",
+      "Blocked12",
+      "Waiting on the owner7",
+      "Pending decisions42",
+      "Open pull requests2",
+    ]);
+  });
+
+  it("shows the server's tasks by status, open labels first, with each label's share", async () => {
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, { shell: SERVER_COUNTS });
+
+    const heading = screen.getByRole("heading", { level: 3, name: /^Tasks by status/ });
+    expect(heading.textContent).toBe("Tasks by status 250");
+    const widget = within(heading.closest(".status-widget") as HTMLElement);
+    expect(widget.getByRole("img").getAttribute("aria-label")).toBe(
+      "Waiting 100, In progress 80, Complete 70",
+    );
+    expect(widget.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Waiting10040%",
+      "In progress8032%",
+      "Complete7028%",
+    ]);
+  });
+
+  it("orders tasks by status by the status directory, not by the order the server's counts arrive in", async () => {
+    const shell = shellWith({ agents: AGENTS, statusLabels: STATUSES });
+    await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/", NO_UPDATES, {
+      shell: {
+        ...shell,
+        counts: {
+          ...shell.counts,
+          tasks: {
+            total: 100,
+            open: 90,
+            blocked: 0,
+            owner: 0,
+            byStatus: { Zeta: 6, Complete: 10, "In progress": 30, Alpha: 4, Waiting: 50 },
+          },
+        },
+      },
+    });
+
+    const heading = screen.getByRole("heading", { level: 3, name: /^Tasks by status/ });
+    const widget = within(heading.closest(".status-widget") as HTMLElement);
+    expect(widget.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Waiting5050%",
+      "In progress3030%",
+      "Alpha44%",
+      "Zeta66%",
+      "Complete1010%",
+    ]);
+  });
+
   it("keeps counting every open task while the open tasks list is filtered", async () => {
     await renderOverview(SEED_LIKE, TWO_OPEN_PRS, "/?attention=owner");
 
@@ -729,5 +832,33 @@ describe("the overview's decisions", () => {
       "Assign the dashboard review?",
     ]);
     expect(pending.heading).toBe("Needs your decision 3");
+  });
+
+  it("ranks the loaded Pending page and counts every pending decision the server holds", async () => {
+    const loaded = [0, 3, 1, 5, 2, 4, 0].map((blocking, i) =>
+      decision({
+        id: `D-3${i}`,
+        question: `Gate ${i} blocks ${blocking}?`,
+        blocks: Array.from({ length: blocking }, (_, n) => `IRP-${n}`),
+        requested_at: `2026-11-0${i + 1}T09:00:00.123456+00:00`,
+      }),
+    );
+    await renderOverview(workspace({ decisions: [] }), NO_PRS, "/", NO_UPDATES, {
+      pendingPage: pendingPageOf(loaded, 130),
+    });
+
+    const pending = section("Needs your decision");
+    expect(pending.rowTitles).toEqual([
+      "Gate 3 blocks 5?",
+      "Gate 5 blocks 4?",
+      "Gate 1 blocks 3?",
+      "Gate 4 blocks 2?",
+      "Gate 2 blocks 1?",
+    ]);
+    expect(pending.heading).toBe("Needs your decision 130");
+    expect(screen.getByRole("link", { name: "All 130 pending decisions" })).toHaveAttribute(
+      "href",
+      "/decisions",
+    );
   });
 });

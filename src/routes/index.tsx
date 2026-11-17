@@ -2,12 +2,19 @@ import { useCallback, useId, type ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   keepPreviousData,
+  queryOptions,
   useInfiniteQuery,
   useSuspenseInfiniteQuery,
   useSuspenseQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { adaptUpdatePages, adaptWorkspace, toAppError } from "@/components/adapt";
+import {
+  adaptDecisionPages,
+  adaptShell,
+  adaptUpdatePages,
+  adaptWorkspace,
+  toAppError,
+} from "@/components/adapt";
 import { DecisionList } from "@/components/decision";
 import { EmptyState, ErrorState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
@@ -18,24 +25,45 @@ import {
   splitInbox,
   type Attention,
   type Directory,
+  type ShellView,
+  type StatusDirectory,
   type TaskView,
 } from "@/components/model";
 import { PullRequestList } from "@/components/pull-request";
-import type { UpdateCounts, UpdatesPage } from "@/components/server-types";
+import type { DecisionsPage, UpdateCounts, UpdatesPage } from "@/components/server-types";
 import { StatusOverview, TaskTable } from "@/components/task";
 import { UpdateList } from "@/components/update-item";
 import { FilterBar, FilterLink } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
-import { prPages, tasksQuery, updatePages, type PrQuery, type UpdateQuery } from "@/lib/task-data";
+import {
+  prPages,
+  shellQuery,
+  tasksQuery,
+  updatePages,
+  type PrQuery,
+  type UpdateQuery,
+} from "@/lib/task-data";
+import { listDecisions } from "@/lib/tasks.functions";
 
 type FeedFilters = { readonly agentId?: string | undefined; readonly taskId?: string | undefined };
 type OverviewDeps = FeedFilters & { readonly attention?: Attention | undefined };
 type OpenTaskFilters = ReturnType<typeof lists.openTasks.filters>;
 
 const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
+const shellView = { ...shellQuery, select: adaptShell };
 const DECISIONS_SHOWN = 5;
 const PRS_SHOWN = 8;
 const OPEN_PRS: PrQuery = { state: "open" };
+
+/**
+ * The first page of the Pending decisions. Past 100 pending decisions only the latest 100 requests are ranked, so an
+ * older request that blocks more tasks can miss the top of the list.
+ */
+const PENDING_PAGE = { status: "Pending", limit: 100 } as const;
+const pendingDecisionsQuery = queryOptions({
+  queryKey: ["decisions", "overview", PENDING_PAGE],
+  queryFn: () => listDecisions({ data: PENDING_PAGE }),
+});
 
 /** The Open tasks list: blocked first, filtered and counted by its attention facet. */
 function openTaskRows(tasks: readonly TaskView[], filters: OpenTaskFilters) {
@@ -95,6 +123,8 @@ export const Route = createFileRoute("/")({
     await Promise.all([
       workspace,
       loadFeed(),
+      queryClient.ensureQueryData(shellQuery),
+      queryClient.ensureQueryData(pendingDecisionsQuery),
       queryClient.ensureInfiniteQueryData(prPages(OPEN_PRS)),
     ]);
   },
@@ -121,7 +151,8 @@ const OPEN_TASKS_ID = "open-tasks";
 function Overview(): ReactNode {
   const search = Route.useSearch();
   const { data: ws } = useSuspenseQuery(workspaceQuery);
-  const pending = splitInbox(ws.decisions).pending;
+  const { data: shell } = useSuspenseQuery(shellView);
+  const { pending, total: pendingTotal } = usePendingDecisions(shell);
   const taskFilters = lists.openTasks.filters(search);
   const tasks = openTaskRows(ws.tasks, taskFilters);
   const decisionsId = useId();
@@ -130,13 +161,13 @@ function Overview(): ReactNode {
   return (
     <Workspace page="Overview" description={DESCRIPTION}>
       <div className="dashboard">
-        <SummaryWidgets tasks={ws.tasks} pendingDecisions={pending.length} />
+        <SummaryWidgets counts={shell.counts} statuses={shell.statuses} />
 
         <div className="dashboard-columns">
           <div className="dashboard-stack">
             <section aria-labelledby={decisionsId} className="widget overview-decisions">
               <h2 id={decisionsId} className="widget-title">
-                Needs your decision <span className="count">{pending.length}</span>
+                Needs your decision <span className="count">{pendingTotal}</span>
               </h2>
               {pending.length === 0 ? (
                 <EmptyState>No decision is waiting on you.</EmptyState>
@@ -144,8 +175,8 @@ function Overview(): ReactNode {
                 <>
                   <DecisionList decisions={pending.slice(0, DECISIONS_SHOWN)} />
                   <Link to="/decisions" className="text-link section-link">
-                    {pending.length > DECISIONS_SHOWN
-                      ? `All ${pending.length} pending decisions`
+                    {pendingTotal > DECISIONS_SHOWN
+                      ? `All ${pendingTotal} pending decisions`
                       : "Decisions and history"}
                   </Link>
                 </>
@@ -180,19 +211,33 @@ function Overview(): ReactNode {
   );
 }
 
+/** The loaded Pending page ranked by `splitInbox`, and how many pending decisions the server holds. */
+function usePendingDecisions({ agents }: ShellView): {
+  readonly pending: ReturnType<typeof splitInbox>["pending"];
+  readonly total: number;
+} {
+  const select = useCallback(
+    (page: DecisionsPage) => ({
+      pending: splitInbox(adaptDecisionPages([page], agents).items).pending,
+      total: page.counts.total,
+    }),
+    [agents],
+  );
+  return useSuspenseQuery({ ...pendingDecisionsQuery, select }).data;
+}
+
 /**
- * The dashboard's numbers, read from what the page already holds: the workspace's open tasks and their attention
- * reasons, the pending decisions, and the open PR count. A blocked or owner number opens the open tasks under it.
+ * The dashboard's numbers, from the server's counts: open tasks and their attention reasons, pending decisions, and the
+ * open PR count. A blocked or owner number opens the open tasks under it.
  */
 function SummaryWidgets({
-  tasks,
-  pendingDecisions,
+  counts,
+  statuses,
 }: {
-  tasks: readonly TaskView[];
-  pendingDecisions: number;
+  counts: ShellView["counts"];
+  statuses: StatusDirectory;
 }): ReactNode {
-  const open = openTasks(tasks);
-  const needing = (reason: Attention) => open.filter((t) => t.attention.includes(reason)).length;
+  const tasks = counts.tasks;
   const openPrs = useSuspenseInfiniteQuery(prPages(OPEN_PRS)).data.counts?.total ?? 0;
   const headingId = useId();
   return (
@@ -208,7 +253,7 @@ function SummaryWidgets({
             hash={OPEN_TASKS_ID}
             className="number-widget"
           >
-            <WidgetNumber label="Open tasks" value={open.length} />
+            <WidgetNumber label="Open tasks" value={tasks.open} />
           </FilterLink>
         </li>
         <li data-hue="red">
@@ -218,7 +263,7 @@ function SummaryWidgets({
             hash={OPEN_TASKS_ID}
             className="number-widget"
           >
-            <WidgetNumber label={ATTENTION_LABELS.blocked} value={needing("blocked")} />
+            <WidgetNumber label={ATTENTION_LABELS.blocked} value={tasks.blocked} />
           </FilterLink>
         </li>
         <li data-hue="purple">
@@ -228,12 +273,15 @@ function SummaryWidgets({
             hash={OPEN_TASKS_ID}
             className="number-widget"
           >
-            <WidgetNumber label={ATTENTION_LABELS.owner} value={needing("owner")} />
+            <WidgetNumber label={ATTENTION_LABELS.owner} value={tasks.owner} />
           </FilterLink>
         </li>
         <li data-hue="orange">
           <Link to="/decisions" className="number-widget">
-            <WidgetNumber label="Pending decisions" value={pendingDecisions} />
+            <WidgetNumber
+              label="Pending decisions"
+              value={counts.decisions.byStatus.Pending ?? 0}
+            />
           </Link>
         </li>
         <li data-hue="green">
@@ -244,12 +292,12 @@ function SummaryWidgets({
       </ul>
       <div className="widget status-widget">
         <h3 className="widget-title">
-          Tasks by status <span className="count">{tasks.length}</span>
+          Tasks by status <span className="count">{tasks.total}</span>
         </h3>
-        {tasks.length === 0 ? (
+        {tasks.total === 0 ? (
           <p className="quiet">No tasks yet.</p>
         ) : (
-          <StatusOverview tasks={tasks} />
+          <StatusOverview byStatus={tasks.byStatus} statuses={statuses} />
         )}
       </div>
     </section>

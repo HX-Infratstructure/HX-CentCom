@@ -1,8 +1,15 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
-import type { Agent, GithubPrsPage, StatusLabel, Task, UpdatesPage } from "./server-types";
+import { shellWith, workspaceWith } from "@/test/ui-fixtures";
+import type {
+  Agent,
+  DecisionsPage,
+  GithubPrsPage,
+  StatusLabel,
+  Task,
+  UpdatesPage,
+} from "./server-types";
 
 const REPO = "HX-Infratstructure/HX-CentCom";
 
@@ -19,6 +26,12 @@ const NO_UPDATES: UpdatesPage = {
   items: [],
   nextCursor: null,
   counts: { total: 0, byAgent: {}, byTask: {}, bySource: {} },
+};
+
+const NO_PENDING: DecisionsPage = {
+  items: [],
+  nextCursor: null,
+  counts: { total: 0, byGateType: {}, byStatus: {} },
 };
 
 const NO_PRS: GithubPrsPage = {
@@ -64,6 +77,8 @@ async function renderPage(url: string, page: string, tasks: readonly Task[] = TA
     heading: page,
     seed: [
       [["task-workspace"], workspace(tasks)],
+      [["workspace-shell"], shellWith({ tasks, agents: AGENTS, statusLabels: STATUSES })],
+      [["decisions", "overview", { status: "Pending", limit: 100 }], NO_PENDING],
       [["updates", {}], { pages: [NO_UPDATES], pageParams: [undefined] }],
       [["prs", "list", { state: "open" }], { pages: [NO_PRS], pageParams: [undefined] }],
     ],
