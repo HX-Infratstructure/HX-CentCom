@@ -1,8 +1,9 @@
 // Roadmap item 7 P1: listTasks pages the tasks blocked first, then by start date (missing last), then by id, with
 // facet counts that ignore their own filter and the cursor.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Route as tasksRoute } from "@/routes/api/v1/tasks";
 import type { Task } from "@/server/services";
-import { expectInvalidAt, setup, WEB_SOURCE, type Fixture } from "../raid/support";
+import { expectInvalidAt, rest, setup, WEB_SOURCE, type Fixture } from "../raid/support";
 
 let h: Fixture;
 beforeEach(async () => {
@@ -95,11 +96,33 @@ describe("listTasks", () => {
     await expectInvalidAt(h.svc.listTasks({ cursor: decisions.nextCursor ?? "" }), "cursor");
   });
 
-  it("refuses a task cursor whose start date is not a calendar date", async () => {
-    const cursor = Buffer.from(JSON.stringify(["task", true, "2026-02-31", "CUR-1"])).toString(
-      "base64url",
-    );
-    await expectInvalidAt(h.svc.listTasks({ cursor }), "cursor");
+  const taskCursor = (start: string, id: string) =>
+    Buffer.from(JSON.stringify(["task", true, start, id])).toString("base64url");
+
+  it.each(["2026-02-31", "0000-01-01"])(
+    "refuses a task cursor whose start date %s PostgreSQL would refuse, with 400 over REST",
+    async (start) => {
+      const cursor = taskCursor(start, "CC-01");
+      await expectInvalidAt(h.svc.listTasks({ cursor }), "cursor");
+      const res = await rest(h.svc, tasksRoute, "GET", `/api/v1/tasks?cursor=${cursor}`);
+      const body = (await res.json()) as { error: { code: string; issues: { path: string }[] } };
+      expect([res.status, body.error.code, body.error.issues.map((i) => i.path)]).toEqual([
+        400,
+        "invalid",
+        ["cursor"],
+      ]);
+    },
+  );
+
+  it("pages after a task cursor with a calendar date or infinity", async () => {
+    const repo = "HX-Cursor-Date-Test";
+    await addTask({ id: "CD-EARLY", repo, start: "2026-01-01" });
+    await addTask({ id: "CD-LATE", repo, start: "2026-03-01" });
+    await addTask({ id: "CD-NODATE", repo, start: null });
+    const after = async (start: string, id: string) =>
+      (await h.svc.listTasks({ repo, cursor: taskCursor(start, id) })).items.map((t) => t.id);
+    expect(await after("2026-02-01", "CD-EARLY")).toEqual(["CD-LATE", "CD-NODATE"]);
+    expect(await after("infinity", "CD-A")).toEqual(["CD-NODATE"]);
   });
 
   it("filters by agent, repository, attention and open", async () => {

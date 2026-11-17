@@ -38,8 +38,11 @@ export const sourceRef = z
 const INSTANT =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?:Z|([+-])(\d{2}):?(\d{2}))$/;
 
+/** PostgreSQL refuses year 0000, and isoTimestamp.fromDriver reads back only years 0001-9999. */
+const inPgYears = (year: number): boolean => year >= 1 && year <= 9999;
+
 /**
- * PostgreSQL refuses year 0000 and offsets beyond ±15:59; isoTimestamp.fromDriver reads back only UTC years 0001-9999.
+ * PostgreSQL refuses offsets beyond ±15:59, and the instant's own year and its UTC year must be inPgYears.
  * Years change on whole seconds, and PostgreSQL's rounding to microseconds reaches the next second only from
  * .9999995. `setUTCFullYear` because `Date.UTC` maps years 0-99 to 1900-1999.
  */
@@ -48,14 +51,14 @@ function storedAndReadBack(value: string): boolean {
   if (!m) return false;
   const [, year, month, day, hour, minute, second = "0", fraction = "", sign, oh = "0", om = "0"] =
     m;
-  if (Number(year) < 1 || Number(oh) > 15 || Number(om) > 59) return false;
+  if (!inPgYears(Number(year)) || Number(oh) > 15 || Number(om) > 59) return false;
   const instant = new Date(0);
   instant.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
   instant.setUTCHours(Number(hour), Number(minute), Number(second), 0);
   const offsetMs = (sign === "-" ? -1 : 1) * (Number(oh) * 60 + Number(om)) * 60_000;
   const carryMs = /^9{6}[5-9]/.test(fraction) ? 1000 : 0;
   const utcYear = new Date(instant.getTime() - offsetMs + carryMs).getUTCFullYear();
-  return utcYear >= 1 && utcYear <= 9999;
+  return inPgYears(utcYear);
 }
 
 /** P3-6: an instant that PostgreSQL stores and that reads back, so a bad one is a 400 before any write. */
@@ -187,14 +190,18 @@ const TASK_DATE_MIN = "2020-01-01";
 const TASK_DATE_MAX = "2099-12-31";
 const TASK_SPAN_MAX_DAYS = 730;
 
-/** A real calendar date, so 2026-02-31 is refused here instead of by the `::date` cast. */
+/** A real calendar date, so 2026-02-31 or 0000-01-01 is refused here instead of by the `::date` cast. */
 export const calendarDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "must be a YYYY-MM-DD date")
   .refine((d) => {
     const parsed = new Date(`${d}T00:00:00Z`);
-    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(d);
-  }, "must be a real calendar date");
+    return (
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.toISOString().startsWith(d) &&
+      inPgYears(parsed.getUTCFullYear())
+    );
+  }, "must be a real calendar date in years 0001-9999");
 
 /**
  * A planned task date, in a range that keeps the timeline, which draws one column per day, from freezing on a date
