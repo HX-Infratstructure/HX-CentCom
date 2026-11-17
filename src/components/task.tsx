@@ -250,7 +250,8 @@ function ordered(
     (a, b) =>
       Number(a.status.isDone) - Number(b.status.isDone) ||
       rank(a.status.id) - rank(b.status.id) ||
-      a.status.id.localeCompare(b.status.id),
+      // Codepoint order, the same on the server and in the browser, so hydration sees one order.
+      Number(a.status.id > b.status.id) - Number(a.status.id < b.status.id),
   );
 }
 
