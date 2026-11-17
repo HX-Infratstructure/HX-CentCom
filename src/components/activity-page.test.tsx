@@ -1,13 +1,18 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "@/test/render-app";
-import { workspaceWith } from "@/test/ui-fixtures";
+import { shellWith, workspaceWith } from "@/test/ui-fixtures";
 import type { ActivityCounts, ActivityEntry, ActivityPage, Agent } from "./server-types";
 
-const server = vi.hoisted(() => ({ listWorkspace: vi.fn(), listActivity: vi.fn() }));
+const server = vi.hoisted(() => ({
+  listWorkspace: vi.fn(),
+  listWorkspaceShell: vi.fn(),
+  listActivity: vi.fn(),
+}));
 vi.mock("@/lib/tasks.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tasks.functions")>()),
   listWorkspace: server.listWorkspace,
+  listWorkspaceShell: server.listWorkspaceShell,
   listActivity: server.listActivity,
 }));
 
@@ -18,8 +23,6 @@ const AGENTS: readonly Agent[] = [
   { id: "atlas", display_name: "Atlas", role: "agent", color: "green", active: true },
   { id: "beacon", display_name: "Beacon", role: "agent", color: "sky", active: true },
 ];
-
-const WORKSPACE = workspaceWith({ agents: AGENTS });
 
 let serial = 0;
 /** A row as listActivity returns it. `revertible` is the server's verdict, so a row the server marks revertible says so. */
@@ -381,10 +384,17 @@ async function confirmRevert(title: string) {
   });
 }
 
+beforeEach(() => {
+  server.listWorkspaceShell.mockResolvedValue(shellWith({ agents: AGENTS }));
+  // Answers only if the page asks for the whole workspace, which it must not.
+  server.listWorkspace.mockResolvedValue(workspaceWith({ agents: AGENTS }));
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   window.sessionStorage.clear();
   server.listWorkspace.mockReset();
+  server.listWorkspaceShell.mockReset();
   server.listActivity.mockReset();
 });
 
@@ -395,7 +405,6 @@ describe("the activity page's filters", () => {
       .map((chip) => chip.textContent);
 
   it("counts each actor and record type from the log's counts, and the whole log under the rows", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(
       page(EVERY_ACTION, "page-2", {
         total: 40,
@@ -417,7 +426,6 @@ describe("the activity page's filters", () => {
   });
 
   it("keeps the actor and record filters in the URL and sends them to the log", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(
       page([PROGRESS], null, {
         total: 1,
@@ -441,7 +449,6 @@ describe("what each activity row changed", () => {
   const LOG = [SUMMARY_EDITED, RAID_CREATED, STATE_BLOCKED, NOTE_ONLY, STATUS_BLOCKED];
 
   it("shows a progress post's status change and none of its bookkeeping", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page(LOG));
     await renderActivity("/activity", false);
 
@@ -449,7 +456,6 @@ describe("what each activity row changed", () => {
   });
 
   it("shows nothing extra for a progress post that changed only bookkeeping", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page(LOG));
     await renderActivity("/activity", false);
 
@@ -464,7 +470,6 @@ describe("what each activity row changed", () => {
       before: ["In progress", 3],
       after: ["Blocked", 4],
     });
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([arrays]));
     await renderActivity("/activity", false);
 
@@ -472,7 +477,6 @@ describe("what each activity row changed", () => {
   });
 
   it("shows a requirement's state change in the page's words", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page(LOG));
     await renderActivity("/activity", false);
 
@@ -480,7 +484,6 @@ describe("what each activity row changed", () => {
   });
 
   it("says a long summary was edited without printing either text", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([SUMMARY_EDITED]));
     await renderActivity("/activity", false);
 
@@ -490,7 +493,6 @@ describe("what each activity row changed", () => {
   });
 
   it("shows nothing extra for a create, which has no before", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([RAID_CREATED]));
     await renderActivity("/activity", false);
 
@@ -498,7 +500,6 @@ describe("what each activity row changed", () => {
   });
 
   it("shows a RAID item's new review date, which is an input and not a write time", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([REVIEW_MOVED]));
     await renderActivity("/activity", false);
 
@@ -509,7 +510,6 @@ describe("what each activity row changed", () => {
   });
 
   it("shows a decision's status change and not when it was decided, which the row's time already says", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([DECIDED]));
     await renderActivity("/activity", false);
 
@@ -520,7 +520,6 @@ describe("what each activity row changed", () => {
   });
 
   it("shows nothing extra for a key revoke, whose only change is when it was revoked", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([KEY_REVOKED]));
     await renderActivity("/activity", false);
 
@@ -528,7 +527,6 @@ describe("what each activity row changed", () => {
   });
 
   it("shows a repinned commit as its short SHA, as the rest of the app does, and a first pin as from none", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([REPINNED, FIRST_PIN]));
     await renderActivity("/activity", false);
 
@@ -543,7 +541,6 @@ describe("Revert on the activity page", () => {
     [SUMMARY_EDITED, "RAID item RAID-09", "summary goes back to its earlier value."],
     [REPINNED, "Task IRP-07", "commit sha goes back from a07c3f5 to 4d1e9b2."],
   ])("says in the confirm dialog what the revert restores (%#)", async (row, record, restores) => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([row]));
     await renderActivity("/activity", true);
 
@@ -554,7 +551,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("is offered nowhere without an owner key", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page(EVERY_ACTION));
     await renderActivity("/activity", false);
 
@@ -563,7 +559,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("is offered in owner mode only on progress, requirement, RAID and lesson updates, and on reverts", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page(EVERY_ACTION));
     await renderActivity("/activity", true);
 
@@ -581,7 +576,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("is not offered on an update whose after records effects, which restoring the row cannot undo", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(
       page([OPENED_DECISION, CLOSED_DEPENDENCY, SUMMARY_EDITED]),
     );
@@ -597,7 +591,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("is not offered on a requirement.set that created the requirement, which has no before", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([REQUIREMENT_CREATED, STATE_BLOCKED]));
     await renderActivity("/activity", true);
 
@@ -610,7 +603,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("sends the confirmed revert with the owner key and a request key, and no body", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([PROGRESS]));
     const fetchMock = stubRevertAnswer(200, { reverted: PROGRESS.id });
     await renderActivity("/activity", true);
@@ -629,7 +621,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("says the change cannot be reverted, with the server's reason, on 409 not_revertible", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([PROGRESS]));
     const reason = `Activity ${PROGRESS.id} cannot be reverted: restoring the row cannot undo its effects (decision).`;
     stubRevertAnswer(409, { error: { code: "not_revertible", status: 409, message: reason } });
@@ -643,7 +634,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("says this change is no longer the record's latest, and only the latest can be reverted, on 409 version_conflict", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([PROGRESS]));
     stubRevertAnswer(409, {
       error: {
@@ -665,7 +655,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("confirms the revert and refetches the log, which then shows the revert on top", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     const revertRow = entry({
       action: "activity.revert",
       entity: "task",
@@ -695,7 +684,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("resends with the same request key after a network failure, so the server replays instead of reverting twice", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([PROGRESS]));
     const fetchMock = vi
       .fn()
@@ -721,7 +709,6 @@ describe("Revert on the activity page", () => {
   });
 
   it("sends a new request key once the server has answered, so a later revert never replays an old answer", async () => {
-    server.listWorkspace.mockResolvedValue(WORKSPACE);
     server.listActivity.mockResolvedValue(page([PROGRESS]));
     const conflict = {
       error: {
@@ -748,5 +735,20 @@ describe("Revert on the activity page", () => {
     const keys = requestKeys(fetchMock);
     expect(keys).toHaveLength(2);
     expect(keys[1]).not.toBe(keys[0]);
+  });
+});
+
+describe("what the activity page reads", () => {
+  it("reads the agents from the bounded shell and never the whole workspace", async () => {
+    server.listActivity.mockResolvedValue(
+      page([PROGRESS], null, { total: 1, byActor: { atlas: 1 }, byEntity: { task: 1 } }),
+    );
+    await renderActivity("/activity", false);
+
+    expect(
+      within(screen.getByRole("group", { name: "Actor" })).getByRole("link", { name: "Atlas 1" }),
+    ).toBeInTheDocument();
+    expect(server.listWorkspaceShell).toHaveBeenCalled();
+    expect(server.listWorkspace).not.toHaveBeenCalled();
   });
 });

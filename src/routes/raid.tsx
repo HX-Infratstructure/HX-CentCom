@@ -10,7 +10,7 @@ import {
   useSuspenseQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { adaptRaid, adaptWorkspace, toAppError } from "@/components/adapt";
+import { adaptRaid, adaptShell, toAppError } from "@/components/adapt";
 import { detailFrom } from "@/components/detail";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
@@ -18,7 +18,7 @@ import { useOpenRecord } from "@/components/open-record";
 import { RaidBoard, RaidDetail } from "@/components/raid";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
-import { tasksQuery } from "@/lib/task-data";
+import { shellQuery } from "@/lib/task-data";
 import { getRaidItem } from "@/lib/tasks.functions";
 import type { RaidItem, RaidPage, RaidQueryInput } from "@/server/services";
 
@@ -27,7 +27,7 @@ const listRaidPage = createServerFn({ method: "GET" })
   .validator((data: RaidQueryInput) => data)
   .handler(({ context, data }) => context.services.listRaid(data));
 
-const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
+const directoryQuery = { ...shellQuery, select: adaptShell };
 
 type RaidFilters = ReturnType<typeof lists.raid.filters>;
 
@@ -66,7 +66,7 @@ export const Route = createFileRoute("/raid")({
   loaderDeps: ({ search }) => lists.raid.filters(search),
   loader: async ({ context: { queryClient }, deps }) => {
     await Promise.all([
-      queryClient.ensureQueryData(tasksQuery),
+      queryClient.ensureQueryData(shellQuery),
       queryClient.ensureInfiniteQueryData(raidPages(raidQuery(deps))),
     ]);
   },
@@ -90,22 +90,23 @@ export const Route = createFileRoute("/raid")({
 
 function RaidRegister(): ReactNode {
   const filters = Route.useLoaderDeps();
-  const { data: ws } = useSuspenseQuery(workspaceQuery);
+  const { data: shell } = useSuspenseQuery(directoryQuery);
   const select = useCallback(
     (data: InfiniteData<RaidPage, string | undefined>) => ({
       items: adaptRaid(
         data.pages.flatMap((page) => page.items),
-        ws.agents,
+        shell.agents,
       ),
       counts: data.pages[0]?.counts ?? null,
     }),
-    [ws.agents],
+    [shell.agents],
   );
   const pages = useSuspenseInfiniteQuery({ ...raidPages(raidQuery(filters)), select });
   const record = useOpenRecord();
   const selectItem = useCallback(
-    (item: RaidItem | null) => (item === null ? null : (adaptRaid([item], ws.agents)[0] ?? null)),
-    [ws.agents],
+    (item: RaidItem | null) =>
+      item === null ? null : (adaptRaid([item], shell.agents)[0] ?? null),
+    [shell.agents],
   );
   const byId = useQuery({ ...raidItemById(record.id), select: selectItem });
   const { items, counts } = pages.data;
@@ -122,7 +123,7 @@ function RaidRegister(): ReactNode {
           task: counts?.byTask ?? {},
         }}
         label="Filter the RAID register"
-        agents={ws.agents}
+        agents={shell.agents}
       />
       {items.length === 0 ? (
         <EmptyState>

@@ -7,17 +7,17 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { ActivityList } from "@/components/activity";
-import { adaptActivityPages, adaptWorkspace, toAppError } from "@/components/adapt";
+import { adaptActivityPages, adaptShell, toAppError } from "@/components/adapt";
 import { EmptyState, ShowMore } from "@/components/list-states";
 import { lists } from "@/components/lists";
 import { FilterBar } from "@/components/url-state";
 import { RouteError, Workspace } from "@/components/workspace";
 import { useOwnerActions } from "@/lib/owner-actions";
 import { listActivity } from "@/lib/tasks.functions";
-import { tasksQuery } from "@/lib/task-data";
+import { shellQuery } from "@/lib/task-data";
 import type { ActivityPage, ActivityQueryInput } from "@/server/services";
 
-const workspaceQuery = { ...tasksQuery, select: adaptWorkspace };
+const directoryQuery = { ...shellQuery, select: adaptShell };
 
 type ActivityFilters = ReturnType<typeof lists.activity.filters>;
 
@@ -42,7 +42,7 @@ export const Route = createFileRoute("/activity")({
   loaderDeps: ({ search }) => lists.activity.filters(search),
   loader: async ({ context: { queryClient }, deps }) => {
     await Promise.all([
-      queryClient.ensureQueryData(tasksQuery),
+      queryClient.ensureQueryData(shellQuery),
       queryClient.ensureInfiniteQueryData(activityPages(activityQuery(deps))),
     ]);
   },
@@ -66,10 +66,10 @@ export const Route = createFileRoute("/activity")({
 
 function ActivityPage(): ReactNode {
   const filters = Route.useLoaderDeps();
-  const { data: ws } = useSuspenseQuery(workspaceQuery);
+  const { data: shell } = useSuspenseQuery(directoryQuery);
   const select = useCallback(
-    (data: InfiniteData<ActivityPage, string | undefined>) => adaptActivityPages(data.pages, ws),
-    [ws],
+    (data: InfiniteData<ActivityPage, string | undefined>) => adaptActivityPages(data.pages, shell),
+    [shell],
   );
   const pages = useSuspenseInfiniteQuery({ ...activityPages(activityQuery(filters)), select });
   const owner = useOwnerActions();
@@ -81,7 +81,7 @@ function ActivityPage(): ReactNode {
         search={lists.activity}
         counts={{ actor: counts?.byActor ?? {}, entity: counts?.byEntity ?? {} }}
         label="Filter activity"
-        agents={ws.agents}
+        agents={shell.agents}
       />
       {entries.length === 0 ? (
         <EmptyState>
