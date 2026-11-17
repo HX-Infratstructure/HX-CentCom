@@ -69,7 +69,7 @@ The WU1 spec keeps the feature table of the WU1 plan. These three plan features 
 These are CC1's decisions, not owner rulings:
 
 - **The kanban filters by repository.** The spec asks for an agent and program filter, and the data model has no program field, so the board filters by agent and repository.
-- **One Show more serves the table, the kanban, and the timeline.** They show the same tasks, a page of 20 at a time in the server's order (blocked first), so a kanban column fills as more pages load. The timeline sorts its loaded bars by start date.
+- **One Show more serves the table, the kanban, and the timeline.** They show the same tasks, a page of 20 at a time in [the server's order](API.md#get-apiv1tasks), so a kanban column fills as more pages load. The timeline sorts its loaded bars by start date.
 - **"No page ever loads a whole table into the browser" holds for tasks, requirements, and decisions.** The pages read `listWorkspaceShell`, tasks come a page at a time, the task sheet reads its requirements by id, and the decision sheet reads loaded pages, then by id. Agents, status labels, and repository heads stay whole, for the reason [ARCHITECTURE.md](ARCHITECTURE.md#boundary-exceptions) gives. `GET /api/v1/workspace` stays the whole snapshot for agents ([API.md](API.md#get-apiv1workspace)). The Overview's "Needs your decision" ranks the first 100 Pending decisions, so past 100 it ranks only the latest 100 requests.
 - **Three additions stay:** the MCP tool `list_updates`, the CLI commands `centcom raid update` and `centcom lesson update`, and the `superseded_by` column, which the API never sets.
 - **A `system` update has no source,** and the pages label it "System" with the agent whose write triggered it.
