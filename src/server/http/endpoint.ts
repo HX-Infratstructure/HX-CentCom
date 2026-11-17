@@ -85,13 +85,18 @@ function apiRequest({ request, context: { services } }: RouteCtx): ApiRequest {
 }
 
 function writeOptions(headers: Headers): UpdateOptions {
-  const ifMatch = headers.get("if-match");
-  const version = ifMatch === null ? null : /^(?:(\d+)|"(\d+)")$/.exec(ifMatch);
   return {
     idempotencyKey: headers.get("idempotency-key") ?? undefined,
-    expectedVersion:
-      ifMatch === null ? undefined : version ? Number(version[1] ?? version[2]) : Number.NaN,
+    expectedVersion: expectedVersion(headers.get("if-match")),
   };
+}
+
+/** The If-Match version: undefined when absent, NaN when malformed, which the services refuse with a 400. */
+function expectedVersion(ifMatch: string | null): number | undefined {
+  if (ifMatch === null) return undefined;
+  const version = /^(?:(\d+)|"(\d+)")$/.exec(ifMatch);
+  if (version === null) return Number.NaN;
+  return Number(version[1] ?? version[2]);
 }
 
 async function readJsonObject(request: Request): Promise<Record<string, unknown>> {

@@ -48,12 +48,13 @@ export interface Deps {
 type Env = Record<string, string | undefined>;
 
 function describe(error: unknown): string {
-  const text = isServiceError(error)
-    ? `${error.code}: ${error.message}`
-    : error instanceof Error
-      ? error.message
-      : String(error);
-  return text.replace(/[\r\n]+/g, " ");
+  return errorText(error).replace(/[\r\n]+/g, " ");
+}
+
+function errorText(error: unknown): string {
+  if (isServiceError(error)) return `${error.code}: ${error.message}`;
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 const octal = (mode: number) => mode.toString(8).padStart(3, "0");
