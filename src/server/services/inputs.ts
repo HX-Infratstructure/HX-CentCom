@@ -187,21 +187,23 @@ const TASK_DATE_MIN = "2020-01-01";
 const TASK_DATE_MAX = "2099-12-31";
 const TASK_SPAN_MAX_DAYS = 730;
 
-/**
- * A planned task date: a real calendar date, so 2026-02-31 is refused here instead of by the cast, in a range
- * that keeps the timeline, which draws one column per day, from freezing on a date such as 9999-12-31.
- */
-const taskDate = z
+/** A real calendar date, so 2026-02-31 is refused here instead of by the `::date` cast. */
+export const calendarDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "must be a YYYY-MM-DD date")
   .refine((d) => {
     const parsed = new Date(`${d}T00:00:00Z`);
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(d);
-  }, "must be a real calendar date")
-  .refine(
-    (d) => d >= TASK_DATE_MIN && d <= TASK_DATE_MAX,
-    `must be between ${TASK_DATE_MIN} and ${TASK_DATE_MAX}`,
-  );
+  }, "must be a real calendar date");
+
+/**
+ * A planned task date, in a range that keeps the timeline, which draws one column per day, from freezing on a date
+ * such as 9999-12-31.
+ */
+const taskDate = calendarDate.refine(
+  (d) => d >= TASK_DATE_MIN && d <= TASK_DATE_MAX,
+  `must be between ${TASK_DATE_MIN} and ${TASK_DATE_MAX}`,
+);
 
 /** The task's agent is not a field an agent sets: `agentId` is the owner's assignment (`taskAssignee`). */
 export const createTaskInput = z
@@ -238,6 +240,9 @@ export const createTaskInput = z
 export const issueKeyInput = z.object({ agentId: id, label: z.string().trim().min(1).max(100) });
 export const revokeKeyInput = z.object({ keyId: z.string().uuid() });
 
+/** The needs-attention reasons of `Task.attention`, which the update and task lists filter by. */
+const ATTENTION_REASONS = ["blocked", "owner", "stale"] as const;
+
 const limit = z.coerce.number().int().min(1).max(100).default(20);
 const cursor = z.string().min(1).max(500);
 
@@ -248,7 +253,7 @@ export const updateQueryInput = z
     /** Updates of any of these tasks. listUpdates refuses it beside `taskId`. */
     taskIds: z.array(id).min(1).max(100).optional(),
     /** Updates of the open tasks that need attention for this reason. listUpdates refuses it beside `taskId` or `taskIds`. */
-    attention: z.enum(["blocked", "owner", "stale"]).optional(),
+    attention: z.enum(ATTENTION_REASONS).optional(),
     source: z.enum(UPDATE_SOURCES).optional(),
     since: pgInstant.optional(),
     until: pgInstant.optional(),
@@ -262,7 +267,7 @@ export const taskQueryInput = z
     agentId: id.optional(),
     repo: id.optional(),
     /** The open tasks that need attention for this reason, under the rule of `Task.attention`. */
-    attention: z.enum(["blocked", "owner", "stale"]).optional(),
+    attention: z.enum(ATTENTION_REASONS).optional(),
     /** A query string carries `true` or `false`; no other string is a boolean. */
     open: z
       .union([z.boolean(), z.enum(["true", "false"]).transform((v) => v === "true")])

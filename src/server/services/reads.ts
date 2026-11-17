@@ -40,6 +40,7 @@ import type { Actor } from "./actor";
 import { ServiceError } from "./errors";
 import {
   activityQueryInput,
+  calendarDate,
   decisionQueryInput,
   isoMicros,
   parse,
@@ -77,12 +78,13 @@ const decisionId = z.string().min(1).max(100);
 const decisionCursor = z.tuple([z.boolean(), instantOrNone, decisionId]);
 /** The literal tag keeps a history cursor from parsing as a default one, and the other way round. */
 const historyCursor = z.tuple([z.literal("decided"), instantOrNone, decisionId]);
+const taskId = z.string().min(1).max(100);
 /** Unblocked, the start date (`infinity` for none) and the id; the tag sets it apart from the other cursors. */
 const taskCursor = z.tuple([
   z.literal("task"),
   z.boolean(),
-  z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal("infinity")]),
-  decisionId,
+  z.union([calendarDate, z.literal("infinity")]),
+  taskId,
 ]);
 
 type FeedKey = z.output<typeof feedCursor>;
@@ -204,15 +206,15 @@ async function tasksWith(
     .orderBy(...orderBy)
     .$dynamic();
   const rows = await (limit === undefined ? selected : selected.limit(limit));
+  /** Without a limit the id list could be every task, so the database selects the ids itself. */
+  const ids =
+    limit === undefined
+      ? tx.select({ id: task.id }).from(task).where(where)
+      : rows.map((t) => t.id);
   const requirements = await tx
     .select()
     .from(taskRequirements)
-    .where(
-      inArray(
-        taskRequirements.task_id,
-        rows.map((t) => t.id),
-      ),
-    )
+    .where(inArray(taskRequirements.task_id, ids))
     .orderBy(taskRequirements.task_id, taskRequirements.created_at, taskRequirements.id);
   const progress = computeProgress(requirements);
   return {
@@ -638,9 +640,14 @@ function taskFilters(query: TaskQuery, except?: TaskFacet): SQL[] {
     except !== "agent" && query.agentId !== undefined ? eq(task.agent, query.agentId) : undefined,
     except !== "repo" && query.repo !== undefined ? eq(task.repository, query.repo) : undefined,
     except !== "attention" && query.attention !== undefined ? attends(query.attention) : undefined,
-    query.open === undefined ? undefined : query.open ? isOpen : sql`not ${isOpen}`,
+    openFilter(query.open),
   ];
   return filters.filter((f): f is SQL => f !== undefined);
+}
+
+function openFilter(open: boolean | undefined): SQL | undefined {
+  if (open === undefined) return undefined;
+  return open ? isOpen : sql`not ${isOpen}`;
 }
 
 const tasksWhere = (where: SQL) =>

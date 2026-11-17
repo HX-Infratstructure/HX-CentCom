@@ -95,6 +95,13 @@ describe("listTasks", () => {
     await expectInvalidAt(h.svc.listTasks({ cursor: decisions.nextCursor ?? "" }), "cursor");
   });
 
+  it("refuses a task cursor whose start date is not a calendar date", async () => {
+    const cursor = Buffer.from(JSON.stringify(["task", true, "2026-02-31", "CUR-1"])).toString(
+      "base64url",
+    );
+    await expectInvalidAt(h.svc.listTasks({ cursor }), "cursor");
+  });
+
   it("filters by agent, repository, attention and open", async () => {
     const repo = "HX-Filter-Test";
     await addTask({ id: "FL-CC1", repo, agent: "CC1" });
